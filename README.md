@@ -51,6 +51,10 @@ cargo build                  # 构建桌面二进制
 
 ## 界面预览
 
+桌面应用（Tauri 外壳，真实 SQLite 后端）：
+
+![桌面应用](./docs/screenshots/00-desktop-app.png)
+
 | 首页 | 编辑器（分屏） |
 | --- | --- |
 | ![首页](./docs/screenshots/02-dashboard.png) | ![编辑器](./docs/screenshots/03-editor.png) |
