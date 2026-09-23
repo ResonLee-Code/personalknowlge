@@ -182,6 +182,19 @@ MyKnowledge\
 > `dist-windows/Personal Knowledge OS_1.0.0_x64-portable.zip`（便携版）。
 > 交叉编译产物未做代码签名，首次运行需要放行 SmartScreen。
 
+本次交付产物的校验值（SHA-256，可在 PowerShell 中用
+`Get-FileHash <文件> -Algorithm SHA256` 核对）：
+
+```text
+c90aa3f0a900e4087fc96a01ece7f03e40350c9c4cd2c81852f070d4ec60da15  Personal Knowledge OS_1.0.0_x64-setup.exe
+3296162de8844aab2ea659a04cf5027054e04deb9d88c0a1968307ce8644813c  Personal Knowledge OS_1.0.0_x64-portable.zip
+```
+
+> 注意：交叉编译只能验证产物结构（架构、GUI 子系统、资源节、内部文件清单）
+> 与业务逻辑测试（59 个 Rust 测试 + 前端 E2E），**无法在 Windows 上做启动冒烟测试**。
+> 正式发布前建议在 Windows 机器上按第八节清单验收一次，或直接使用
+> `.github/workflows/windows-release.yml` 在 Windows 运行器上构建。
+
 ### 在 Windows 上构建（推荐，可产出并验证安装包）
 
 ```powershell
