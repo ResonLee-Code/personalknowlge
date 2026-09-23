@@ -158,7 +158,7 @@ fn as_string_list(value: &Value) -> Vec<String> {
 pub fn serialize(frontmatter: &Frontmatter, body: &str) -> String {
     // 已知字段按设计文档 12.3 的顺序输出；tags 使用缩进块序列风格。
     let mut yaml = String::new();
-    let mut push_scalar = |yaml: &mut String, key: &str, value: Option<&String>| {
+    let push_scalar = |yaml: &mut String, key: &str, value: Option<&String>| {
         if let Some(value) = value {
             if !value.trim().is_empty() {
                 yaml.push_str(&scalar_entry(key, value));

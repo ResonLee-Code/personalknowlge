@@ -9,7 +9,9 @@ default-run = "personal-knowledge-os"
 
 [lib]
 name = "personal_knowledge_os_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# 桌面端（Windows / macOS）只需要 rlib；
+# staticlib / cdylib 仅移动端需要，且会让 Windows 交叉编译多出 cdylib 链接步骤。
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

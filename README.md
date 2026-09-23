@@ -66,6 +66,31 @@ cargo build                  # 构建桌面二进制
 其余截图（欢迎页、全局搜索面板、分类管理、标签、设置、笔记列表）位于
 [`docs/screenshots/`](./docs/screenshots)，由 `pnpm test:e2e` 自动生成。
 
+## 下载与安装
+
+### Windows（x64）
+
+已构建好的安装包位于 `dist-windows/`：
+
+| 文件 | 说明 |
+| --- | --- |
+| `Personal Knowledge OS_1.0.0_x64-setup.exe` | NSIS 安装包（默认按当前用户安装，无需管理员权限） |
+| `Personal Knowledge OS_1.0.0_x64-portable.zip` | 便携版：解压后直接运行，含 `WebView2Loader.dll` 与使用说明 |
+
+安装步骤、静默安装参数、快捷方式、卸载、常见问题与验证清单见
+[docs/WINDOWS_INSTALL_GUIDE.md](./docs/WINDOWS_INSTALL_GUIDE.md)。
+
+在 Windows 上重新打包：`.\scripts\windows\build-windows.ps1`；
+在 macOS/Linux 上交叉打包：`ZIG=/path/to/zig scripts/cross/build-windows.sh`
+再执行 `scripts/windows/build-installer.sh`（详见安装说明第七节）。
+
+### macOS
+
+```bash
+pnpm install && pnpm build && pnpm tauri build
+# 产物：src-tauri/target/release/bundle/{macos,dmg}/
+```
+
 ## 目录结构
 
 ```text
