@@ -1,0 +1,216 @@
+import { create } from 'zustand';
+
+import { errorMessage } from '@/lib/format';
+import { workspaceService } from '@/services/workspaceService';
+import { searchService } from '@/services/searchService';
+import type {
+  AppSettings,
+  IndexStatus,
+  ScanReport,
+  UpdateSettingsInput,
+  Workspace,
+  WorkspaceStats,
+  WorkspaceSummary,
+} from '@/types';
+
+interface WorkspaceState {
+  workspace: Workspace | null;
+  stats: WorkspaceStats;
+  settings: AppSettings | null;
+  indexStatus: IndexStatus | null;
+  workspaces: WorkspaceSummary[];
+  loading: boolean;
+  error: string | null;
+  initializedWarnings: string[];
+  bootstrap: () => Promise<void>;
+  refreshList: () => Promise<void>;
+  createWorkspace: (name: string, root: string) => Promise<boolean>;
+  openWorkspace: (root: string) => Promise<boolean>;
+  switchWorkspace: (id: string) => Promise<boolean>;
+  closeWorkspace: () => Promise<void>;
+  forgetWorkspace: (id: string) => Promise<void>;
+  refreshStats: () => Promise<void>;
+  scan: () => Promise<ScanReport | null>;
+  rebuildIndex: () => Promise<void>;
+  updateSettings: (input: UpdateSettingsInput) => Promise<void>;
+  refreshIndexStatus: () => Promise<IndexStatus | null>;
+}
+
+const emptyStats: WorkspaceStats = {
+  noteCount: 0,
+  inboxCount: 0,
+  trashCount: 0,
+  categoryCount: 0,
+  tagCount: 0,
+  attachmentCount: 0,
+};
+
+export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
+  workspace: null,
+  stats: emptyStats,
+  settings: null,
+  indexStatus: null,
+  workspaces: [],
+  loading: false,
+  error: null,
+  initializedWarnings: [],
+
+  bootstrap: async () => {
+    set({ loading: true, error: null });
+    try {
+      const current = await workspaceService.current();
+      if (current) {
+        set({
+          workspace: current.workspace,
+          stats: current.stats,
+          settings: current.settings,
+          indexStatus: current.indexStatus,
+        });
+      }
+      await get().refreshList();
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  refreshList: async () => {
+    try {
+      const workspaces = await workspaceService.list();
+      set({ workspaces });
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    }
+  },
+
+  createWorkspace: async (name, root) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await workspaceService.create(name, root);
+      set({
+        workspace: result.workspace,
+        stats: result.stats,
+        settings: result.settings,
+        indexStatus: result.indexStatus,
+        initializedWarnings: result.warnings,
+      });
+      await get().refreshList();
+      return true;
+    } catch (error) {
+      set({ error: errorMessage(error) });
+      return false;
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  openWorkspace: async (root) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await workspaceService.open(root);
+      set({
+        workspace: result.workspace,
+        stats: result.stats,
+        settings: result.settings,
+        indexStatus: result.indexStatus,
+        initializedWarnings: result.warnings,
+      });
+      await get().refreshList();
+      return true;
+    } catch (error) {
+      set({ error: errorMessage(error) });
+      return false;
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  switchWorkspace: async (id) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await workspaceService.switch(id);
+      set({
+        workspace: result.workspace,
+        stats: result.stats,
+        settings: result.settings,
+        indexStatus: result.indexStatus,
+        initializedWarnings: result.warnings,
+      });
+      await get().refreshList();
+      return true;
+    } catch (error) {
+      set({ error: errorMessage(error) });
+      return false;
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  closeWorkspace: async () => {
+    try {
+      await workspaceService.close();
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    }
+    set({ workspace: null, stats: emptyStats, settings: null, indexStatus: null });
+  },
+
+  forgetWorkspace: async (id) => {
+    try {
+      await workspaceService.forget(id);
+      await get().refreshList();
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    }
+  },
+
+  refreshStats: async () => {
+    if (!get().workspace) return;
+    try {
+      const stats = await workspaceService.stats();
+      set({ stats });
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    }
+  },
+
+  scan: async () => {
+    try {
+      return await workspaceService.scan();
+    } catch (error) {
+      set({ error: errorMessage(error) });
+      return null;
+    }
+  },
+
+  rebuildIndex: async () => {
+    try {
+      const status = await workspaceService.rebuildIndex();
+      set({ indexStatus: status });
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    }
+  },
+
+  updateSettings: async (input) => {
+    try {
+      const settings = await workspaceService.updateSettings(input);
+      set({ settings });
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    }
+  },
+
+  refreshIndexStatus: async () => {
+    if (!get().workspace) return null;
+    try {
+      const status = await searchService.status();
+      set({ indexStatus: status });
+      return status;
+    } catch (error) {
+      set({ error: errorMessage(error) });
+      return null;
+    }
+  },
+}));

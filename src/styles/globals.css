@@ -1,0 +1,260 @@
+@import 'tailwindcss';
+@import 'highlight.js/styles/github.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-raised: var(--surface-raised);
+  --color-border-subtle: var(--border-subtle);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --radius-panel: 0.75rem;
+  --font-sans: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+:root {
+  --surface: #ffffff;
+  --surface-muted: #f7f7f9;
+  --surface-raised: #ffffff;
+  --border-subtle: #e6e6ec;
+  --ink: #18181b;
+  --ink-muted: #52525b;
+  --ink-subtle: #8b8b96;
+  --brand: #4f46e5;
+  --brand-soft: #eef2ff;
+  color-scheme: light;
+}
+
+.dark {
+  --surface: #16161a;
+  --surface-muted: #1d1d22;
+  --surface-raised: #22222a;
+  --border-subtle: #2f2f38;
+  --ink: #f4f4f5;
+  --ink-muted: #b6b6c0;
+  --ink-subtle: #85858f;
+  --brand: #818cf8;
+  --brand-soft: #26264a;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--surface-muted);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* 应用内滚动条样式 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink-subtle) 45%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--ink-subtle) 40%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--ink-subtle) 65%, transparent);
+}
+
+/* Markdown 预览样式（设计文档 16.5） */
+.markdown-body {
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.75;
+  word-break: break-word;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 1.5em 0 0.6em;
+}
+
+.markdown-body h1 {
+  font-size: 1.6em;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.3em;
+}
+
+.markdown-body h2 {
+  font-size: 1.3em;
+}
+
+.markdown-body h3 {
+  font-size: 1.12em;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body table {
+  margin: 0.75em 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.5em;
+}
+
+.markdown-body ul {
+  list-style: disc;
+}
+
+.markdown-body ol {
+  list-style: decimal;
+}
+
+.markdown-body li {
+  margin: 0.25em 0;
+}
+
+.markdown-body a {
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid var(--border-subtle);
+  padding-left: 0.9em;
+  color: var(--ink-muted);
+}
+
+.markdown-body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.35em;
+  padding: 0.1em 0.35em;
+}
+
+.markdown-body pre {
+  background: var(--surface-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.6em;
+  padding: 0.9em 1em;
+  overflow-x: auto;
+}
+
+.markdown-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+
+/* 代码高亮在深色主题下的底色与文字 */
+.dark .markdown-body .hljs {
+  background: var(--surface-muted);
+  color: #e4e4e7;
+}
+
+.dark .markdown-body .hljs-keyword,
+.dark .markdown-body .hljs-selector-tag,
+.dark .markdown-body .hljs-built_in {
+  color: #c4b5fd;
+}
+
+.dark .markdown-body .hljs-string,
+.dark .markdown-body .hljs-attr {
+  color: #86efac;
+}
+
+.dark .markdown-body .hljs-comment {
+  color: #8b8b96;
+}
+
+.dark .markdown-body .hljs-number,
+.dark .markdown-body .hljs-literal {
+  color: #fca5a5;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.94em;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--border-subtle);
+  padding: 0.45em 0.7em;
+  text-align: left;
+}
+
+.markdown-body th {
+  background: var(--surface-muted);
+  font-weight: 600;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 0.5em;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 1.5em 0;
+}
+
+/* 搜索关键词高亮 */
+.search-highlight {
+  background: color-mix(in srgb, var(--brand) 22%, transparent);
+  border-radius: 0.2em;
+  padding: 0 0.1em;
+  color: inherit;
+}
+
+/* CodeMirror 容器高度交由 flex 控制 */
+.cm-editor {
+  height: 100%;
+  background: transparent;
+  font-family: var(--font-mono);
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+.cm-scroller {
+  font-family: var(--font-mono);
+}
+
+.cm-gutters {
+  background: transparent;
+  border-right: 1px solid var(--border-subtle);
+}

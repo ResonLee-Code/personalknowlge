@@ -1,0 +1,15 @@
+# Environment note (2026-09-23):
+#
+# The network in this sandbox serves crates.io over a TLS chain with an expired /
+# mismatched certificate, so `https://index.crates.io` and `https://static.crates.io`
+# cannot be reached by cargo. The USTC mirror is reachable and serves both the
+# sparse index and the crate archives, so the registry is replaced here.
+#
+# This only affects this checkout. Delete this directory if you build in an
+# environment with a working crates.io connection.
+
+[source.crates-io]
+replace-with = "ustc"
+
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Personal Knowledge OS",
+  "version": "1.0.0",
+  "identifier": "com.personalknowledge.os",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Personal Knowledge OS",
+        "width": 1380,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 660,
+        "resizable": true,
+        "center": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "shortDescription": "本地优先的个人知识管理桌面应用",
+    "longDescription": "Personal Knowledge OS 以 Markdown 文件保存笔记正文，使用 SQLite 与全文搜索索引管理元数据，支持分类、标签、全文检索与备份导出。",
+    "copyright": "Personal Knowledge OS"
+  },
+  "plugins": {}
+}

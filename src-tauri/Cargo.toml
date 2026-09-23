@@ -1,0 +1,46 @@
+[package]
+name = "personal-knowledge-os"
+version = "1.0.0"
+description = "Personal Knowledge OS - 本地优先的个人知识管理桌面应用"
+authors = ["Personal Knowledge OS"]
+edition = "2021"
+license = "MIT"
+default-run = "personal-knowledge-os"
+
+[lib]
+name = "personal_knowledge_os_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
+
+[dependencies]
+chrono = { version = "0.4.45", features = ["serde"] }
+dirs = "7.0.0"
+notify = "8.2.0"
+pulldown-cmark = { version = "0.13.4", default-features = false }
+regex = "1.13.1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+serde_yaml = "0.9.34"
+sha2 = "0.10.9"
+tauri = { version = "2.11", features = [] }
+tauri-plugin-dialog = "2.4"
+tauri-plugin-opener = "2.5.5"
+thiserror = "2.0.20"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.20.0", features = ["v4"] }
+walkdir = "2.5.0"
+zip = { version = "4.2.0", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

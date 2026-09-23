@@ -1,0 +1,186 @@
+import { ChevronRight, FolderTree, MoreHorizontal, Plus } from 'lucide-react';
+import { useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
+
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { EmptyState } from '@/components/ui/empty-state';
+import { cn } from '@/lib/utils';
+import { useCategoriesStore } from '@/stores/categoriesStore';
+import type { CategoryNode } from '@/types';
+
+import { CategoryDeleteDialog, CategoryFormDialog } from './CategoryDialogs';
+
+type DialogState =
+  | { kind: 'create'; parentId: string | null }
+  | { kind: 'rename'; id: string; name: string }
+  | { kind: 'delete'; id: string; name: string }
+  | null;
+
+export function CategoryTree() {
+  const tree = useCategoriesStore((state) => state.tree);
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const activeId = params.get('categoryId');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [dialog, setDialog] = useState<DialogState>(null);
+
+  const toggle = (id: string) => {
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const select = (id: string) => navigate(`/notes?categoryId=${encodeURIComponent(id)}`);
+
+  const renderNode = (node: CategoryNode) => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expanded.has(node.category.id);
+    return (
+      <li key={node.category.id}>
+        <div
+          className={cn(
+            'group flex items-center gap-1 rounded-md pr-1 text-sm transition-colors',
+            activeId === node.category.id
+              ? 'bg-[var(--brand-soft)] text-[var(--brand)]'
+              : 'text-[var(--ink-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]',
+          )}
+          style={{ paddingLeft: `${node.depth * 10}px` }}
+        >
+          <button
+            type="button"
+            aria-label={isExpanded ? '折叠' : '展开'}
+            className={cn(
+              'flex h-5 w-5 items-center justify-center rounded transition-transform',
+              !hasChildren && 'opacity-0',
+              isExpanded && 'rotate-90',
+            )}
+            onClick={() => toggle(node.category.id)}
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
+            onClick={() => select(node.category.id)}
+          >
+            <span className="truncate">{node.category.name}</span>
+            {node.category.noteCount > 0 ? (
+              <span className="text-[11px] tabular-nums text-[var(--ink-subtle)]">
+                {node.category.noteCount}
+              </span>
+            ) : null}
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="分类操作"
+                className="rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem
+                onSelect={() => setDialog({ kind: 'create', parentId: node.category.id })}
+              >
+                新建子分类
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() =>
+                  setDialog({ kind: 'rename', id: node.category.id, name: node.category.name })
+                }
+              >
+                重命名
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                destructive
+                onSelect={() =>
+                  setDialog({ kind: 'delete', id: node.category.id, name: node.category.name })
+                }
+              >
+                删除分类
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        {hasChildren && isExpanded ? (
+          <ul className="mt-0.5 space-y-0.5">{node.children.map(renderNode)}</ul>
+        ) : null}
+      </li>
+    );
+  };
+
+  return (
+    <section className="space-y-1">
+      <header className="flex items-center justify-between px-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-subtle)]">
+          分类
+        </h2>
+        <Button
+          variant="ghost"
+          size="icon"
+          title="新建分类"
+          className="h-6 w-6"
+          onClick={() => setDialog({ kind: 'create', parentId: null })}
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </header>
+      {tree.length === 0 ? (
+        <EmptyState
+          icon={FolderTree}
+          title="还没有分类"
+          description="创建分类后，笔记会按目录自动整理。"
+          className="py-6"
+          action={
+            <Button size="sm" variant="secondary" onClick={() => setDialog({ kind: 'create', parentId: null })}>
+              <Plus className="h-3.5 w-3.5" />
+              新建分类
+            </Button>
+          }
+        />
+      ) : (
+        <ul className="space-y-0.5">{tree.map(renderNode)}</ul>
+      )}
+
+      {dialog?.kind === 'create' ? (
+        <CategoryFormDialog
+          mode="create"
+          parentId={dialog.parentId}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
+      {dialog?.kind === 'rename' ? (
+        <CategoryFormDialog
+          mode="rename"
+          categoryId={dialog.id}
+          initialName={dialog.name}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
+      {dialog?.kind === 'delete' ? (
+        <CategoryDeleteDialog
+          categoryId={dialog.id}
+          name={dialog.name}
+          onClose={() => setDialog(null)}
+          onDeleted={(moved) => {
+            toast.success(`分类已删除，处理了 ${moved} 篇笔记`);
+            setDialog(null);
+            navigate('/notes');
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}

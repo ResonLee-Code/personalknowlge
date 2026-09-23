@@ -1,0 +1,9 @@
+allowBuilds:
+  esbuild: set this to true or false
+# pnpm 11 起，构建设置从 package.json 的 `pnpm` 字段迁移到本文件。
+onlyBuiltDependencies:
+  - esbuild
+
+# pnpm 11 默认在运行脚本前校验依赖并尝试重装；
+# 离线 / 受限网络环境下这会阻断 `pnpm build` 与 `pnpm tauri dev`。
+verifyDepsBeforeRun: false
