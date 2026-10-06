@@ -97,6 +97,33 @@ CREATE TABLE IF NOT EXISTS settings (
 `settings` 保存工作区级设置 JSON 与索引状态：
 `app.settings`、`index.state`、`index.last_rebuilt_at`、`index.last_error`。
 
+### note_links（迁移 003，双向链接）
+
+```sql
+CREATE TABLE IF NOT EXISTS note_links (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id   TEXT NOT NULL,
+    source_note_id TEXT NOT NULL,
+    target_note_id TEXT,              -- 解析不到目标时为 NULL（未解析链接）
+    target_title   TEXT NOT NULL,     -- 链接原文，便于重命名后重连
+    target_anchor  TEXT,              -- [[标题#小节]]
+    link_type      TEXT NOT NULL DEFAULT 'wikilink',  -- wikilink | markdown | url
+    context        TEXT,              -- 命中行上下文（≤ 120 字，以链接为中心截断）
+    position       INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL,
+    UNIQUE (source_note_id, target_title, position)
+);
+
+CREATE INDEX idx_note_links_source ON note_links(source_note_id);
+CREATE INDEX idx_note_links_target ON note_links(target_note_id);
+CREATE INDEX idx_note_links_title  ON note_links(workspace_id, lower(target_title));
+CREATE INDEX idx_note_links_type   ON note_links(link_type);
+```
+
+要点：该表是**可重建的派生数据**（`links_rebuild` 可从 Markdown 全量恢复），
+外链以 `link_type='url'` 记录但不进入图谱；`target_note_id` 允许为空以支持
+「未解析链接」。解析规则见 [PLAN_V1.1.md](./PLAN_V1.1.md) 的 F1。
+
 ### 索引
 
 ```sql
@@ -148,6 +175,9 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 - 记录表：`schema_migrations(version, name, applied_at)`，同时写入 `PRAGMA user_version`；
 - 打开工作区时若 `user_version` 高于当前应用支持版本 → 返回 `WORKSPACE_INVALID`（提示升级应用）；
 - 索引可重建：`search_rebuild_index` 清空 FTS5 并按 `notes` 重新写入，不依赖外部文件。
+
+当前迁移列表：`001_init`（表结构）、`002_search_index`（FTS5）、`003_note_links`（双向链接），
+`SCHEMA_VERSION = 3`。
 
 ## 5. 数据恢复能力
 

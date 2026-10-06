@@ -464,6 +464,319 @@ pub fn build_snippet(text: &str, keyword: &str, max_chars: usize) -> Vec<TextSeg
     segments
 }
 
+// ------------------------------------------------------------------ 双向链接
+
+/// 从 Markdown 中解析出的一个 `[[…]]` 链接。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiLinkMatch {
+    /// 目标标题（`[[标题|别名]]` 中的「标题」）
+    pub target: String,
+    /// 显示别名
+    pub alias: Option<String>,
+    /// `[[标题#小节]]` 中的小节
+    pub anchor: Option<String>,
+    /// 在正文中的出现顺序（从 0 开始）
+    pub position: usize,
+    /// 命中所在行的上下文摘要（最多 120 字）
+    pub context: String,
+}
+
+/// 上下文摘要的最大长度。
+const LINK_CONTEXT_CHARS: usize = 120;
+
+/// 解析正文中的双向链接。
+///
+/// 规则（对应 `docs/PLAN_V1.1.md` 的 F1）：
+/// - 支持 `[[标题]]`、`[[标题|别名]]`、`[[标题#小节]]`、`[[标题#小节|别名]]`；
+/// - `\|` 与 `\#` 视为字面量，便于标题里出现这些字符；
+/// - **忽略围栏代码块与行内代码**中的 `[[…]]`；
+/// - 链接不跨行；目标为空则丢弃。
+pub fn parse_wikilinks(markdown: &str) -> Vec<WikiLinkMatch> {
+    let chars: Vec<char> = markdown.chars().collect();
+    let parsable = mask_code_regions(&chars);
+    let mut matches = Vec::new();
+    let mut index = 0usize;
+
+    while index + 1 < chars.len() {
+        if parsable[index] && chars[index] == '[' && chars[index + 1] == '[' {
+            if let Some(end) = find_wikilink_end(&chars, &parsable, index + 2) {
+                let inner: String = chars[index + 2..end].iter().collect();
+                if let Some((target, alias, anchor)) = parse_wikilink_inner(&inner) {
+                    matches.push(WikiLinkMatch {
+                        target,
+                        alias,
+                        anchor,
+                        position: matches.len(),
+                        context: line_context(&chars, index),
+                    });
+                }
+                index = end + 2;
+                continue;
+            }
+        }
+        index += 1;
+    }
+    matches
+}
+
+/// 找出 `[[` 之后的结束位置（`]` 的下标）。
+fn find_wikilink_end(chars: &[char], parsable: &[bool], start: usize) -> Option<usize> {
+    let mut index = start;
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '\n' {
+            return None;
+        }
+        if ch == ']' && index + 1 < chars.len() && chars[index + 1] == ']' && parsable[index] {
+            return Some(index);
+        }
+        // 出现新的 `[[` 说明前一个未闭合
+        if ch == '[' && index + 1 < chars.len() && chars[index + 1] == '[' {
+            return None;
+        }
+        index += 1;
+    }
+    None
+}
+
+/// 解析 `[[…]]` 内部文本：返回（目标、别名、锚点）。
+fn parse_wikilink_inner(inner: &str) -> Option<(String, Option<String>, Option<String>)> {
+    let (target_part, alias_part) = split_unescaped(inner, '|');
+    let (title_part, anchor_part) = split_unescaped(&target_part, '#');
+
+    let target = unescape_link_text(title_part.trim());
+    if target.is_empty() {
+        return None;
+    }
+    let alias = alias_part
+        .map(|value| unescape_link_text(value.trim()))
+        .filter(|value| !value.is_empty());
+    let anchor = anchor_part
+        .map(|value| unescape_link_text(value.trim()))
+        .filter(|value| !value.is_empty());
+
+    Some((target, alias, anchor))
+}
+
+/// 按未转义的分隔符切成两段。
+fn split_unescaped(value: &str, separator: char) -> (String, Option<String>) {
+    let chars: Vec<char> = value.chars().collect();
+    let mut index = 0usize;
+    while index < chars.len() {
+        if chars[index] == '\\' {
+            index += 2;
+            continue;
+        }
+        if chars[index] == separator {
+            let left: String = chars[..index].iter().collect();
+            let right: String = chars[index + 1..].iter().collect();
+            return (left, Some(right));
+        }
+        index += 1;
+    }
+    (value.to_string(), None)
+}
+
+fn unescape_link_text(value: &str) -> String {
+    value.replace("\\|", "|").replace("\\#", "#").replace("\\]", "]")
+}
+
+/// 取某一字符位置所在行的上下文摘要。
+///
+/// 行太长时以**链接为中心**截断（而不是从行首截），
+/// 否则反链面板里会看不到命中的位置。
+fn line_context(chars: &[char], at: usize) -> String {
+    let line_start = chars[..at]
+        .iter()
+        .rposition(|ch| *ch == '\n')
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let line_end = chars[at..]
+        .iter()
+        .position(|ch| *ch == '\n')
+        .map(|offset| at + offset)
+        .unwrap_or(chars.len());
+    let line: Vec<char> = chars[line_start..line_end].to_vec();
+
+    if line.len() <= LINK_CONTEXT_CHARS {
+        return line.iter().collect::<String>().trim().to_string();
+    }
+
+    let offset = at - line_start;
+    let half = LINK_CONTEXT_CHARS / 2;
+    let mut from = offset.saturating_sub(half);
+    let mut to = (from + LINK_CONTEXT_CHARS).min(line.len());
+    if to - from < LINK_CONTEXT_CHARS {
+        from = to.saturating_sub(LINK_CONTEXT_CHARS);
+    }
+
+    let mut out = String::new();
+    if from > 0 {
+        out.push('…');
+    }
+    out.push_str(&line[from..to].iter().collect::<String>().trim());
+    if to < line.len() {
+        out.push('…');
+    }
+    out
+}
+
+/// 标记可解析位置：围栏代码块与行内代码中的内容不可解析。
+fn mask_code_regions(chars: &[char]) -> Vec<bool> {
+    let mut parsable = vec![true; chars.len()];
+
+    // 1) 围栏代码块（``` 或 ~~~，允许更长围栏）
+    let mut line_start = 0usize;
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+    let mut index = 0usize;
+    loop {
+        let at_end = index == chars.len();
+        if at_end || chars[index] == '\n' {
+            let line: String = chars[line_start..index].iter().collect();
+            let trimmed = line.trim();
+            let fence_run = trimmed.chars().take_while(|ch| *ch == '`' || *ch == '~').count();
+            let is_fence = fence_run >= 3
+                && trimmed.chars().all(|ch| ch == '`' || ch == '~' || ch.is_whitespace() || !ch.is_alphanumeric() == false)
+                && trimmed.chars().next().is_some_and(|ch| ch == '`' || ch == '~');
+            let marker = trimmed.chars().next().unwrap_or('`');
+
+            if is_fence {
+                if !in_fence {
+                    in_fence = true;
+                    fence_char = marker;
+                    fence_len = fence_run;
+                } else if marker == fence_char && fence_run >= fence_len {
+                    in_fence = false;
+                }
+                for offset in line_start..index {
+                    parsable[offset] = false;
+                }
+            } else if in_fence {
+                for offset in line_start..index {
+                    parsable[offset] = false;
+                }
+            }
+            line_start = index + 1;
+        }
+        if at_end {
+            break;
+        }
+        index += 1;
+    }
+
+    // 2) 行内代码（成对的反引号，不跨行）
+    let mut cursor = 0usize;
+    while cursor < chars.len() {
+        if chars[cursor] == '`' && parsable[cursor] {
+            let mut run = 1usize;
+            while cursor + run < chars.len() && chars[cursor + run] == '`' && parsable[cursor + run] {
+                run += 1;
+            }
+            let mut probe = cursor + run;
+            let mut closing: Option<usize> = None;
+            while probe < chars.len() {
+                if chars[probe] == '\n' {
+                    break;
+                }
+                if chars[probe] == '`' && parsable[probe] {
+                    let mut close_run = 1usize;
+                    while probe + close_run < chars.len()
+                        && chars[probe + close_run] == '`'
+                        && parsable[probe + close_run]
+                    {
+                        close_run += 1;
+                    }
+                    if close_run == run {
+                        closing = Some(probe);
+                        break;
+                    }
+                    probe += close_run;
+                    continue;
+                }
+                probe += 1;
+            }
+            match closing {
+                Some(end) => {
+                    for offset in cursor..(end + run) {
+                        parsable[offset] = false;
+                    }
+                    cursor = end + run;
+                }
+                None => cursor += run,
+            }
+        } else {
+            cursor += 1;
+        }
+    }
+
+    parsable
+}
+
+#[cfg(test)]
+mod wikilink_tests {
+    use super::*;
+
+    #[test]
+    fn parses_basic_alias_and_anchor_forms() {
+        let matches = parse_wikilinks(
+            "参考 [[SQLite 全文搜索]]，别名写法 [[全文搜索|搜索笔记]]，锚点 [[设计文档#索引策略]]，组合 [[设计文档#索引策略|策略]]。",
+        );
+        assert_eq!(matches.len(), 4);
+
+        assert_eq!(matches[0].target, "SQLite 全文搜索");
+        assert_eq!(matches[0].alias, None);
+        assert_eq!(matches[0].anchor, None);
+        assert_eq!(matches[0].position, 0);
+
+        assert_eq!(matches[1].target, "全文搜索");
+        assert_eq!(matches[1].alias.as_deref(), Some("搜索笔记"));
+
+        assert_eq!(matches[2].target, "设计文档");
+        assert_eq!(matches[2].anchor.as_deref(), Some("索引策略"));
+
+        assert_eq!(matches[3].target, "设计文档");
+        assert_eq!(matches[3].anchor.as_deref(), Some("索引策略"));
+        assert_eq!(matches[3].alias.as_deref(), Some("策略"));
+        assert_eq!(matches[3].position, 3);
+    }
+
+    #[test]
+    fn ignores_links_inside_code() {
+        let markdown = "正文 [[真链接]]\n\n```\n[[代码块里的链接]]\n```\n\n行内 `[[行内代码]]` 结束。\n\n~~~md\n[[另一个代码块]]\n~~~\n";
+        let matches = parse_wikilinks(markdown);
+        assert_eq!(matches.len(), 1, "只应解析正文中的链接：{matches:?}");
+        assert_eq!(matches[0].target, "真链接");
+    }
+
+    #[test]
+    fn supports_escaped_separators_and_skips_empty_targets() {
+        let matches = parse_wikilinks("[[A\\|B]] 与 [[ ]]，还有 [[#只有锚点]]");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].target, "A|B");
+        assert_eq!(matches[0].alias, None);
+    }
+
+    #[test]
+    fn does_not_span_lines() {
+        let matches = parse_wikilinks("[[未闭合\n换行]]");
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn captures_line_context_and_truncates() {
+        let long = "前缀".repeat(80);
+        let markdown = format!("{long} [[目标笔记]] 后缀");
+        let matches = parse_wikilinks(&markdown);
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].context.contains("[[目标笔记]]"));
+        assert!(matches[0].context.chars().count() <= LINK_CONTEXT_CHARS + 2);
+        assert!(matches[0].context.starts_with('…'));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

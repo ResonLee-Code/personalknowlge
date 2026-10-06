@@ -4,6 +4,7 @@
 
 pub mod backup;
 pub mod category;
+pub mod link;
 pub mod note;
 pub mod search;
 pub mod settings;

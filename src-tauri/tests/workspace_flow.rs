@@ -1018,3 +1018,32 @@ fn layout_settings_round_trip_and_clamp() {
     assert_eq!(reopened.settings.list_width, 432);
     assert_eq!(reopened.settings.editor_mode, "split");
 }
+
+#[test]
+fn applies_note_links_migration() {
+    let harness = Harness::new();
+    harness.create_workspace();
+    let context = harness.context();
+
+    assert_eq!(context.db.schema_version().expect("schema 版本"), 3);
+
+    let (table, indexes) = context
+        .db
+        .with_conn(|conn| {
+            let table: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='note_links'",
+                [],
+                |row| row.get(0),
+            )?;
+            let indexes: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_note_links_%'",
+                [],
+                |row| row.get(0),
+            )?;
+            Ok((table, indexes))
+        })
+        .expect("查询 schema");
+
+    assert_eq!(table, 1, "note_links 表应随迁移 003 建立");
+    assert_eq!(indexes, 4, "note_links 的四个索引都应建立");
+}

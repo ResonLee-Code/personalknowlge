@@ -9,6 +9,36 @@
 
 ---
 
+## 未发布（V1.1 开发中）
+
+### M1-1 双向链接地基（已完成第一步）
+
+- 新增迁移 `003_note_links.sql`：`note_links` 表 + 4 个索引，`SCHEMA_VERSION` 升到 3；
+- 新增 `core::text::parse_wikilinks`：解析 `[[标题]]`、`[[标题|别名]]`、`[[标题#小节]]`、
+  `[[标题#小节|别名]]`，支持 `\|` / `\#` 转义，**忽略围栏代码块与行内代码**中的链接，
+  不跨行，上下文摘要以链接为中心截断（≤ 120 字）；
+- 新增领域模型 `domain/link.rs`：`LinkType`、`ParsedLink`、`Backlink`、`OutgoingLink`、
+  `UnresolvedLink`、`LinkCounts`、`LinkRebuildReport`（供后续面板与图谱使用）；
+- 测试：5 个解析器单元测试 + 1 个迁移集成测试（表与索引建立、`schema_version = 3`）。
+
+尚未完成（后续增量）：`LinkService` 的增量/全量更新、`links_*` 命令、
+编辑器反向链接面板与未解析链接入口。
+
+### 当前构建（含迁移 003）
+
+```text
+Personal Knowledge OS_1.0.1_aarch64.dmg
+  size   3954682 bytes（3.8 MB）
+  sha256 4b6f257778437ded952db241567b0f9516df5ad97f9eed4fdaa316054ffb98db
+  built  2026-10-07（macOS 内构建，未签名）
+```
+
+> ⚠️ 兼容性提示：从本构建起，打开工作区时数据库会迁移到 **schema 3**（新增 `note_links`）。
+> schema 更高的数据库会被旧版本应用拒绝打开（提示「由更高版本的应用创建」），
+> 本地测试请统一使用本构建或更新版本，不要与更早的小版本混用同一工作区。
+
+---
+
 ## V1.0.1 — 2026-10-07
 
 主题：补齐「导入 / 导出 / 布局」三块体验，并修掉影响日常使用的缺陷。
@@ -48,17 +78,16 @@
 
 | 平台 | 状态 |
 | --- | --- |
-| macOS | ✅ 已随 V1.0.1 重新构建：`src-tauri/target/release/bundle/macos/Personal Knowledge OS.app` 与 `.../dmg/Personal Knowledge OS_1.0.1_aarch64.dmg` |
+| macOS | ✅ 已构建：`src-tauri/target/release/bundle/{macos,dmg}/`（当前校验值见「未发布（V1.1 开发中）」的「当前构建」小节） |
 | Windows | ⏸ **待确认**。`dist-windows/` 中现有安装包与便携版仍是 V1.0.0（2026-09-24）构建，未包含本版本改动；确认后再重新打包（命令见 [WINDOWS_INSTALL_GUIDE.md](./WINDOWS_INSTALL_GUIDE.md)） |
 
-macOS 产物校验值与构建信息：
+### 文档与决策记录
 
-```text
-Personal Knowledge OS_1.0.1_aarch64.dmg
-  size   3953990 bytes（3.8 MB）
-  sha256 06f54e91c940a4a3256f7a448073c4968c6baa44334cacefc729a5211d66e7ec
-  built  2026-10-07（macOS 内构建，未做代码签名与公证）
-```
+- 工程设计基线 `Personal-Knowledge-OS-Engineering-Design-V1.0.md` 正文保持不变，
+  新增**附录 C：实现状态与偏差记录**（偏差 D1–D9、V1.0.1 增补、Sprint 完成度、待评估项）；
+- 新增 [PLAN_V1.1.md](./PLAN_V1.1.md) 与 [CHANGELOG.md](./CHANGELOG.md)；
+- 2026-10-07 确认的执行口径：Windows 打包等待指令、暂不做签名与自动更新（本地运行自测）、
+  先交付 M1/M2 再评估图谱视图、中文分词先测量再决定。
 
 Windows 侧记录（V1.0.0，待替换）：
 

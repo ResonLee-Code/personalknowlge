@@ -25,9 +25,14 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "search_index",
         sql: include_str!("../../../migrations/002_search_index.sql"),
     },
+    Migration {
+        version: 3,
+        name: "note_links",
+        sql: include_str!("../../../migrations/003_note_links.sql"),
+    },
 ];
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// 创建迁移记录表。
 fn ensure_migration_table(conn: &Connection) -> Result<()> {
