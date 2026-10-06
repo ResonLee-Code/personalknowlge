@@ -9,7 +9,35 @@
 
 ---
 
-## 未发布（V1.1 开发中）
+## V1.1.0 — 2026-10-07
+
+主题：**双向链接 + 编辑体验 + 知识图谱**。本版把「记录 → 组织 → 找回 → 看见关系」打通，
+并为未来的 AI 能力预留了框架（见 [AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md)）。
+
+版本号已在 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 与本文同步为 **1.1.0**。
+
+### M3 知识图谱（新增）
+
+- 新增 `graph_get` 命令（`application::GraphService`）：节点来自 `notes`（支持分类含子分类、
+  标签、关键词过滤），边来自 `note_links` 中**已解析**的链接；图谱不落库，`links_rebuild` 即可整体修复；
+- 过滤器：分类、标签、孤立节点开关、**聚焦（1–2 跳邻域）**；
+- 容量保护：默认最多 2000 节点 / 5000 边，超出时按连接度优先保留并给出提示
+  （`truncated` + `totalNodes/totalEdges`），避免大库首屏卡顿；
+- 节点度数按**可见子图**重算（同一对笔记的多条链接算一个邻居），避免枢纽节点被重复链接放大；
+- 新增 `/graph` 页面：不引入第三方可视化依赖，自研 Canvas 力导向布局
+  （网格近邻斥力 + 弹簧 + 向心力，每帧多步推进，≈1s 收敛后停止渲染帧）；
+  支持滚轮缩放、拖拽平移、拖拽节点固定、单击选中（高亮其连接）、双击打开笔记、`F` 适应窗口；
+  右侧提供图例（按分类着色、未分类为灰色）与选中笔记详情；
+- 侧边栏新增「知识图谱」入口；浏览器预览后端同样实现 `graph_get`（复用同一套解析规则）；
+- 测试：4 个 Rust 集成测试（节点/边/度数、聚焦跳数、标签与关键词过滤、截断与总数）
+  + 7 个布局算法单测 + 5 个页面组件测试 + 1 个预览后端测试；E2E 新增第 21 步。
+
+### 框架规划：AI 决策层（文档）
+
+- 新增 [AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md)：定义 **AI 决策层**（意图 → 路由 → 计划 →
+  执行 → 校验 → 汇总）、模型接入层（`LlmProvider` trait，本地优先）、
+  检索层（`Retriever` trait，先复用 FTS5，向量检索为可选增强）、工具层（只读，写回归建议）与隐私开关矩阵；
+- 本版**不引入任何模型调用**，只固定边界与接口，避免后续把模型调用散落到 UI。
 
 ### M1-1 双向链接地基（已完成）
 
@@ -108,16 +136,22 @@ M1（双向链接地基）到此完成。
 
 M2（编辑体验）到此完成。下一步：M3 知识图谱视图（评估后决定）与 Windows 打包（等待指令）。
 
-### 当前构建（含迁移 003）
+### 当前构建（V1.1.0，含迁移 003）
 
 ```text
-Personal Knowledge OS_1.0.1_aarch64.dmg
-  size   3954682 bytes（3.8 MB）
-  sha256 4b6f257778437ded952db241567b0f9516df5ad97f9eed4fdaa316054ffb98db
-  built  2026-10-07（macOS 内构建，未签名）
+Personal Knowledge OS_1.1.0_aarch64.dmg
+  path   src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.1.0_aarch64.dmg
+  size   4052316 bytes（3.9 MB）
+  sha256 86bd9abf8500157f2d85122307ac927ca3bdb35362d0be53a43d56000c32030d
+  built  2026-10-07 02:29（macOS aarch64 本地构建，未签名）
+
+Personal Knowledge OS.app（同目录 bundle/macos/）
+  binary 7604976 bytes，release profile（lto + opt-level="s" + strip）
 ```
 
-> ⚠️ 兼容性提示：从本构建起，打开工作区时数据库会迁移到 **schema 3**（新增 `note_links`）。
+> Windows 安装包仍为 V1.0.0 构建（`dist-windows/`），**等待指令后**再交叉编译同步到 V1.1.0。
+
+> ⚠️ 兼容性提示：从 V1.0.1 起，打开工作区时数据库会迁移到 **schema 3**（新增 `note_links`）。
 > schema 更高的数据库会被旧版本应用拒绝打开（提示「由更高版本的应用创建」），
 > 本地测试请统一使用本构建或更新版本，不要与更早的小版本混用同一工作区。
 

@@ -21,6 +21,7 @@ SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeSc
 | 分类 | 分类树、子分类、重命名（同步目录与文件路径）、删除策略（Inbox / 父分类 / 取消分类） |
 | 标签 | 创建、重命名、删除、笔记多标签绑定，大小写不敏感唯一 |
 | 搜索 | 标题 + 正文 + 标签全文检索、中文双字短语、英文前缀、相关度与时间排序、分类/标签/收藏/时间过滤、结果摘要与高亮、索引状态与手动重建 |
+| 图谱 | `/graph` 知识图谱：节点 = 笔记、边 = 双向链接；分类着色、度数定大小、分类/标签/孤立节点过滤、1–2 跳聚焦、缩放/平移/拖拽固定、双击打开 |
 | 外部编辑 | 文件监听（原生事件 + 轮询兜底）、自动采纳外部新增/修改、标记缺失文件、忽略自身写入回声 |
 | 数据安全 | 原子写入、内容哈希冲突检测、回收站、ZIP 备份与校验、Markdown 导出、路径穿越防护 |
 | 界面 | 三栏工作台、全局搜索面板（⌘/Ctrl + K）、快速切换（⌘/Ctrl + P）、编辑/分屏/预览 + 大纲、深浅主题、空状态、状态栏 |
@@ -31,6 +32,9 @@ SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeSc
 
 Tauri 2 · Rust · React 19 · TypeScript(strict) · Vite 8 · Tailwind CSS 4 · CodeMirror 6 ·
 SQLite(bundled) + FTS5 · pulldown-cmark · notify · zip · serde · tracing
+
+图谱视图为自研 Canvas 力导向布局（不引入可视化依赖）；AI 能力的框架规划见
+[`docs/AI_ARCHITECTURE_PLAN.md`](./docs/AI_ARCHITECTURE_PLAN.md)（V1.1 不含模型调用）。
 
 ## 环境要求
 

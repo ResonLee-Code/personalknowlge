@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { linkService } from '@/services/linkService';
+import { graphService } from '@/services/graphService';
 import { noteService } from '@/services/noteService';
 import { categoryService } from '@/services/categoryService';
 import { searchService } from '@/services/searchService';
@@ -181,5 +182,34 @@ describe('浏览器预览后端', () => {
     expect(report.unresolved).toBe(1);
     // 创建工作区会预置一篇欢迎笔记，因此是 3 篇
     expect(report.scannedNotes).toBe(3);
+  });
+
+  it('按链接生成图谱节点与边，并支持聚焦与孤立节点开关', async () => {
+    await workspaceService.create('测试库', '/tmp/mock');
+    const alpha = await noteService.create({ title: '图谱甲' });
+    const beta = await noteService.create({ title: '图谱乙' });
+    const lonely = await noteService.create({ title: '图谱孤立' });
+    await noteService.save({
+      id: alpha.note.id,
+      content: '指向 [[图谱乙]]',
+      baseContentHash: alpha.note.contentHash,
+    });
+
+    const graph = await graphService.get();
+    const find = (id: string) => graph.nodes.find((node) => node.id === id);
+    expect(find(alpha.note.id)?.degree).toBe(1);
+    expect(find(beta.note.id)?.degree).toBe(1);
+    expect(find(lonely.note.id)?.orphan).toBe(true);
+    expect(graph.edges).toEqual([
+      { source: alpha.note.id, target: beta.note.id, linkType: 'wikilink', weight: 1 },
+    ]);
+
+    const focused = await graphService.get({ focusNoteId: alpha.note.id, hops: 1 });
+    expect(focused.nodes.map((node) => node.id).sort()).toEqual(
+      [alpha.note.id, beta.note.id].sort(),
+    );
+
+    const withoutOrphans = await graphService.get({ includeOrphans: false });
+    expect(withoutOrphans.nodes.every((node) => !node.orphan)).toBe(true);
   });
 });

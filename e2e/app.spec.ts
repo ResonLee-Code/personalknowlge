@@ -249,6 +249,16 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
     'SQLite 全文搜索学习笔记',
   );
 
+  // 21. 知识图谱（V1.1 M3）：节点/连接统计 + 力导向画布
+  await page.goto('/#/graph');
+  await expect(page.getByRole('heading', { name: '知识图谱' })).toBeVisible();
+  await expect(page.getByText(/3 个节点/)).toBeVisible();
+  await expect(page.getByText(/1 条连接/)).toBeVisible();
+  await expect(page.getByTestId('graph-canvas')).toBeVisible();
+  // 等布局收敛（收敛后提示语会从「正在计算布局」切换）
+  await expect(page.getByText(/拖拽节点可固定位置/)).toBeVisible({ timeout: 10_000 });
+  await page.screenshot({ path: path.join(SHOTS, '21-graph.png') });
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

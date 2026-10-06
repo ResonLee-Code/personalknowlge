@@ -15,6 +15,9 @@ import type {
   Category,
   CategoryNode,
   CreateNoteInput,
+  GraphData,
+  GraphNode,
+  GraphQuery,
   IndexStatus,
   LinkCounts,
   LinkRebuildReport,
@@ -591,6 +594,132 @@ function mockRebuild(): LinkRebuildReport {
   };
 }
 
+/** 浏览器预览模式下的知识图谱（与 Rust 端同一套过滤/截断语义）。 */
+function mockGraph(query: GraphQuery): GraphData {
+  const startedAt = Date.now();
+  const listed = listNotes({
+    categoryId: query.categoryId ?? undefined,
+    tagId: query.tagId ?? undefined,
+    keyword: query.keyword ?? undefined,
+    status: 'active',
+    pageSize: 500,
+  });
+  const nodesById = new Map(listed.items.map((item) => [item.id, item]));
+
+  // 事件边：只保留两端都在候选集合内的已解析链接
+  const edgeMap = new Map<string, { source: string; target: string; weight: number }>();
+  const neighbours = new Map<string, Set<string>>();
+  const connect = (source: string, target: string) => {
+    if (source === target) return;
+    const key = `${source}\u0000${target}`;
+    const edge = edgeMap.get(key) ?? { source, target, weight: 0 };
+    edge.weight += 1;
+    edgeMap.set(key, edge);
+    if (!neighbours.has(source)) neighbours.set(source, new Set());
+    if (!neighbours.has(target)) neighbours.set(target, new Set());
+    neighbours.get(source)!.add(target);
+    neighbours.get(target)!.add(source);
+  };
+
+  state.notes
+    .filter((note) => note.status === 'active')
+    .forEach((note) => {
+      parseWikilinks(state.contents[note.id] ?? '').forEach((link) => {
+        const target = resolveLinkTarget(link.target);
+        if (!target) return;
+        if (!nodesById.has(note.id) || !nodesById.has(target.id)) return;
+        connect(note.id, target.id);
+      });
+    });
+
+  // 聚焦：以某篇笔记为中心做 N 跳
+  let focus: Set<string> | null = null;
+  const focusId = query.focusNoteId ?? null;
+  if (focusId && nodesById.has(focusId)) {
+    const hops = Math.min(3, Math.max(1, query.hops ?? 1));
+    focus = new Set([focusId]);
+    let frontier = [focusId];
+    for (let step = 0; step < hops; step += 1) {
+      const next: string[] = [];
+      frontier.forEach((id) => {
+        neighbours.get(id)?.forEach((neighbor) => {
+          if (!focus!.has(neighbor)) {
+            focus!.add(neighbor);
+            next.push(neighbor);
+          }
+        });
+      });
+      if (next.length === 0) break;
+      frontier = next;
+    }
+  }
+
+  const includeOrphans = query.includeOrphans ?? true;
+  let nodes: GraphNode[] = [...nodesById.values()]
+    .filter((item) => !focus || focus.has(item.id))
+    .map((item) => {
+      const degree = neighbours.get(item.id)?.size ?? 0;
+      return {
+        id: item.id,
+        title: item.title,
+        categoryId: item.categoryId ?? null,
+        updatedAt: item.updatedAt,
+        degree,
+        tags: state.noteTags[item.id] ?? [],
+        orphan: degree === 0,
+      };
+    })
+    .filter((node) => includeOrphans || !node.orphan);
+
+  const totalNodes = nodes.length;
+  const maxNodes = Math.max(1, query.maxNodes ?? 2000);
+  let truncated = false;
+  if (nodes.length > maxNodes) {
+    nodes = [...nodes]
+      .sort((left, right) => right.degree - left.degree || right.updatedAt.localeCompare(left.updatedAt))
+      .slice(0, maxNodes);
+    truncated = true;
+  }
+
+  const kept = new Set(nodes.map((node) => node.id));
+  let edges = [...edgeMap.values()].filter(
+    (edge) => kept.has(edge.source) && kept.has(edge.target),
+  );
+  const totalEdges = edges.length;
+  const maxEdges = Math.max(1, query.maxEdges ?? 5000);
+  if (edges.length > maxEdges) {
+    edges = [...edges].sort((left, right) => right.weight - left.weight).slice(0, maxEdges);
+    truncated = true;
+  }
+
+  // 截断后按可见边集重算邻居数
+  const visible = new Map<string, Set<string>>();
+  edges.forEach((edge) => {
+    if (!visible.has(edge.source)) visible.set(edge.source, new Set());
+    if (!visible.has(edge.target)) visible.set(edge.target, new Set());
+    visible.get(edge.source)!.add(edge.target);
+    visible.get(edge.target)!.add(edge.source);
+  });
+  nodes = nodes.map((node) => {
+    const degree = visible.get(node.id)?.size ?? 0;
+    return { ...node, degree, orphan: degree === 0 };
+  });
+
+  return {
+    nodes,
+    edges: edges.map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+      linkType: 'wikilink' as const,
+      weight: edge.weight,
+    })),
+    truncated,
+    totalNodes,
+    totalEdges,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
 function categoryTree(): CategoryNode[] {
   const build = (parentId: string | null, depth: number): CategoryNode[] =>
     state.categories
@@ -814,6 +943,9 @@ export async function handleMockInvoke(
     case 'links_rebuild':
       requireWorkspace();
       return mockRebuild();
+    case 'graph_get':
+      requireWorkspace();
+      return mockGraph((payload.query ?? {}) as GraphQuery);
     case 'note_export':
       fail('INVALID_INPUT', '浏览器预览模式不支持导出到本地文件，请在桌面应用中使用「导出」。');
       break;

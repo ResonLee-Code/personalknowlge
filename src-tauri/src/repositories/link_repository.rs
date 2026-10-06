@@ -40,6 +40,8 @@ pub trait LinkRepository {
     fn list_for_source(&self, conn: &Connection, source_note_id: &str) -> Result<Vec<NoteLinkRow>>;
     fn list_for_target(&self, conn: &Connection, target_note_id: &str) -> Result<Vec<NoteLinkRow>>;
     fn list_unresolved(&self, conn: &Connection, workspace_id: &str) -> Result<Vec<NoteLinkRow>>;
+    /// 全库**已解析**的链接（不含外链），用于知识图谱等派生视图。
+    fn list_resolved(&self, conn: &Connection, workspace_id: &str) -> Result<Vec<NoteLinkRow>>;
     fn list_titles(&self, conn: &Connection, workspace_id: &str) -> Result<Vec<NoteTitleRow>>;
     fn clear_workspace(&self, conn: &Connection, workspace_id: &str) -> Result<()>;
     fn unbind_target(&self, conn: &Connection, target_note_id: &str) -> Result<usize>;
@@ -145,6 +147,21 @@ impl LinkRepository for SqliteLinkRepository {
         let sql = format!(
             "SELECT {COLUMNS} FROM note_links
              WHERE workspace_id = ?1 AND target_note_id IS NULL AND link_type <> 'url'
+             ORDER BY source_note_id ASC, position ASC"
+        );
+        let mut statement = conn.prepare(&sql)?;
+        let rows = statement.query_map(params![workspace_id], map_row)?;
+        let mut list = Vec::new();
+        for row in rows {
+            list.push(row?);
+        }
+        Ok(list)
+    }
+
+    fn list_resolved(&self, conn: &Connection, workspace_id: &str) -> Result<Vec<NoteLinkRow>> {
+        let sql = format!(
+            "SELECT {COLUMNS} FROM note_links
+             WHERE workspace_id = ?1 AND target_note_id IS NOT NULL AND link_type <> 'url'
              ORDER BY source_note_id ASC, position ASC"
         );
         let mut statement = conn.prepare(&sql)?;

@@ -190,7 +190,20 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
   （另接受 `{{标题}}`、`{{日期}}`、`{{时间}}`），未知占位符原样保留；
 - `template_render` 只返回内容，写入仍走 `note_create`，保证索引 / 链接 / 统计路径唯一。
 
-## 12. 前端服务层
+## 12. 知识图谱（V1.1 M3）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `graph_get` | `{ query: { categoryId?, tagId?, keyword?, focusNoteId?, hops?, includeOrphans?, updatedAfter?, maxNodes?, maxEdges? } }` | `GraphData`（`nodes`、`edges`、`truncated`、`totalNodes`、`totalEdges`、`durationMs`） |
+
+- 节点来自 `notes`（沿用列表查询的过滤：分类含子分类、标签、关键词），
+  边来自 `note_links` 中**已解析**的链接（不含外链与自链接）；
+- `hops` 为聚焦跳数（1–3，缺省 1）；`includeOrphans` 缺省 `true`；
+- 容量上限缺省 2000 节点 / 5000 边，超出时按连接度优先保留并令 `truncated = true`；
+- `degree` 是**本次结果内**的邻居数（同一对笔记多条链接算一个邻居），截断后重新计算；
+- 图谱是派生数据：不落库，`links_rebuild` 可从 Markdown 整体修复。
+
+## 13. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 
@@ -200,6 +213,6 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 
 按领域拆分的服务模块：`workspaceService`、`noteService`、`categoryService`、`tagService`、
 `searchService`、`backupService`、`linkService`（第 9 节）、`attachmentService`（第 10 节）、
-`templateService`（第 11 节）。
+`templateService`（第 11 节）、`graphService`（第 12 节）。
 浏览器预览后端对 `links_*` 提供与 Rust 端一致的解析实现，
 因此反链面板、引用计数与未解析链接在纯前端预览下同样可用。

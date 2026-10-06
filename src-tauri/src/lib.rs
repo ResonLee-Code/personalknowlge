@@ -88,6 +88,7 @@ pub fn run() {
             commands::link_commands::links_get_unresolved,
             commands::link_commands::links_get_counts,
             commands::link_commands::links_rebuild,
+            commands::graph_commands::graph_get,
             commands::backup_commands::backup_create,
             commands::backup_commands::backup_list,
             commands::backup_commands::backup_validate,

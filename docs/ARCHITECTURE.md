@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 表现层 | 界面与交互，不直接访问 SQLite 与文件系统 | `src/` |
 | 命令层 | Tauri 命令，参数校验与线程调度 | `src-tauri/src/commands/` |
-| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件、模板） | `src-tauri/src/application/` |
+| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件、模板、图谱；AI 决策层为规划中） | `src-tauri/src/application/` |
 | 领域层 | 数据结构与不变量，不依赖框架 | `src-tauri/src/domain/` |
 | 仓储层 | 隔离 SQL 细节（trait + SQLite 实现） | `src-tauri/src/repositories/` |
 | 基础设施层 | SQLite、Markdown 存储、FTS5、文件监听、备份、frontmatter、docx 生成 | `src-tauri/src/infrastructure/` |
@@ -20,7 +20,7 @@ React UI (src/)
    ▼
 commands/            ← 只做转发；阻塞任务交给 async_runtime::spawn_blocking
    ▼
-application/         ← NoteService / CategoryService / TagService / SearchService / BackupService / LinkService / AttachmentService / TemplateService / IndexService / WorkspaceService
+application/         ← NoteService / CategoryService / TagService / SearchService / BackupService / LinkService / AttachmentService / TemplateService / GraphService / IndexService / WorkspaceService
    ▼
 domain/  +  repositories/  +  infrastructure/
    ▼
@@ -189,3 +189,18 @@ Base64 编解码由 `core::base64` 自带实现（避免为单点需求引入新
 
 模板只读取 `.knowledge/templates` 下的 Markdown，模板名禁止包含路径分隔符与 `..`，
 单文件上限 1 MB；新建工作区时会写入一个示例模板，用于让该能力可被发现。
+
+### 5.4 知识图谱（V1.1 M3）
+
+```text
+graph_get
+  → GraphService：
+      节点 = SqliteNoteRepository.list(分类/标签/关键词过滤)
+      边   = SqliteLinkRepository.list_resolved（仅已解析、去掉自链接）
+      → 聚焦（N 跳 BFS）→ 孤立节点开关 → 度数优先截断（2000/5000）
+      → 按可见边集重算邻居数 → 附加标签（tag_names_for_notes）
+  → 前端 /graph：self-made Canvas 力导向（网格近邻斥力 + 弹簧 + 向心力）
+```
+
+图谱**不落库**，与反链面板同源（都由 `note_links` 派生），因此 `links_rebuild` 即可整体修复。
+前端不引入第三方可视化依赖，布局收敛后停止 `requestAnimationFrame`，避免大库常驻耗电。

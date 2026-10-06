@@ -466,3 +466,43 @@ export interface RenderedTemplate {
   name: string;
   content: string;
 }
+
+/** 知识图谱（V1.1 M3） */
+export interface GraphQuery {
+  categoryId?: string | null;
+  tagId?: string | null;
+  keyword?: string | null;
+  focusNoteId?: string | null;
+  hops?: number | null;
+  includeOrphans?: boolean | null;
+  updatedAfter?: string | null;
+  maxNodes?: number | null;
+  maxEdges?: number | null;
+}
+
+export interface GraphNode {
+  id: string;
+  title: string;
+  categoryId?: string | null;
+  updatedAt: string;
+  /** 本次结果里的邻居数（同一对笔记多条链接算一个邻居） */
+  degree: number;
+  tags: string[];
+  orphan: boolean;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  linkType: LinkType;
+  weight: number;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  truncated: boolean;
+  totalNodes: number;
+  totalEdges: number;
+  durationMs: number;
+}

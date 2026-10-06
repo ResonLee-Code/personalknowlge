@@ -8,6 +8,7 @@ export const ROUTES = {
   categories: '/categories',
   tags: '/tags',
   favorites: '/favorites',
+  graph: '/graph',
   trash: '/trash',
   settings: '/settings',
   about: '/about',
