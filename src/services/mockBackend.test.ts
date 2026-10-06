@@ -87,4 +87,14 @@ describe('浏览器预览后端', () => {
       import('@/services/api').then(({ call }) => call('not_implemented_command')),
     ).rejects.toMatchObject({ code: 'INTERNAL_ERROR' });
   });
+
+  it('浏览器预览模式下导入本地文件会给出明确提示', async () => {
+    await workspaceService.create('测试库', '/tmp/mock');
+    await expect(
+      noteService.importFiles({ paths: ['/tmp/note.md'], categoryId: null }),
+    ).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+      message: expect.stringContaining('桌面应用'),
+    });
+  });
 });

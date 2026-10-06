@@ -24,3 +24,15 @@ export async function pickDirectory(title: string): Promise<string | null> {
   if (!selected || Array.isArray(selected)) return null;
   return selected;
 }
+
+/** 选择多个 Markdown / 文本文件（用于导入）。 */
+export async function pickMarkdownFiles(title = '选择要导入的文件'): Promise<string[]> {
+  const selected = await openDialog({
+    directory: false,
+    multiple: true,
+    title,
+    filters: [{ name: 'Markdown / 文本', extensions: ['md', 'markdown', 'txt'] }],
+  });
+  if (!selected) return [];
+  return Array.isArray(selected) ? selected : [selected];
+}

@@ -6,6 +6,8 @@ import type {
   NoteSummary,
   SaveNoteInput,
   SaveNoteResult,
+  ImportNotesInput,
+  ImportReport,
 } from '@/types';
 
 import { call } from './api';
@@ -45,4 +47,7 @@ export const noteService = {
   setTags: (id: string, tags: string[]) => call<NoteDetail>('note_set_tags', { id, tags }),
 
   count: (status?: string) => call<number>('note_count', { status }),
+
+  /** 导入外部 Markdown / 文本文件或目录（复制进知识库） */
+  importFiles: (input: ImportNotesInput) => call<ImportReport>('note_import', { input }),
 };

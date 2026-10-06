@@ -3,6 +3,7 @@
 use tauri::State;
 
 use crate::application::note_service::NoteService;
+use crate::application::import_service::{ImportNotesInput, ImportReport, ImportService};
 use crate::core::error::Result;
 use crate::domain::note::{
     CreateNoteInput, NoteDetail, NoteListQuery, NoteListResult, NoteStatus, NoteSummary,
@@ -156,4 +157,14 @@ pub async fn note_count(state: State<'_, AppState>, status: Option<String>) -> R
         })
     })
     .await
+}
+
+/// 导入外部 Markdown / 文本文件或整个目录（复制进知识库，不修改源文件）。
+#[tauri::command]
+pub async fn note_import(
+    state: State<'_, AppState>,
+    input: ImportNotesInput,
+) -> Result<ImportReport> {
+    let context = state.inner.context()?;
+    run(move || ImportService::new(context).import(input)).await
 }

@@ -66,6 +66,7 @@ pub fn run() {
             commands::note_commands::note_set_favorite,
             commands::note_commands::note_set_tags,
             commands::note_commands::note_count,
+            commands::note_commands::note_import,
             commands::category_commands::category_list,
             commands::category_commands::category_tree,
             commands::category_commands::category_create,

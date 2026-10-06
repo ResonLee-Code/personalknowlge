@@ -1,4 +1,4 @@
-import { FileText, Search, Star, Trash2, TriangleAlert } from 'lucide-react';
+import { FileText, ListFilter, Search, Star, Trash2, TriangleAlert } from 'lucide-react';
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -25,7 +25,6 @@ export function NoteListPanel() {
   const location = useLocation();
   const navigate = useNavigate();
   const width = useUiStore((state) => state.listWidth);
-  const setWidth = useUiStore((state) => state.setListWidth);
   const items = useNotesStore((state) => state.items);
   const total = useNotesStore((state) => state.total);
   const loading = useNotesStore((state) => state.loading);
@@ -163,24 +162,20 @@ export function NoteListPanel() {
         </ScrollArea>
       )}
 
-      <div className="flex items-center justify-between border-t border-[var(--border-subtle)] px-2 py-1">
-        <button
-          type="button"
-          className="text-[11px] text-[var(--ink-subtle)] hover:text-[var(--brand)]"
-          onClick={() => navigate(ROUTES.notes)}
-        >
-          查看全部笔记
-        </button>
-        <input
-          type="range"
-          aria-label="调整列表宽度"
-          min={240}
-          max={520}
-          value={width}
-          onChange={(event) => setWidth(Number(event.target.value))}
-          className="hidden h-1 w-20 cursor-pointer accent-[var(--brand)] md:block"
-        />
-      </div>
+      {/* 仅在按分类/标签筛选时出现：用于回到全部笔记 */}
+      {scope.kind === 'category' || scope.kind === 'tag' ? (
+        <div className="border-t border-[var(--border-subtle)] px-2 py-1.5">
+          <button
+            type="button"
+            title="清除分类 / 标签筛选，回到全部笔记"
+            className="flex items-center gap-1.5 text-[11px] text-[var(--ink-muted)] transition-colors hover:text-[var(--brand)]"
+            onClick={() => navigate(ROUTES.notes)}
+          >
+            <ListFilter className="h-3 w-3" />
+            清除筛选，查看全部笔记
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

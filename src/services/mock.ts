@@ -661,6 +661,12 @@ export async function handleMockInvoke(
       const status = (payload.status as string) ?? 'active';
       return state.notes.filter((note) => note.status === status).length;
     }
+    case 'note_import':
+      fail(
+        'INVALID_INPUT',
+        '浏览器预览模式无法读取本地文件，请在桌面应用中使用「导入外部文件」。',
+      );
+      break;
     case 'category_list':
       requireWorkspace();
       return state.categories;

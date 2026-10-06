@@ -69,8 +69,13 @@ export interface AppError {
 | `note_set_favorite` | `{ id, favorite }` | `NoteDetail` |
 | `note_set_tags` | `{ id, tags: string[] }` | `NoteDetail` |
 | `note_count` | `{ status? }` | `number` |
+| `note_import` | `{ input: ImportNotesInput }` | `ImportReport` |
 
 `SaveNoteInput`：`{ id, content, baseContentHash?, title?, categoryId?, tags? }`。
+`ImportNotesInput`：`{ paths: string[], categoryId? }`（`paths` 可以是文件或目录，目录会递归展开）；
+`ImportReport`：`{ imported: ImportedNote[], skipped: { sourcePath, reason }[], total, failed }`。
+导入是**复制**语义，源文件不会被修改；单文件上限 5 MB、单次上限 500 个文件，
+Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 当磁盘哈希与 `baseContentHash` 不一致时返回 `NOTE_CONFLICT`，
 `details` 内含 `{ noteId, filePath, currentHash, expectedHash, currentContent }`，供界面提示用户选择。
 

@@ -4,7 +4,9 @@ import { useParams, useSearchParams } from 'react-router-dom';
 
 import { EmptyState } from '@/components/ui/empty-state';
 import { useNotesStore, type NoteScope } from '@/stores/notesStore';
+import { useUiStore } from '@/stores/uiStore';
 
+import { ResizeHandle } from '@/components/layout/ResizeHandle';
 import { NoteEditorPage } from './NoteEditorPage';
 import { NoteListPanel } from './NoteListPanel';
 
@@ -18,6 +20,7 @@ export function NotesSection({ baseScope }: { baseScope: NoteScope }) {
   const setScope = useNotesStore((state) => state.setScope);
   const openDetail = useNotesStore((state) => state.openDetail);
   const detail = useNotesStore((state) => state.detail);
+  const setListWidth = useUiStore((state) => state.setListWidth);
 
   const categoryId = params.get('categoryId');
   const tagId = params.get('tagId');
@@ -43,6 +46,7 @@ export function NotesSection({ baseScope }: { baseScope: NoteScope }) {
   return (
     <div className="flex min-h-0 flex-1">
       <NoteListPanel />
+      <ResizeHandle side="left" label="调整列表宽度" onResize={setListWidth} />
       <div className="flex min-w-0 flex-1 flex-col">
         {id ? (
           <NoteEditorPage />

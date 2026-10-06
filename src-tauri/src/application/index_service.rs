@@ -620,17 +620,31 @@ impl IndexService {
     }
 }
 
-/// 从相对路径推断标题（去掉 `YYYYMMDD-HHmmss-` 前缀）。
-pub fn file_stem_title(relative: &str) -> String {
-    let name = relative.rsplit('/').next().unwrap_or(relative);
-    let stem = name
-        .trim_end_matches(".md")
-        .trim_end_matches(".markdown");
-    let stripped = match stem.find('-') {
-        Some(index) if index == 15 => &stem[index + 1..],
-        _ => stem,
+/// 从文件路径推断标题：去掉已知文本扩展名与 `YYYYMMDD-HHmmss-` 前缀。
+pub fn file_stem_title(path: &str) -> String {
+    use std::sync::OnceLock;
+
+    static TIMESTAMP_PREFIX: OnceLock<regex::Regex> = OnceLock::new();
+    const TEXT_EXTENSIONS: [&str; 5] = ["md", "markdown", "mdown", "txt", "text"];
+
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+
+    // 只去掉已知的文本扩展名，避免误伤标题中的点号
+    let stem = match name.rsplit_once('.') {
+        Some((base, extension))
+            if !base.is_empty()
+                && TEXT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()) =>
+        {
+            base
+        }
+        _ => name,
     };
-    let title = stripped.trim();
+
+    let stamp = TIMESTAMP_PREFIX
+        .get_or_init(|| regex::Regex::new(r"^\d{8}-\d{6}-").expect("时间戳前缀正则必须合法"));
+    let cleaned = stamp.replace(stem, "");
+    let title = cleaned.trim();
+
     if title.is_empty() {
         stem.to_string()
     } else {
@@ -658,5 +672,35 @@ pub fn content_changed(stored_hash: Option<&str>, current: &str) -> bool {
     match stored_hash {
         Some(hash) => hash != sha256_hex_str(current),
         None => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_stem_title;
+
+    #[test]
+    fn strips_timestamp_prefix_and_text_extension() {
+        assert_eq!(
+            file_stem_title("00_Inbox/20260924-010009-欢迎使用-Personal-Knowledge-OS.md"),
+            "欢迎使用-Personal-Knowledge-OS"
+        );
+        assert_eq!(file_stem_title("20260901-100000-纯文本文档.txt"), "纯文本文档");
+        assert_eq!(file_stem_title("20260901-100000-笔记.markdown"), "笔记");
+    }
+
+    #[test]
+    fn keeps_meaningful_dots_in_names() {
+        // 只去掉已知的文本扩展名，文件名中的其它点号保留
+        assert_eq!(file_stem_title("2026.09.23 会议记录.md"), "2026.09.23 会议记录");
+        assert_eq!(file_stem_title("v1.2 设计稿"), "v1.2 设计稿");
+    }
+
+    #[test]
+    fn handles_paths_without_extension_or_title() {
+        assert_eq!(file_stem_title("note"), "note");
+        assert_eq!(file_stem_title("/tmp/20260901-100000-meeting.md"), "meeting");
+        // 前缀后为空时回退为去掉扩展名的原文件名
+        assert_eq!(file_stem_title("20260901-100000-.md"), "20260901-100000-");
     }
 }

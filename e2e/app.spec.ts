@@ -91,6 +91,26 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByRole('heading', { name: '全部笔记' })).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '10-note-list-dark.png') });
 
+  // 11. 列表宽度改为拖拽把手，底部不再出现无法解释的滑块
+  await expect(page.locator('input[type="range"]')).toHaveCount(0);
+
+  // 按分类筛选时才出现「清除筛选」入口
+  await page.getByRole('button', { name: /^技术/ }).click();
+  await expect(page.getByRole('button', { name: /清除筛选，查看全部笔记/ })).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '11-clear-filter.png') });
+  await page.getByRole('button', { name: /清除筛选，查看全部笔记/ }).click();
+  await expect(page.getByRole('heading', { name: '全部笔记' })).toBeVisible();
+
+  // 12. 新建笔记对话框：手动创建 / 导入外部文件
+  await page.getByRole('button', { name: '新建笔记' }).first().click();
+  await expect(page.getByRole('button', { name: /导入外部文件/ })).toBeVisible();
+  await page.getByRole('button', { name: /导入外部文件/ }).click();
+  // Playwright 的 name 默认是子串匹配，这里用 exact 区分「选择文件 / 选择文件夹」
+  await expect(page.getByRole('button', { name: '选择文件', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '选择文件夹', exact: true })).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '12-import-dialog.png') });
+  await page.getByRole('button', { name: '取消' }).click();
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

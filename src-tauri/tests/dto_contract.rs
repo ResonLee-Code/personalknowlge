@@ -5,6 +5,7 @@
 //! 这里的 JSON 片段与 `docs/API_CONTRACT.md` 中记录的调用保持一致。
 
 use personal_knowledge_os_lib::domain::backup::{BackupCreateInput, ExportMarkdownInput};
+use personal_knowledge_os_lib::application::import_service::ImportNotesInput;
 use personal_knowledge_os_lib::domain::category::CreateCategoryInput;
 use personal_knowledge_os_lib::domain::note::{
     CreateNoteInput, NoteListQuery, NoteSort, NoteStatus, SaveNoteInput,
@@ -102,4 +103,18 @@ fn backup_inputs_accept_partial_payload() {
         serde_json::from_str(r#"{ "targetDir": "/tmp/export" }"#)
             .expect("导出输入应容忍缺省字段");
     assert!(!export_minimal.include_attachments);
+}
+
+#[test]
+fn import_input_accepts_paths_without_category() {
+    // 前端在「导入到 Inbox」时不发送 categoryId
+    let input: ImportNotesInput = serde_json::from_str(r#"{ "paths": ["/tmp/a.md", "/tmp/b.txt"] }"#)
+        .expect("导入输入应接受缺省分类");
+    assert_eq!(input.paths.len(), 2);
+    assert!(input.category_id.is_none());
+
+    let with_category: ImportNotesInput =
+        serde_json::from_str(r#"{ "paths": ["/tmp/a.md"], "categoryId": "cat_1" }"#)
+            .expect("带分类的导入输入应可解析");
+    assert_eq!(with_category.category_id.as_deref(), Some("cat_1"));
 }

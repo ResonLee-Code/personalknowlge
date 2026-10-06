@@ -326,3 +326,30 @@ export interface SaveNoteInput {
   categoryId?: string | null;
   tags?: string[] | null;
 }
+
+/** 外部文件导入 */
+export interface ImportNotesInput {
+  /** 绝对路径，可以是文件或目录 */
+  paths: string[];
+  /** 目标分类；为空时导入到 Inbox */
+  categoryId?: string | null;
+}
+
+export interface ImportedNote {
+  sourcePath: string;
+  noteId: string;
+  title: string;
+  filePath: string;
+}
+
+export interface SkippedFile {
+  sourcePath: string;
+  reason: string;
+}
+
+export interface ImportReport {
+  imported: ImportedNote[];
+  skipped: SkippedFile[];
+  total: number;
+  failed: number;
+}
