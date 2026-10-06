@@ -149,6 +149,34 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   expect(Math.abs(leftGap - rightGap)).toBeLessThan(8);
   await page.screenshot({ path: path.join(SHOTS, '14-settings-layout.png') });
 
+  // 15. 分屏比例拖拽：编辑栏宽度应跟随指针（回归：首次进入时比例换算错误导致跳变）
+  await page.goto('/#/notes');
+  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await expect(page.locator('.cm-content')).toBeVisible();
+  const editorPane = page.getByTestId('editor-pane');
+  const paneBefore = await editorPane.boundingBox();
+  const splitHandle = await page
+    .getByRole('separator', { name: '调整编辑 / 预览比例' })
+    .boundingBox();
+  if (!paneBefore || !splitHandle) throw new Error('未找到编辑栏或分屏把手');
+  const splitX = splitHandle.x + splitHandle.width / 2;
+  const splitY = splitHandle.y + 60;
+  await page.mouse.move(splitX, splitY);
+  await page.mouse.down();
+  await page.mouse.move(splitX + 60, splitY, { steps: 8 });
+  await page.mouse.up();
+  const paneAfter = await editorPane.boundingBox();
+  const grown = paneAfter!.width - paneBefore.width;
+  expect(grown).toBeGreaterThan(30);
+  expect(grown).toBeLessThan(90);
+
+  // 16. 切换笔记不应重置编辑模式（回归：切换后回到预览）
+  await page.getByRole('button', { name: '编辑', exact: true }).click();
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await page.getByRole('button', { name: /欢迎使用 Personal Knowledge OS/ }).first().click();
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '15-edit-mode-kept.png') });
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

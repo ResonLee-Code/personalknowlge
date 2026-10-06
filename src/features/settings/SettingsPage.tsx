@@ -122,7 +122,10 @@ export function SettingsPage() {
               ))}
             </select>
           </Row>
-          <Row label="默认视图" hint="打开笔记时的默认布局">
+          <Row
+            label="默认视图"
+            hint="打开笔记时的默认布局；在编辑器顶部切换后会被记住"
+          >
             <select
               value={settings.editorMode}
               onChange={(event) => void updateSettings({ editorMode: event.target.value })}

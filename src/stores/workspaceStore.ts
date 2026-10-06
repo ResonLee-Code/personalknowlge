@@ -201,7 +201,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   updateSettings: async (input) => {
     try {
       const settings = await workspaceService.updateSettings(input);
-      set({ settings });
+      // 成功即清除上一次的错误提示（状态栏不再残留历史警告）
+      set({ settings, error: null });
     } catch (error) {
       set({ error: errorMessage(error) });
     }
@@ -228,9 +229,9 @@ export function persistLayoutPreferences(): void {
   if (!useWorkspaceStore.getState().workspace) return;
   const ui = useUiStore.getState();
   void useWorkspaceStore.getState().updateSettings({
-    sidebarWidth: ui.sidebarWidth,
-    listWidth: ui.listWidth,
-    editorSplitRatio: ui.editorSplitRatio,
+    sidebarWidth: Math.round(ui.sidebarWidth),
+    listWidth: Math.round(ui.listWidth),
+    editorSplitRatio: Math.round(ui.editorSplitRatio * 1000) / 1000,
     editorMode: ui.editorMode,
     fontSize: ui.fontSize,
     theme: ui.theme,

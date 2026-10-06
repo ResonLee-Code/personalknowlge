@@ -1,4 +1,4 @@
-import { AlertTriangle, Database, FolderOpen, HardDrive } from 'lucide-react';
+import { AlertTriangle, Database, FolderOpen, HardDrive, X } from 'lucide-react';
 
 import { formatCount } from '@/lib/format';
 import { isTauriRuntime } from '@/services/api';
@@ -21,6 +21,11 @@ export function StatusBar() {
   const notesError = useNotesStore((state) => state.error);
   const workspaceError = useWorkspaceStore((state) => state.error);
   const error = notesError ?? workspaceError;
+
+  const dismissError = () => {
+    useNotesStore.setState({ error: null });
+    useWorkspaceStore.setState({ error: null });
+  };
 
   const state = indexStatus?.state ?? 'ready';
 
@@ -47,6 +52,14 @@ export function StatusBar() {
         <span className="flex items-center gap-1 text-red-500" title={error}>
           <AlertTriangle className="h-3 w-3" />
           {error.slice(0, 40)}
+          <button
+            type="button"
+            aria-label="忽略这条提示"
+            className="rounded p-0.5 hover:bg-red-500/10"
+            onClick={dismissError}
+          >
+            <X className="h-3 w-3" />
+          </button>
         </span>
       ) : null}
       <span className="ml-auto flex items-center gap-1">

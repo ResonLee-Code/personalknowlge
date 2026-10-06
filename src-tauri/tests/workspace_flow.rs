@@ -975,3 +975,46 @@ fn file_watcher_reports_external_changes() {
     let _ = index;
     watcher.stop();
 }
+
+#[test]
+fn layout_settings_round_trip_and_clamp() {
+    use personal_knowledge_os_lib::domain::settings::UpdateSettingsInput;
+
+    let harness = Harness::new();
+    harness.create_workspace();
+    let service = WorkspaceService::new(Arc::clone(&harness.app));
+
+    // 分栏宽度与分屏比例应原样保存（前端已取整 / 保留三位小数）
+    let updated = service
+        .update_settings(UpdateSettingsInput {
+            sidebar_width: Some(301),
+            list_width: Some(432),
+            editor_split_ratio: Some(0.512),
+            editor_mode: Some("split".into()),
+            theme: Some("dark".into()),
+            ..Default::default()
+        })
+        .expect("更新设置");
+    assert_eq!(updated.sidebar_width, 301);
+    assert_eq!(updated.list_width, 432);
+    assert!((updated.editor_split_ratio - 0.512).abs() < 1e-6);
+    assert_eq!(updated.editor_mode, "split");
+
+    // 越界的分屏比例应被夹取
+    let clamped = service
+        .update_settings(UpdateSettingsInput {
+            editor_split_ratio: Some(0.95),
+            ..Default::default()
+        })
+        .expect("越界值应被夹取");
+    assert!((clamped.editor_split_ratio - 0.7).abs() < 1e-6);
+
+    // 重新打开工作区后应恢复布局设置
+    service.close().expect("关闭工作区");
+    let reopened = WorkspaceService::new(Arc::clone(&harness.app))
+        .open(&harness.root.to_string_lossy())
+        .expect("重新打开工作区");
+    assert_eq!(reopened.settings.sidebar_width, 301);
+    assert_eq!(reopened.settings.list_width, 432);
+    assert_eq!(reopened.settings.editor_mode, "split");
+}

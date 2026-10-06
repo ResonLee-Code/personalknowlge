@@ -56,15 +56,18 @@ export const useUiStore = create<UiState>((set, get) => ({
   commandPaletteOpen: false,
   newNoteDialogOpen: false,
   setSidebarWidth: (sidebarWidth) => {
-    const clamped = Math.min(420, Math.max(180, sidebarWidth));
+    // 取整：Retina 屏上 clientX 可能是小数，后端按整数像素存储
+    const clamped = Math.round(Math.min(420, Math.max(180, sidebarWidth)));
     set({ sidebarWidth: clamped });
   },
   setListWidth: (listWidth) => {
-    const clamped = Math.min(560, Math.max(240, listWidth));
+    const clamped = Math.round(Math.min(560, Math.max(240, listWidth)));
     set({ listWidth: clamped });
   },
   setEditorSplitRatio: (editorSplitRatio) => {
-    set({ editorSplitRatio: Math.min(0.7, Math.max(0.3, editorSplitRatio)) });
+    // 保留三位小数，既够精细也避免浮点噪声
+    const clamped = Math.min(0.7, Math.max(0.3, editorSplitRatio));
+    set({ editorSplitRatio: Math.round(clamped * 1000) / 1000 });
   },
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   setEditorMode: (editorMode) => set({ editorMode }),
@@ -84,10 +87,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   applyPreferences: (preferences) => {
     const next: Partial<UiState> = {};
     if (typeof preferences.sidebarWidth === 'number') {
-      next.sidebarWidth = Math.min(420, Math.max(180, preferences.sidebarWidth));
+      next.sidebarWidth = Math.round(
+        Math.min(420, Math.max(180, preferences.sidebarWidth)),
+      );
     }
     if (typeof preferences.listWidth === 'number') {
-      next.listWidth = Math.min(560, Math.max(240, preferences.listWidth));
+      next.listWidth = Math.round(Math.min(560, Math.max(240, preferences.listWidth)));
     }
     if (
       preferences.editorMode === 'edit' ||
@@ -100,7 +105,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     const themeApplied = preferences.theme === 'light' || preferences.theme === 'dark';
     if (themeApplied) next.theme = preferences.theme as ThemeName;
     if (typeof preferences.editorSplitRatio === 'number') {
-      next.editorSplitRatio = Math.min(0.7, Math.max(0.3, preferences.editorSplitRatio));
+      const ratio = Math.min(0.7, Math.max(0.3, preferences.editorSplitRatio));
+      next.editorSplitRatio = Math.round(ratio * 1000) / 1000;
     }
     if (Object.keys(next).length === 0) return;
     set(next);

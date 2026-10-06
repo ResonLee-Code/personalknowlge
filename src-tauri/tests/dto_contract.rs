@@ -118,3 +118,23 @@ fn import_input_accepts_paths_without_category() {
             .expect("带分类的导入输入应可解析");
     assert_eq!(with_category.category_id.as_deref(), Some("cat_1"));
 }
+
+#[test]
+fn settings_input_accepts_fractional_pixel_values() {
+    // Retina 屏拖拽分栏时 clientX 可能是小数（如 320.5），后端应四舍五入而不是报错
+    let input: UpdateSettingsInput = serde_json::from_str(
+        r#"{ "sidebarWidth": 320.5, "listWidth": 400.4, "autosaveDelayMs": 1000.0, "editorSplitRatio": 0.512 }"#,
+    )
+    .expect("小数像素值应被接受");
+    assert_eq!(input.sidebar_width, Some(321));
+    assert_eq!(input.list_width, Some(400));
+    assert_eq!(input.autosave_delay_ms, Some(1000));
+    assert_eq!(input.editor_split_ratio, Some(0.512));
+
+    // 整数输入同样可用
+    let integers: UpdateSettingsInput =
+        serde_json::from_str(r#"{ "sidebarWidth": 248, "editorSplitRatio": 0 }"#)
+            .expect("整数应可用");
+    assert_eq!(integers.sidebar_width, Some(248));
+    assert_eq!(integers.editor_split_ratio, Some(0.0));
+}

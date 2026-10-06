@@ -83,6 +83,10 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 `markdown` 直接复制原文件（含 frontmatter）；`html` 输出自包含单文件（内联样式，可打印为 PDF）；
 `docx` 输出 OOXML（Word / WPS 可编辑，也可另存 PDF）；`pdf` 写出打印视图 HTML 并返回内容
 （`printReady = true`），由前端打开系统打印流程选择「存储为 PDF」。
+
+`UpdateSettingsInput` 的数值字段（`sidebarWidth`、`listWidth`、`fontSize`、
+`autosaveDelayMs`）接受整数或小数：后端会四舍五入为整数，
+便于前端直接发送拖拽产生的浮点像素值；`editorSplitRatio` 接受 0.3–0.7 的小数并夹取。
 当磁盘哈希与 `baseContentHash` 不一致时返回 `NOTE_CONFLICT`，
 `details` 内含 `{ noteId, filePath, currentHash, expectedHash, currentContent }`，供界面提示用户选择。
 

@@ -81,8 +81,8 @@ export function NoteEditorPage() {
   const loadedId = useRef<string | null>(null);
   const baseHash = useRef<string | null>(null);
   const editorWrapper = useRef<HTMLDivElement | null>(null);
-  const splitContainer = useRef<HTMLDivElement | null>(null);
   const [splitWidth, setSplitWidth] = useState(0);
+  const splitObserver = useRef<ResizeObserver | null>(null);
 
   const signature = `${content}\u0000${title}\u0000${tags.join(',')}`;
 
@@ -137,17 +137,35 @@ export function NoteEditorPage() {
     if (element instanceof HTMLElement) element.focus();
   }, []);
 
-  // 记录分屏容器宽度，用于把拖拽的像素增量换算成比例
-  useEffect(() => {
-    const element = splitContainer.current;
-    if (!element) return;
-    const update = () => setSplitWidth(element.clientWidth);
+  /**
+   * 记录分屏容器宽度，用于把拖拽的像素增量换算成比例。
+   *
+   * 用回调 ref 而不是 useEffect：首次进入笔记时内容还在加载（组件会提前返回），
+   * 容器此刻并不存在；若只依赖 editorMode，观察器就永远不会建立，
+   * 拖拽时按 1px = 1 计算比例，会瞬间贴到最小/最大（表现为「拖动不自然」）。
+   */
+  const attachSplitContainer = useCallback((node: HTMLDivElement | null) => {
+    splitObserver.current?.disconnect();
+    splitObserver.current = null;
+    if (!node) return;
+    const update = () => setSplitWidth(node.clientWidth);
     update();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(update);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [editorMode]);
+    observer.observe(node);
+    splitObserver.current = observer;
+  }, []);
+
+  useEffect(() => () => splitObserver.current?.disconnect(), []);
+
+  /** 切换视图后立即持久化，下次打开不会回到旧模式 */
+  const changeEditorMode = useCallback(
+    (mode: typeof editorMode) => {
+      setEditorMode(mode);
+      void useWorkspaceStore.getState().updateSettings({ editorMode: mode });
+    },
+    [setEditorMode],
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -228,7 +246,7 @@ export function NoteEditorPage() {
               key={option.value}
               type="button"
               title={option.label}
-              onClick={() => setEditorMode(option.value)}
+              onClick={() => changeEditorMode(option.value)}
               className={cn(
                 'flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors',
                 editorMode === option.value
@@ -376,10 +394,11 @@ export function NoteEditorPage() {
         />
       </div>
 
-      <div ref={splitContainer} className="flex min-h-0 flex-1">
+      <div ref={attachSplitContainer} className="flex min-h-0 flex-1">
         {editorMode !== 'preview' ? (
           <div
             ref={editorWrapper}
+            data-testid="editor-pane"
             className={cn(
               'min-w-0 overflow-hidden',
               editorMode === 'split' ? 'shrink-0' : 'flex-1',
@@ -405,14 +424,14 @@ export function NoteEditorPage() {
             value={editorSplitRatio}
             min={0.3}
             max={0.7}
-            scale={1 / Math.max(1, splitWidth)}
+            scale={splitWidth > 0 ? 1 / splitWidth : 0}
             onChange={setEditorSplitRatio}
             onCommit={persistLayoutPreferences}
             onReset={() => setEditorSplitRatio(LAYOUT_DEFAULTS.editorSplitRatio)}
           />
         ) : null}
         {editorMode !== 'edit' ? (
-          <div className="min-w-0 flex-1 overflow-auto">
+          <div data-testid="preview-pane" className="min-w-0 flex-1 overflow-auto">
             <MarkdownPreview content={content} />
           </div>
         ) : null}

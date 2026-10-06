@@ -54,7 +54,7 @@ pub fn build_docx(
         let mut zip = ZipWriter::new(cursor);
         let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
-        let mut write_entry = |zip: &mut ZipWriter<_>, name: &str, content: &str| -> Result<()> {
+        let write_entry = |zip: &mut ZipWriter<_>, name: &str, content: &str| -> Result<()> {
             zip.start_file(name, options)
                 .map_err(|error| AppError::new(ErrorCode::ExportFailed, error.to_string()))?;
             zip.write_all(content.as_bytes())?;
