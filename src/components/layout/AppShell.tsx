@@ -39,7 +39,10 @@ export function AppShell() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-tl-lg border-l border-t border-[var(--border-subtle)] bg-[var(--surface)]">
-          <Outlet />
+          {/* 页面根节点需要完整宽高，否则 flex 会把它压到内容宽度（右侧出现大片空白） */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <Outlet />
+          </div>
         </main>
       </div>
       <StatusBar />

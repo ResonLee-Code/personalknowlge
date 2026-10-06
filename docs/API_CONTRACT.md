@@ -70,12 +70,19 @@ export interface AppError {
 | `note_set_tags` | `{ id, tags: string[] }` | `NoteDetail` |
 | `note_count` | `{ status? }` | `number` |
 | `note_import` | `{ input: ImportNotesInput }` | `ImportReport` |
+| `note_export` | `{ input: ExportNoteInput }` | `ExportNoteResult` |
 
 `SaveNoteInput`：`{ id, content, baseContentHash?, title?, categoryId?, tags? }`。
 `ImportNotesInput`：`{ paths: string[], categoryId? }`（`paths` 可以是文件或目录，目录会递归展开）；
 `ImportReport`：`{ imported: ImportedNote[], skipped: { sourcePath, reason }[], total, failed }`。
 导入是**复制**语义，源文件不会被修改；单文件上限 5 MB、单次上限 500 个文件，
 Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
+
+`ExportNoteInput`：`{ id, format: 'markdown' | 'html' | 'docx' | 'pdf', targetPath? }`。
+`ExportNoteResult`：`{ format, path, fileName, bytes, printReady, html? }`。
+`markdown` 直接复制原文件（含 frontmatter）；`html` 输出自包含单文件（内联样式，可打印为 PDF）；
+`docx` 输出 OOXML（Word / WPS 可编辑，也可另存 PDF）；`pdf` 写出打印视图 HTML 并返回内容
+（`printReady = true`），由前端打开系统打印流程选择「存储为 PDF」。
 当磁盘哈希与 `baseContentHash` 不一致时返回 `NOTE_CONFLICT`，
 `details` 内含 `{ noteId, filePath, currentHash, expectedHash, currentContent }`，供界面提示用户选择。
 

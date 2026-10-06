@@ -8,6 +8,8 @@ import type {
   SaveNoteResult,
   ImportNotesInput,
   ImportReport,
+  ExportNoteInput,
+  ExportNoteResult,
 } from '@/types';
 
 import { call } from './api';
@@ -50,4 +52,7 @@ export const noteService = {
 
   /** 导入外部 Markdown / 文本文件或目录（复制进知识库） */
   importFiles: (input: ImportNotesInput) => call<ImportReport>('note_import', { input }),
+
+  /** 导出单篇笔记（md / html / docx / pdf 打印视图） */
+  exportNote: (input: ExportNoteInput) => call<ExportNoteResult>('note_export', { input }),
 };

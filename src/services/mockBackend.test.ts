@@ -97,4 +97,15 @@ describe('浏览器预览后端', () => {
       message: expect.stringContaining('桌面应用'),
     });
   });
+
+  it('浏览器预览模式下导出会给出明确提示', async () => {
+    await workspaceService.create('测试库', '/tmp/mock');
+    const note = await noteService.create({ title: '导出测试', initialContent: '正文' });
+    await expect(
+      noteService.exportNote({ id: note.note.id, format: 'docx', targetPath: '/tmp/a.docx' }),
+    ).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+      message: expect.stringContaining('桌面应用'),
+    });
+  });
 });

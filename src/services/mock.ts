@@ -67,6 +67,7 @@ const emptySettings: AppSettings = {
   defaultNewLocation: 'inbox',
   backupDir: null,
   editorMode: 'split',
+  editorSplitRatio: 0.5,
   sidebarWidth: 240,
   listWidth: 320,
   lastOpenedNoteId: null,
@@ -665,6 +666,12 @@ export async function handleMockInvoke(
       fail(
         'INVALID_INPUT',
         '浏览器预览模式无法读取本地文件，请在桌面应用中使用「导入外部文件」。',
+      );
+      break;
+    case 'note_export':
+      fail(
+        'INVALID_INPUT',
+        '浏览器预览模式不支持导出到本地文件，请在桌面应用中使用「导出」。',
       );
       break;
     case 'category_list':

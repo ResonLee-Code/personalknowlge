@@ -2,6 +2,7 @@
 
 pub mod backup;
 pub mod db;
+pub mod docx;
 pub mod fts;
 pub mod frontmatter;
 pub mod markdown_storage;

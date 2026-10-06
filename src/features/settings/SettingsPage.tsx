@@ -90,8 +90,8 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="h-full overflow-auto p-6">
-      <div className="mx-auto max-w-3xl space-y-5">
+    <div className="h-full w-full overflow-auto p-6">
+      <div className="mx-auto w-full max-w-6xl space-y-5">
         <header>
           <h1 className="text-lg font-semibold text-[var(--ink)]">设置</h1>
           <p className="mt-1 text-xs text-[var(--ink-subtle)]">
@@ -99,6 +99,7 @@ export function SettingsPage() {
           </p>
         </header>
 
+        <div className="grid items-start gap-5 xl:grid-cols-2">
         <Section title="编辑器" icon={Database}>
           <Row label="自动保存" hint="停止输入后自动写入文件（默认 1000ms）">
             <Switch
@@ -304,6 +305,7 @@ export function SettingsPage() {
             <Input readOnly value={workspace?.rootPath ?? ''} className="mt-1 h-8 text-xs" />
           </div>
         </Section>
+        </div>
       </div>
     </div>
   );

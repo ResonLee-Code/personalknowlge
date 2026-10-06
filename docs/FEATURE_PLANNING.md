@@ -42,7 +42,7 @@ V1.x 不引入云端与账号体系（见 [ARCHITECTURE.md](./ARCHITECTURE.md) �
 | 评论 / @提及 | 支持 | ⛔ 不适用 | 无协作场景 |
 | 多人实时协同 | CRDT / OT | ⛔ 不适用 | 明确不做（设计与文档 4.2 一致） |
 | 历史/审计/水印 | 企业能力 | ⛔ 不适用 | — |
-| 导入导出 | Word/Markdown/PDF、网页剪藏、开放 API | 🟡 Markdown 导入导出已完成 | 🔷 P1 网页剪藏（扩展）、P2 docx/PDF 与 Obsidian/Notion 目录导入 |
+| 导入导出 | Word/Markdown/PDF、网页剪藏、开放 API | ✅ Markdown/文本导入 + 单篇导出 Markdown/HTML/Word/PDF(打印视图) | 🔷 P1 网页剪藏、保留目录结构导入；P2 Obsidian/Notion 目录导入 |
 | 移动端 | App / 小程序 | ⛔ 不适用 | 保持桌面端 |
 
 一句话结论：**协作类能力（权限、评论、实时协同）不做**；
@@ -166,7 +166,13 @@ links_rebuild()                  -> LinkRebuildReport
 
 ## 4. 导入 / 导出后续
 
-本次已交付「Markdown / 文本文件与目录导入」。后续按价值排序：
+**已交付（V1.0.1）**
+
+- 导入：Markdown / 文本文件与目录（保留 frontmatter 元数据，复制语义，源文件不变）；
+- 导出：单篇笔记 → Markdown / 自包含 HTML / Word(.docx) / PDF 打印视图；
+  整库 → Markdown 目录导出与 ZIP 备份（含清单与逐文件哈希校验）。
+
+后续按价值排序：
 
 | 能力 | 说明 | 优先级 |
 | --- | --- | --- |

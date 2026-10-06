@@ -214,6 +214,8 @@ export interface AppSettings {
   defaultNewLocation: string;
   backupDir?: string | null;
   editorMode: string;
+  /** 分屏模式下编辑器占比（0.3 ~ 0.7） */
+  editorSplitRatio: number;
   sidebarWidth: number;
   listWidth: number;
   lastOpenedNoteId?: string | null;
@@ -228,6 +230,7 @@ export interface UpdateSettingsInput {
   defaultNewLocation?: string;
   backupDir?: string;
   editorMode?: string;
+  editorSplitRatio?: number;
   sidebarWidth?: number;
   listWidth?: number;
   lastOpenedNoteId?: string;
@@ -352,4 +355,24 @@ export interface ImportReport {
   skipped: SkippedFile[];
   total: number;
   failed: number;
+}
+
+/** 笔记导出 */
+export type ExportFormat = 'markdown' | 'html' | 'docx' | 'pdf';
+
+export interface ExportNoteInput {
+  id: string;
+  format: ExportFormat;
+  /** 目标文件路径；PDF 打印视图可省略 */
+  targetPath?: string | null;
+}
+
+export interface ExportNoteResult {
+  format: ExportFormat;
+  path: string;
+  fileName: string;
+  bytes: number;
+  /** PDF：需要前端打开打印视图 */
+  printReady: boolean;
+  html?: string | null;
 }

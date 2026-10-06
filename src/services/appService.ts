@@ -1,6 +1,6 @@
 import type { AppInfo } from '@/types';
 
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openPath as openWithSystem } from '@tauri-apps/plugin-opener';
 
 import { call } from './api';
@@ -35,4 +35,17 @@ export async function pickMarkdownFiles(title = '选择要导入的文件'): Pro
   });
   if (!selected) return [];
   return Array.isArray(selected) ? selected : [selected];
+}
+
+/** 选择导出目标文件（含扩展名过滤）。 */
+export async function pickSavePath(
+  defaultName: string,
+  extensions: string[],
+  label: string,
+): Promise<string | null> {
+  const selected = await saveDialog({
+    defaultPath: defaultName,
+    filters: [{ name: label, extensions }],
+  });
+  return selected ?? null;
 }

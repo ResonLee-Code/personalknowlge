@@ -48,8 +48,8 @@ export function DashboardPage() {
   }, [workspace?.id]);
 
   return (
-    <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-5xl space-y-6 p-6">
+    <div className="h-full w-full overflow-auto">
+      <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
         <header className="space-y-3">
           <h1 className="text-xl font-semibold text-[var(--ink)]">{workspace?.name ?? '知识库'}</h1>
           <p className="text-xs text-[var(--ink-subtle)]">{workspace?.rootPath}</p>
@@ -147,7 +147,7 @@ export function DashboardPage() {
           )}
         </section>
 
-        <section className="grid gap-3 lg:grid-cols-2">
+        <section className="grid items-start gap-3 lg:grid-cols-[2fr_1fr]">
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4">
             <h2 className="mb-2 text-sm font-semibold text-[var(--ink)]">常用分类</h2>
             {categories.length === 0 ? (

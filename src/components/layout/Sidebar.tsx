@@ -9,7 +9,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useTagsStore } from '@/stores/tagsStore';
 import { useUiStore } from '@/stores/uiStore';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { LAYOUT_DEFAULTS } from '@/stores/uiStore';
+import { persistLayoutPreferences, useWorkspaceStore } from '@/stores/workspaceStore';
 
 import { NavigationMenu } from './NavigationMenu';
 import { ResizeHandle } from './ResizeHandle';
@@ -66,7 +67,7 @@ export function Sidebar() {
 
   return (
     <div className="flex shrink-0" style={{ width }}>
-      <aside className="flex min-w-0 flex-1 flex-col">
+      <aside data-testid="sidebar" className="flex min-w-0 flex-1 flex-col">
         <div className="px-2 pt-2">
           <WorkspaceSwitcher />
         </div>
@@ -97,7 +98,16 @@ export function Sidebar() {
           </Button>
         </div>
       </aside>
-      <ResizeHandle side="left" label="调整侧边栏宽度" onResize={setWidth} />
+      <ResizeHandle
+        side="left"
+        label="调整侧边栏宽度"
+        value={width}
+        min={180}
+        max={420}
+        onChange={setWidth}
+        onCommit={persistLayoutPreferences}
+        onReset={() => setWidth(LAYOUT_DEFAULTS.sidebarWidth)}
+      />
     </div>
   );
 }

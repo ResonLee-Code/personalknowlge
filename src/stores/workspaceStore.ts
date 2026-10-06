@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { errorMessage } from '@/lib/format';
 import { workspaceService } from '@/services/workspaceService';
 import { searchService } from '@/services/searchService';
+import { useUiStore } from '@/stores/uiStore';
 import type {
   AppSettings,
   IndexStatus,
@@ -66,6 +67,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           settings: current.settings,
           indexStatus: current.indexStatus,
         });
+        useUiStore.getState().applyPreferences(current.settings);
       }
       await get().refreshList();
     } catch (error) {
@@ -95,6 +97,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         indexStatus: result.indexStatus,
         initializedWarnings: result.warnings,
       });
+      useUiStore.getState().applyPreferences(result.settings);
       await get().refreshList();
       return true;
     } catch (error) {
@@ -116,6 +119,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         indexStatus: result.indexStatus,
         initializedWarnings: result.warnings,
       });
+      useUiStore.getState().applyPreferences(result.settings);
       await get().refreshList();
       return true;
     } catch (error) {
@@ -137,6 +141,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         indexStatus: result.indexStatus,
         initializedWarnings: result.warnings,
       });
+      useUiStore.getState().applyPreferences(result.settings);
       await get().refreshList();
       return true;
     } catch (error) {
@@ -214,3 +219,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 }));
+
+/**
+ * 把界面布局偏好（分栏宽度、分屏比例、主题、字号）写回工作区设置，
+ * 下次打开同一个知识库时恢复。拖动过程中不调用，只在拖动结束/键盘调整后调用。
+ */
+export function persistLayoutPreferences(): void {
+  if (!useWorkspaceStore.getState().workspace) return;
+  const ui = useUiStore.getState();
+  void useWorkspaceStore.getState().updateSettings({
+    sidebarWidth: ui.sidebarWidth,
+    listWidth: ui.listWidth,
+    editorSplitRatio: ui.editorSplitRatio,
+    editorMode: ui.editorMode,
+    fontSize: ui.fontSize,
+    theme: ui.theme,
+  });
+}

@@ -5,6 +5,7 @@ import {
   FileText,
   FolderInput,
   FolderOpen,
+  Download,
   MoreHorizontal,
   Pencil,
   Save,
@@ -21,8 +22,10 @@ import { ConflictDialog } from '@/components/editor/ConflictDialog';
 import { MarkdownEditor } from '@/components/editor/MarkdownEditor';
 import { MarkdownPreview } from '@/components/editor/MarkdownPreview';
 import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
+import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
 import { TagEditor } from '@/components/editor/TagEditor';
+import { ResizeHandle } from '@/components/layout/ResizeHandle';
 import { MoveNoteDialog } from '@/components/notes/MoveNoteDialog';
 import { Button } from '@/components/ui/button';
 import {
@@ -41,8 +44,8 @@ import { cn } from '@/lib/utils';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { isTauriRuntime } from '@/services/api';
 import { useNotesStore } from '@/stores/notesStore';
-import { useUiStore } from '@/stores/uiStore';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { LAYOUT_DEFAULTS, useUiStore } from '@/stores/uiStore';
+import { persistLayoutPreferences, useWorkspaceStore } from '@/stores/workspaceStore';
 
 /** 笔记编辑器（设计文档 16.5）。 */
 export function NoteEditorPage() {
@@ -65,16 +68,21 @@ export function NoteEditorPage() {
   const editorMode = useUiStore((state) => state.editorMode);
   const setEditorMode = useUiStore((state) => state.setEditorMode);
   const fontSize = useUiStore((state) => state.fontSize);
+  const editorSplitRatio = useUiStore((state) => state.editorSplitRatio);
+  const setEditorSplitRatio = useUiStore((state) => state.setEditorSplitRatio);
 
   const [content, setContent] = useState('');
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [moveOpen, setMoveOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [forceOverwrite, setForceOverwrite] = useState(false);
   const loadedId = useRef<string | null>(null);
   const baseHash = useRef<string | null>(null);
   const editorWrapper = useRef<HTMLDivElement | null>(null);
+  const splitContainer = useRef<HTMLDivElement | null>(null);
+  const [splitWidth, setSplitWidth] = useState(0);
 
   const signature = `${content}\u0000${title}\u0000${tags.join(',')}`;
 
@@ -128,6 +136,18 @@ export function NoteEditorPage() {
     const element = editorWrapper.current?.querySelector('.cm-content');
     if (element instanceof HTMLElement) element.focus();
   }, []);
+
+  // 记录分屏容器宽度，用于把拖拽的像素增量换算成比例
+  useEffect(() => {
+    const element = splitContainer.current;
+    if (!element) return;
+    const update = () => setSplitWidth(element.clientWidth);
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [editorMode]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -273,6 +293,10 @@ export function NoteEditorPage() {
               <DropdownMenuItem onSelect={() => void showPath()}>复制相对路径</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void reveal()}>在文件夹中显示</DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setExportOpen(true)}>
+                <Download className="h-3.5 w-3.5" /> 导出（Markdown / HTML / Word / PDF）
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               {note.status === 'deleted' ? (
                 <>
                   <DropdownMenuItem
@@ -352,14 +376,15 @@ export function NoteEditorPage() {
         />
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      <div ref={splitContainer} className="flex min-h-0 flex-1">
         {editorMode !== 'preview' ? (
           <div
             ref={editorWrapper}
             className={cn(
-              'min-w-0 flex-1 overflow-hidden',
-              editorMode === 'split' && 'border-r border-[var(--border-subtle)]',
+              'min-w-0 overflow-hidden',
+              editorMode === 'split' ? 'shrink-0' : 'flex-1',
             )}
+            style={editorMode === 'split' ? { width: `${editorSplitRatio * 100}%` } : undefined}
           >
             <MarkdownEditor
               value={content}
@@ -372,6 +397,19 @@ export function NoteEditorPage() {
               }}
             />
           </div>
+        ) : null}
+        {editorMode === 'split' ? (
+          <ResizeHandle
+            side="left"
+            label="调整编辑 / 预览比例"
+            value={editorSplitRatio}
+            min={0.3}
+            max={0.7}
+            scale={1 / Math.max(1, splitWidth)}
+            onChange={setEditorSplitRatio}
+            onCommit={persistLayoutPreferences}
+            onReset={() => setEditorSplitRatio(LAYOUT_DEFAULTS.editorSplitRatio)}
+          />
         ) : null}
         {editorMode !== 'edit' ? (
           <div className="min-w-0 flex-1 overflow-auto">
@@ -393,6 +431,13 @@ export function NoteEditorPage() {
           noteId={note.id}
           initialTitle={note.title}
           onClose={() => setRenameOpen(false)}
+        />
+      ) : null}
+      {exportOpen ? (
+        <ExportNoteDialog
+          noteId={note.id}
+          title={note.title}
+          onClose={() => setExportOpen(false)}
         />
       ) : null}
     </div>

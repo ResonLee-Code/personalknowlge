@@ -36,8 +36,8 @@ export function CategoriesPage() {
   walk(tree);
 
   return (
-    <div className="h-full overflow-auto p-6">
-      <div className="mx-auto max-w-3xl space-y-4">
+    <div className="h-full w-full overflow-auto p-6">
+      <div className="mx-auto w-full max-w-5xl space-y-4">
         <header className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold text-[var(--ink)]">分类管理</h1>

@@ -501,6 +501,9 @@ pub fn apply_settings(settings: &mut AppSettings, input: &UpdateSettingsInput) {
     if let Some(value) = &input.editor_mode {
         settings.editor_mode = value.clone();
     }
+    if let Some(value) = input.editor_split_ratio {
+        settings.editor_split_ratio = value.clamp(0.3, 0.7);
+    }
     if let Some(value) = input.sidebar_width {
         settings.sidebar_width = value.clamp(160, 480);
     }

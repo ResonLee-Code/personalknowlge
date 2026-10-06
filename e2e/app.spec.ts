@@ -94,6 +94,20 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   // 11. 列表宽度改为拖拽把手，底部不再出现无法解释的滑块
   await expect(page.locator('input[type="range"]')).toHaveCount(0);
 
+  // 分栏可拖拽：向右拖动列表把手应加宽列表
+  const listPanel = page.getByTestId('note-list-panel');
+  const beforeBox = await listPanel.boundingBox();
+  const handleBox = await page
+    .getByRole('separator', { name: '调整笔记列表宽度' })
+    .boundingBox();
+  if (!beforeBox || !handleBox) throw new Error('未找到列表或分栏把手');
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + 80, handleBox.y + handleBox.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const afterBox = await listPanel.boundingBox();
+  expect(afterBox!.width).toBeGreaterThan(beforeBox.width + 40);
+
   // 按分类筛选时才出现「清除筛选」入口
   await page.getByRole('button', { name: /^技术/ }).click();
   await expect(page.getByRole('button', { name: /清除筛选，查看全部笔记/ })).toBeVisible();
@@ -110,6 +124,30 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByRole('button', { name: '选择文件夹', exact: true })).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '12-import-dialog.png') });
   await page.getByRole('button', { name: '取消' }).click();
+
+  // 13. 笔记导出入口（四种格式）
+  await page.goto('/#/notes');
+  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await page.getByRole('button', { name: '更多操作' }).click();
+  await page.getByRole('menuitem', { name: /导出（Markdown/ }).click();
+  await expect(page.getByText('Markdown (.md)')).toBeVisible();
+  await expect(page.getByText('Word (.docx)')).toBeVisible();
+  await expect(page.getByText('PDF（打印视图）')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '13-export-dialog.png') });
+  await page.getByRole('button', { name: '完成' }).click();
+
+  // 14. 设置页布局：内容占满并居中（回归：右侧曾出现大片空白）
+  await page.goto('/#/settings');
+  await expect(page.getByRole('heading', { name: '设置', level: 1 })).toBeVisible();
+  const mainBox = await page.locator('main').boundingBox();
+  const contentBox = await page.locator('main div.mx-auto').first().boundingBox();
+  if (!mainBox || !contentBox) throw new Error('未找到主区域或内容容器');
+  expect(contentBox.width).toBeGreaterThan(mainBox.width * 0.5);
+  const leftGap = contentBox.x - mainBox.x;
+  const rightGap = mainBox.x + mainBox.width - (contentBox.x + contentBox.width);
+  expect(Math.abs(leftGap - rightGap)).toBeLessThan(8);
+  await page.screenshot({ path: path.join(SHOTS, '14-settings-layout.png') });
 
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();

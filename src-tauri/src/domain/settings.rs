@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// 工作区级设置，保存在 `settings` 表。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub autosave_enabled: bool,
     pub autosave_delay_ms: u64,
@@ -15,6 +15,8 @@ pub struct AppSettings {
     pub backup_dir: Option<String>,
     /// 编辑器默认模式：`edit` | `split` | `preview`
     pub editor_mode: String,
+    /// 分屏模式下编辑器占比（0.3 ~ 0.7）
+    pub editor_split_ratio: f32,
     pub sidebar_width: u32,
     pub list_width: u32,
     /// 关闭前最后打开的笔记，便于恢复现场
@@ -33,6 +35,7 @@ impl Default for AppSettings {
             default_new_location: "inbox".to_string(),
             backup_dir: None,
             editor_mode: "split".to_string(),
+            editor_split_ratio: 0.5,
             sidebar_width: 240,
             list_width: 320,
             last_opened_note_id: None,
@@ -82,6 +85,8 @@ pub struct UpdateSettingsInput {
     pub default_new_location: Option<String>,
     pub backup_dir: Option<String>,
     pub editor_mode: Option<String>,
+    /// 分屏模式下编辑器占比（0.3 ~ 0.7）
+    pub editor_split_ratio: Option<f32>,
     pub sidebar_width: Option<u32>,
     pub list_width: Option<u32>,
     pub last_opened_note_id: Option<String>,

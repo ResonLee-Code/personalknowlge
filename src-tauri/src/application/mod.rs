@@ -5,6 +5,7 @@
 pub mod backup_service;
 pub mod category_service;
 pub mod context;
+pub mod export_service;
 pub mod index_service;
 pub mod import_service;
 pub mod lookup;
@@ -17,6 +18,7 @@ pub mod workspace_service;
 pub use backup_service::BackupService;
 pub use category_service::CategoryService;
 pub use context::WorkspaceContext;
+pub use export_service::{ExportFormat, ExportNoteInput, ExportNoteResult, ExportService};
 pub use index_service::{IndexService, ScanReport};
 pub use import_service::{ImportNotesInput, ImportReport, ImportService};
 pub use lookup::CategoryLookup;

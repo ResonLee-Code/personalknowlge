@@ -231,15 +231,24 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
         paths,
         categoryId: categoryId || null,
       });
-      setReport(result);
       await refreshNotes();
       await refreshStats();
       if (result.imported.length > 0) {
-        toast.success(
-          `已导入 ${result.imported.length} 篇笔记${result.failed > 0 ? `，${result.failed} 个文件被跳过` : ''}`,
-        );
+        // 导入成功后直接进入第一篇笔记，避免停在结果页
+        const first = result.imported[0];
+        onClose();
+        if (result.failed > 0) {
+          toast.warning(
+            `已导入 ${result.imported.length} 篇，${result.failed} 个文件被跳过（体积超限或路径不可读）`,
+          );
+        } else {
+          toast.success(`已导入 ${result.imported.length} 篇笔记`);
+        }
+        if (first) navigate(`/notes/${first.noteId}`);
       } else {
-        toast.error('没有导入任何文件，请查看跳过原因');
+        // 全部失败时保留结果面板，列出原因供用户修正
+        setReport(result);
+        toast.error('没有导入任何文件，请查看下方跳过原因');
       }
     } catch (error) {
       toast.error(errorMessage(error));

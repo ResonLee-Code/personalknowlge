@@ -42,8 +42,8 @@ export function TagsPage() {
   };
 
   return (
-    <div className="h-full overflow-auto p-6">
-      <div className="mx-auto max-w-3xl space-y-4">
+    <div className="h-full w-full overflow-auto p-6">
+      <div className="mx-auto w-full max-w-5xl space-y-4">
         <header>
           <h1 className="text-lg font-semibold text-[var(--ink)]">标签</h1>
           <p className="mt-1 text-xs text-[var(--ink-subtle)]">

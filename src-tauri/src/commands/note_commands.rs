@@ -4,6 +4,7 @@ use tauri::State;
 
 use crate::application::note_service::NoteService;
 use crate::application::import_service::{ImportNotesInput, ImportReport, ImportService};
+use crate::application::export_service::{ExportNoteInput, ExportNoteResult, ExportService};
 use crate::core::error::Result;
 use crate::domain::note::{
     CreateNoteInput, NoteDetail, NoteListQuery, NoteListResult, NoteStatus, NoteSummary,
@@ -167,4 +168,14 @@ pub async fn note_import(
 ) -> Result<ImportReport> {
     let context = state.inner.context()?;
     run(move || ImportService::new(context).import(input)).await
+}
+
+/// 导出单篇笔记（Markdown / HTML / Word(docx) / PDF 打印视图）。
+#[tauri::command]
+pub async fn note_export(
+    state: State<'_, AppState>,
+    input: ExportNoteInput,
+) -> Result<ExportNoteResult> {
+    let context = state.inner.context()?;
+    run(move || ExportService::new(context).export_note(input)).await
 }

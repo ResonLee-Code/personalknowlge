@@ -98,7 +98,11 @@ export function NoteListPanel() {
   })();
 
   return (
-    <div className="flex min-w-0 shrink-0 flex-col border-r border-[var(--border-subtle)]" style={{ width }}>
+    <div
+      data-testid="note-list-panel"
+      className="flex min-w-0 shrink-0 flex-col border-r border-[var(--border-subtle)]"
+      style={{ width }}
+    >
       <div className="space-y-2 border-b border-[var(--border-subtle)] p-2.5">
         <div className="flex items-center justify-between">
           <h1 className="text-sm font-semibold text-[var(--ink)]">{title}</h1>
