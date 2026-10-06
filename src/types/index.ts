@@ -424,6 +424,35 @@ export interface LinkRebuildReport {
   durationMs: number;
 }
 
+/** 类型化关系（N2） */
+export interface OutgoingRelation {
+  id: string;
+  relationType: string;
+  targetNoteId: string;
+  targetTitle: string;
+  note?: string | null;
+}
+
+export interface IncomingRelation {
+  id: string;
+  relationType: string;
+  sourceNoteId: string;
+  sourceTitle: string;
+  note?: string | null;
+}
+
+export interface RelationView {
+  outgoing: OutgoingRelation[];
+  incoming: IncomingRelation[];
+}
+
+export interface AddRelationInput {
+  sourceId: string;
+  targetId: string;
+  relationType: string;
+  note?: string | null;
+}
+
 /** 更新来源与时效（V1.1.2 N1） */
 export interface SetSourceInput {
   id: string;

@@ -323,6 +323,7 @@ impl ImportService {
             }
         }
         // 导入的笔记同样参与双向链接（也会把指向它的未解析链接绑定过来）
+        let _ = super::relation_service::RelationService::new(Arc::clone(&self.ctx)).rebuild();
         if let Err(error) = super::link_service::LinkService::new(Arc::clone(&self.ctx))
             .on_note_available(&note, &body)
         {

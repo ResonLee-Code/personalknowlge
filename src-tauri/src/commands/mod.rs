@@ -10,6 +10,7 @@ pub mod category_commands;
 pub mod graph_commands;
 pub mod link_commands;
 pub mod note_commands;
+pub mod relation_commands;
 pub mod search_commands;
 pub mod tag_commands;
 pub mod template_commands;

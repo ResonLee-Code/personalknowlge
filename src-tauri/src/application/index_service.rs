@@ -27,6 +27,7 @@ use crate::repositories::{
 
 use super::context::WorkspaceContext;
 use super::link_service::LinkService;
+use super::relation_service::RelationService;
 
 /// 扫描结果。
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
@@ -515,6 +516,9 @@ impl IndexService {
             let _ = super::tag_service::TagService::new(Arc::clone(&self.ctx))
                 .ensure_tag(&id, tag);
         }
+        if let Err(error) = RelationService::new(Arc::clone(&self.ctx)).refresh_note(&note) {
+            tracing::debug!(target: "relations", "采纳文件时刷新关系失败：{}", error.message);
+        }
 
         let category_path = category_id
             .as_ref()
@@ -629,6 +633,9 @@ impl IndexService {
             None => String::new(),
         };
         let tags = self.tag_names(&note.id).unwrap_or_default();
+        if let Err(error) = RelationService::new(Arc::clone(&self.ctx)).refresh_note(note) {
+            tracing::warn!(target: "relations", "同步外部修改的关系失败：{}", error.message);
+        }
         if let Err(error) = self.index_document(&note.id, &title, &stored.body, &tags, &category_path)
         {
             report

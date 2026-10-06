@@ -23,6 +23,7 @@ use crate::repositories::{NoteRepository, SqliteNoteRepository, trash_path_of};
 use super::context::WorkspaceContext;
 use super::index_service::IndexService;
 use super::link_service::LinkService;
+use super::relation_service::RelationService;
 use super::tag_service::TagService;
 
 pub struct NoteService {
@@ -246,11 +247,11 @@ impl NoteService {
             tags: tags.clone(),
             created_at: Some(created_at),
             updated_at: Some(now.clone()),
-            source_type: None,
-            source_ref: None,
-            source_reliability: None,
-            valid_until: None,
-            relations: Vec::new(),
+            source_type: existing.frontmatter.source_type.clone(),
+            source_ref: existing.frontmatter.source_ref.clone(),
+            source_reliability: existing.frontmatter.source_reliability,
+            valid_until: existing.frontmatter.valid_until.clone(),
+            relations: existing.frontmatter.relations.clone(),
             extra: existing.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &input.content);
@@ -353,11 +354,11 @@ impl NoteService {
                 .clone()
                 .or_else(|| Some(note.created_at.clone())),
             updated_at: Some(now.clone()),
-            source_type: None,
-            source_ref: None,
-            source_reliability: None,
-            valid_until: None,
-            relations: Vec::new(),
+            source_type: stored.frontmatter.source_type.clone(),
+            source_ref: stored.frontmatter.source_ref.clone(),
+            source_reliability: stored.frontmatter.source_reliability,
+            valid_until: stored.frontmatter.valid_until.clone(),
+            relations: stored.frontmatter.relations.clone(),
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -378,6 +379,11 @@ impl NoteService {
             self.refresh_outgoing_links(&updated, &stored.body);
         }
         // 指向旧标题的链接自动重连（含改写来源笔记正文）
+        if let Err(error) = RelationService::new(Arc::clone(&self.ctx))
+            .on_note_renamed(&note.id, &note.title, &title)
+        {
+            tracing::warn!(target: "relations", "重命名时更新关系失败：{}", error.message);
+        }
         if let Err(error) = self.links().on_note_renamed(&note.id, &note.title, &title) {
             tracing::warn!(target: "links", "重连双向链接失败：{}", error.message);
         }
@@ -429,11 +435,11 @@ impl NoteService {
                 .clone()
                 .or_else(|| Some(note.created_at.clone())),
             updated_at: Some(now.clone()),
-            source_type: None,
-            source_ref: None,
-            source_reliability: None,
-            valid_until: None,
-            relations: Vec::new(),
+            source_type: stored.frontmatter.source_type.clone(),
+            source_ref: stored.frontmatter.source_ref.clone(),
+            source_reliability: stored.frontmatter.source_reliability,
+            valid_until: stored.frontmatter.valid_until.clone(),
+            relations: stored.frontmatter.relations.clone(),
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -482,6 +488,7 @@ impl NoteService {
         if note.status == NoteStatus::Deleted {
             return Ok(());
         }
+        let _ = RelationService::new(Arc::clone(&self.ctx)).on_note_unavailable(&note.id);
         let trash_path = if self.ctx.storage.exists(&note.file_path) {
             Some(self.ctx.storage.move_to_trash(&note.file_path)?)
         } else {
@@ -645,9 +652,9 @@ impl NoteService {
             updated_at: Some(now_iso()),
             source_type: stored.frontmatter.source_type.clone(),
             source_ref: stored.frontmatter.source_ref.clone(),
-            source_reliability: None,
-            valid_until: None,
-            relations: Vec::new(),
+            source_reliability: stored.frontmatter.source_reliability,
+            valid_until: stored.frontmatter.valid_until.clone(),
+            relations: stored.frontmatter.relations.clone(),
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);

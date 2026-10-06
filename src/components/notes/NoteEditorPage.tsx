@@ -8,6 +8,7 @@ import {
   FileText,
   FolderInput,
   FolderOpen,
+  GitBranch,
   Link2,
   ListTree,
   MoreHorizontal,
@@ -28,6 +29,7 @@ import { ConflictDialog } from '@/components/editor/ConflictDialog';
 import { MarkdownEditor } from '@/components/editor/MarkdownEditor';
 import { MarkdownPreview } from '@/components/editor/MarkdownPreview';
 import { OutlinePanel } from '@/components/editor/OutlinePanel';
+import { RelationsPanel } from '@/components/editor/RelationsPanel';
 import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { SourceDialog } from '@/components/editor/SourceDialog';
@@ -57,16 +59,18 @@ import { ROUTES } from '@/lib/constants';
 import { errorMessage, formatDateTime, formatRelative } from '@/lib/format';
 import { freshnessState, reliabilityStars, sourceTypeLabel } from '@/lib/freshness';
 import { parseOutline } from '@/lib/markdown';
+import { relationHighlights } from '@/lib/relations';
 import { cn } from '@/lib/utils';
 import { attachmentService } from '@/services/attachmentService';
 import { linkService } from '@/services/linkService';
+import { relationService } from '@/services/relationService';
 import { noteService } from '@/services/noteService';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { isTauriRuntime } from '@/services/api';
 import { useNotesStore } from '@/stores/notesStore';
 import { LAYOUT_DEFAULTS, useUiStore } from '@/stores/uiStore';
 import { persistLayoutPreferences, useWorkspaceStore } from '@/stores/workspaceStore';
-import type { LinkCounts } from '@/types';
+import type { LinkCounts, RelationView } from '@/types';
 import { EditorView } from '@codemirror/view';
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 
@@ -101,6 +105,7 @@ export function NoteEditorPage() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
+  const [relations, setRelations] = useState<RelationView | null>(null);
   const [forceOverwrite, setForceOverwrite] = useState(false);
   const loadedId = useRef<string | null>(null);
   const baseHash = useRef<string | null>(null);
@@ -259,6 +264,24 @@ export function NoteEditorPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail?.note.id]);
+
+  // 关系（N2）：随笔记切换与保存刷新，用于元信息栏角标
+  useEffect(() => {
+    const noteId = detail?.note.id;
+    if (!noteId) return;
+    let cancelled = false;
+    relationService
+      .list(noteId)
+      .then((next) => {
+        if (!cancelled) setRelations(next);
+      })
+      .catch(() => {
+        if (!cancelled) setRelations(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.note.id, linkRevision]);
 
   // 引用计数（元信息栏）：随笔记切换与保存刷新
   useEffect(() => {
@@ -571,6 +594,38 @@ export function NoteEditorPage() {
               ) : null}
             </button>
           ) : null}
+          {relations
+            ? (() => {
+                const highlights = relationHighlights(
+                  relations.outgoing,
+                  relations.incoming,
+                );
+                return (
+                  <>
+                    {highlights.supersededBy ? (
+                      <span className="flex items-center gap-1 text-amber-600">
+                        <GitBranch className="h-3 w-3" />
+                        已被「
+                        {relations.incoming.find((item) => item.id === highlights.supersededBy?.id)
+                          ?.sourceTitle ?? '其它笔记'}
+                        」取代
+                      </span>
+                    ) : null}
+                    {highlights.supersedes ? (
+                      <span className="text-amber-600">
+                        已取代「
+                        {relations.outgoing.find((item) => item.id === highlights.supersedes?.id)
+                          ?.targetTitle ?? '其它笔记'}
+                        」
+                      </span>
+                    ) : null}
+                    {highlights.conflictCount > 0 ? (
+                      <span className="text-red-500">{highlights.conflictCount} 处冲突</span>
+                    ) : null}
+                  </>
+                );
+              })()
+            : null}
           {freshnessState(note.validUntil) === 'expired' ? (
             <span className="flex items-center gap-1 text-amber-600" title={`有效期至 ${note.validUntil}`}>
               <AlertTriangle className="h-3 w-3" />
@@ -656,6 +711,12 @@ export function NoteEditorPage() {
           />
         ) : null}
       </div>
+
+      <RelationsPanel
+        noteId={note.id}
+        refreshKey={linkRevision}
+        onChanged={bumpLinkRevision}
+      />
 
       <BacklinkPanel noteId={note.id} refreshKey={linkRevision} />
 

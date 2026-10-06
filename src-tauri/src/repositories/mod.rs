@@ -6,6 +6,7 @@
 pub mod category_repository;
 pub mod link_repository;
 pub mod note_repository;
+pub mod relation_repository;
 pub mod settings_repository;
 pub mod tag_repository;
 pub mod workspace_repository;
@@ -15,6 +16,7 @@ pub use link_repository::{
     LinkRepository, NoteLinkRow, NoteTitleRow, SqliteLinkRepository,
 };
 pub use note_repository::{trash_path_of, NoteRepository, SqliteNoteRepository};
+pub use relation_repository::{RelationRepository, RelationRow, SqliteRelationRepository};
 pub use settings_repository::{SettingsRepository, SqliteSettingsRepository};
 pub use tag_repository::{SqliteTagRepository, TagRepository};
 pub use workspace_repository::{SqliteWorkspaceRepository, WorkspaceRepository};

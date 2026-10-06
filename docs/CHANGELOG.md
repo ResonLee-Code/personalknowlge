@@ -137,7 +137,48 @@
 | `graph_get` 分类过滤 / 2 跳聚焦 | 22.0 / 22.9 ms | 22.8 / 83.6 ms |
 | `database.sqlite` / `.knowledge` | 6.7 / 10.8 MB | 6.7 / 11.6 MB |
 
-### N1 来源与时效（V1.1.2 开发中）
+### N2 类型化关系（已完成）
+
+- `note_relations` 不再是预留：新增 `RelationService` 与 4 个命令
+  `relations_list` / `relations_add` / `relations_remove` / `relations_rebuild`；
+- **frontmatter 是唯一事实来源**：关系写在来源笔记的
+  `relations: [{ type, target, note }]`，数据库表是派生数据，可整表重建；
+- 联动：重命名目标笔记会**改写来源笔记 frontmatter 里的目标标题**；
+  目标删除/移入回收站会解绑派生关系（声明保留，重建可恢复）；
+  保存、外部编辑、导入、采纳外部文件都会刷新派生关系；
+- 支持的关系类型（与 V2.0 文档 §13 对齐）：RELATED_TO / DERIVED_FROM / SUPERSEDES /
+  CONTRADICTS / CONFIRMS / DEPENDS_ON / PART_OF / EXAMPLE_OF / REFERENCES；
+- 界面：编辑器底部「关系」面板（默认折叠）——出边可增删、入边只读、
+  「添加关系」对话框（搜标题选目标 + 选类型 + 填说明）；
+  元信息栏新增角标：**已被「X」取代 / 已取代「Y」/ N 处冲突**；
+- 测试：Rust `relation_flow` 3 个集成测试（增删查 + 重命名改写 + 删除解绑 + 重建），
+  前端 `relations` 5 个单测 + `RelationsPanel` 3 个组件测试。
+
+### 第一代遗留项：回收站批量清理（完成）
+
+- 回收站列表按时间分组（今天 / 昨天 / 近 7 天 / 更早），便于按批次处理；
+- 底部新增「清空回收站（N）」入口，二次确认后逐篇永久删除并刷新列表；
+- 新增 `timeGroup` 工具 + 4 个单测。
+
+### 第二代接口预留（仅骨架，不接模型）
+
+- 新增 `src-tauri/src/application/ai/`：`DecisionModel` / `Retriever` / `GenerativeModel`
+  三个 trait 与 `DecisionKind` / `DecisionChoice` / `RetrievedChunk` 等 DTO，
+  **签名先冻结**，未来接 Jev / 本地模型时只实现 trait，不改上层业务；
+- 唯一实现是离线兜底 `RuleDecisionProvider`（无网络、无新依赖，3 个单测）；
+- **不注册任何命令、不接入界面、不引入依赖** —— 本版只做形状与边界；
+- 文档：`docs/AI_ARCHITECTURE_PLAN.md` 补充接口清单，`docs/NEXT_GEN_ANALYSIS.md` 记录选型结论。
+
+### 两个缺陷修复（本轮发现）
+
+1. **元数据被清空**：`save` / `rename` / `move_to_category` / `duplicate` / `set_tags`
+   重建 frontmatter 时把来源与关系字段写成空值，导致每次自动保存都会丢掉来源信息；
+   已改为保留原值，并补 `note_assets_flow` 保真回归测试；
+2. **关系面板死循环**：面板加载完成后回调父组件 → 父组件递增 refreshKey → 面板再次加载，
+   页面卡死（E2E 在「编辑器输入」步骤超时暴露）；已移除加载完成的回调，
+   并给编辑区加 `min-h-[180px]` 防止被底部面板挤到无法输入。
+
+### N1 来源与时效（已完成）
 
 - 迁移 `004_note_assets.sql`（`SCHEMA_VERSION = 4`）：`notes` 新增 `source_type` / `source_ref` /
   `source_reliability` / `valid_until` 四列；新建 `note_relations` 表（类型化关系，数据模型预留）；

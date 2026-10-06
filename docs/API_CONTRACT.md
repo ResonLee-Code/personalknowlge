@@ -215,7 +215,23 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - `degree` 是**本次结果内**的邻居数（同一对笔记多条链接算一个邻居），截断后重新计算；
 - 图谱是派生数据：不落库，`links_rebuild` 可从 Markdown 整体修复。
 
-## 14. 前端服务层
+## 14. 类型化关系（N2）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `relations_list` | `{ noteId }` | `{ outgoing: OutgoingRelation[], incoming: IncomingRelation[] }` |
+| `relations_add` | `{ input: { sourceId, targetId, relationType, note? } }` | `RelationView` |
+| `relations_remove` | `{ id }` | `RelationView`（来源笔记的视图） |
+| `relations_rebuild` | — | `usize`（重建的关系统数） |
+
+- 关系类型：`RELATED_TO` / `DERIVED_FROM` / `SUPERSEDES` / `CONTRADICTS` / `CONFIRMS` /
+  `DEPENDS_ON` / `PART_OF` / `EXAMPLE_OF` / `REFERENCES`（大小写、空格、短横线都会归一）；
+- 声明写在来源笔记 frontmatter 的 `relations:`；`note_relations` 表是**派生数据**，
+  `relations_rebuild` 可从正文整表恢复；
+- 重命名目标笔记会改写来源 frontmatter 里的 `target`；目标被删除时派生关系解绑
+  （声明保留，目标恢复后重建即可复原）。
+
+## 15. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 

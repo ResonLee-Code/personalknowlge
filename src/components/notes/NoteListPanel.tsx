@@ -1,4 +1,5 @@
 import { FileText, ListFilter, Search, Star, Trash2, TriangleAlert } from 'lucide-react';
+import { toast } from 'sonner';
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -7,6 +8,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ROUTES } from '@/lib/constants';
+import { errorMessage } from '@/lib/format';
+import { groupByRecency } from '@/lib/timeGroup';
 import { cn } from '@/lib/utils';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
@@ -152,19 +155,81 @@ export function NoteListPanel() {
         />
       ) : (
         <ScrollArea className="flex-1">
-          <ul className="space-y-0.5 p-1.5">
-            {items.map((note) => (
-              <NoteListItem
-                key={note.id}
-                note={note}
-                selected={selectedId === note.id}
-                basePath={basePath}
-                onOpen={() => navigate(`${basePath}/${note.id}`)}
-              />
-            ))}
-          </ul>
+          {scope.kind === 'trash' ? (
+            // 回收站按时间分组，便于按批次清理
+            <div className="p-1.5">
+              {groupByRecency(items, (note) => note.updatedAt).map((group) => (
+                <section key={group.bucket} className="mb-1.5">
+                  <p className="px-1.5 py-1 text-[11px] font-medium text-[var(--ink-subtle)]">
+                    {group.label}
+                    <span className="ml-1 text-[var(--ink-subtle)]/70">{group.items.length}</span>
+                  </p>
+                  <ul className="space-y-0.5">
+                    {group.items.map((note) => (
+                      <NoteListItem
+                        key={note.id}
+                        note={note}
+                        selected={selectedId === note.id}
+                        basePath={basePath}
+                        onOpen={() => navigate(`${basePath}/${note.id}`)}
+                      />
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <ul className="space-y-0.5 p-1.5">
+              {items.map((note) => (
+                <NoteListItem
+                  key={note.id}
+                  note={note}
+                  selected={selectedId === note.id}
+                  basePath={basePath}
+                  onOpen={() => navigate(`${basePath}/${note.id}`)}
+                />
+              ))}
+            </ul>
+          )}
         </ScrollArea>
       )}
+
+      {/* 回收站：批量清理（永久删除，不可恢复） */}
+      {scope.kind === 'trash' && items.length > 0 ? (
+        <div className="border-t border-[var(--border-subtle)] px-2 py-1.5">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 text-[11px] text-[var(--ink-muted)] transition-colors hover:text-red-500"
+            onClick={() => {
+              if (
+                !window.confirm(
+                  `将永久删除回收站中的 ${items.length} 篇笔记，此操作不可恢复。是否继续？`,
+                )
+              ) {
+                return;
+              }
+              void (async () => {
+                const purge = useNotesStore.getState().purge;
+                let removed = 0;
+                for (const note of items) {
+                  try {
+                    await purge(note.id);
+                    removed += 1;
+                  } catch (error) {
+                    toast.error(errorMessage(error));
+                    break;
+                  }
+                }
+                await useNotesStore.getState().refresh();
+                if (removed > 0) toast.success(`已永久删除 ${removed} 篇笔记`);
+              })();
+            }}
+          >
+            <Trash2 className="h-3 w-3" />
+            清空回收站（{items.length}）
+          </button>
+        </div>
+      ) : null}
 
       {/* 仅在按分类/标签筛选时出现：用于回到全部笔记 */}
       {scope.kind === 'category' || scope.kind === 'tag' ? (

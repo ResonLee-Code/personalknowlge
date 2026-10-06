@@ -943,6 +943,16 @@ export async function handleMockInvoke(
     case 'links_rebuild':
       requireWorkspace();
       return mockRebuild();
+    case 'relations_list':
+      requireWorkspace();
+      return { outgoing: [], incoming: [] };
+    case 'relations_add':
+    case 'relations_remove':
+      fail('INVALID_INPUT', '浏览器预览模式不支持类型化关系（需要写入工作区文件）。');
+      break;
+    case 'relations_rebuild':
+      requireWorkspace();
+      return 0;
     case 'graph_get':
       requireWorkspace();
       return mockGraph((payload.query ?? {}) as GraphQuery);

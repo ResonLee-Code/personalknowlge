@@ -124,3 +124,79 @@ fn external_frontmatter_edit_syncs_source_metadata() {
     assert_eq!(refreshed.note.source_reliability, Some(4));
     assert_eq!(refreshed.note.valid_until.as_deref(), Some("2026-12-31"));
 }
+
+#[test]
+fn save_rename_move_tags_keep_source_and_relations() {
+    // 回归：以前 save / rename / move / set_tags 会把来源与关系字段重置为空
+    let fixture = Fixture::new();
+    let notes = fixture.notes();
+    let detail = notes
+        .create(CreateNoteInput {
+            title: "元数据保真".into(),
+            category_id: None,
+            initial_content: Some("正文".into()),
+            tags: None,
+        })
+        .expect("创建笔记");
+
+    notes
+        .set_source(SetSourceInput {
+            id: detail.note.id.clone(),
+            source_type: Some("book".into()),
+            source_ref: Some("《领域驱动设计》".into()),
+            source_reliability: Some(4),
+            valid_until: Some("2030-01-01".into()),
+        })
+        .expect("写入来源");
+
+    // 1) 保存正文
+    notes
+        .save(personal_knowledge_os_lib::domain::note::SaveNoteInput {
+            id: detail.note.id.clone(),
+            content: "正文已更新".into(),
+            base_content_hash: None,
+            title: None,
+            category_id: None,
+            tags: None,
+        })
+        .expect("保存");
+    let after_save = notes.get(&detail.note.id).expect("读取");
+    assert_eq!(after_save.note.source_type.as_deref(), Some("book"));
+    assert_eq!(after_save.note.source_reliability, Some(4));
+    assert_eq!(after_save.note.valid_until.as_deref(), Some("2030-01-01"));
+
+    // 2) 改标签
+    notes.set_tags(&detail.note.id, &["元数据".into()]).expect("改标签");
+    let after_tags = notes.get(&detail.note.id).expect("读取");
+    assert_eq!(after_tags.note.source_type.as_deref(), Some("book"));
+
+    // 3) 重命名
+    let renamed = notes.rename(&detail.note.id, "元数据保真 v2", false).expect("重命名");
+    assert_eq!(renamed.note.source_ref.as_deref(), Some("《领域驱动设计》"));
+
+    // 4) 移动分类
+    let category = personal_knowledge_os_lib::application::category_service::CategoryService::new(
+        fixture.app.context().unwrap(),
+    )
+    .create(personal_knowledge_os_lib::domain::category::CreateCategoryInput {
+        name: "保真分类".into(),
+        parent_id: None,
+        create_directory: None,
+    })
+    .expect("建分类");
+    let moved = notes
+        .move_to_category(&detail.note.id, Some(&category.id))
+        .expect("移动");
+    assert_eq!(moved.note.source_reliability, Some(4));
+    assert_eq!(moved.note.valid_until.as_deref(), Some("2030-01-01"));
+
+    // 文件里同样保留
+    let stored = fixture
+        .app
+        .context()
+        .unwrap()
+        .storage
+        .read_note(&moved.note.file_path)
+        .expect("读取文件");
+    assert_eq!(stored.frontmatter.source_type.as_deref(), Some("book"));
+}
