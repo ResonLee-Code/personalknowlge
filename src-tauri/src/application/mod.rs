@@ -9,6 +9,7 @@ pub mod export_service;
 pub mod index_service;
 pub mod import_service;
 pub mod lookup;
+pub mod link_service;
 pub mod note_service;
 pub mod registry;
 pub mod search_service;
@@ -22,6 +23,7 @@ pub use export_service::{ExportFormat, ExportNoteInput, ExportNoteResult, Export
 pub use index_service::{IndexService, ScanReport};
 pub use import_service::{ImportNotesInput, ImportReport, ImportService};
 pub use lookup::CategoryLookup;
+pub use link_service::LinkService;
 pub use note_service::NoteService;
 pub use registry::WorkspaceRegistryStore;
 pub use search_service::SearchService;

@@ -313,6 +313,12 @@ impl ImportService {
                 let _ = index.mark_stale(Some(error.message.clone()));
             }
         }
+        // 导入的笔记同样参与双向链接（也会把指向它的未解析链接绑定过来）
+        if let Err(error) = super::link_service::LinkService::new(Arc::clone(&self.ctx))
+            .on_note_available(&note, &body)
+        {
+            tracing::warn!(target: "links", "导入后更新链接失败：{}", error.message);
+        }
 
         Ok(ImportedNote { source_path, note_id: id, title, file_path: relative })
     }

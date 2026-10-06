@@ -478,8 +478,22 @@ pub struct WikiLinkMatch {
     pub anchor: Option<String>,
     /// 在正文中的出现顺序（从 0 开始）
     pub position: usize,
+    /// 在正文中的字符下标（用于按出现顺序合并其它类型的链接）
+    pub offset: usize,
     /// 命中所在行的上下文摘要（最多 120 字）
     pub context: String,
+}
+
+/// 从 Markdown 中解析出的一个标准链接 `[文字](目标)`。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownLinkMatch {
+    pub target: String,
+    pub text: Option<String>,
+    pub offset: usize,
+    pub context: String,
+    /// http/https 外链
+    pub is_external: bool,
 }
 
 /// 上下文摘要的最大长度。
@@ -508,6 +522,7 @@ pub fn parse_wikilinks(markdown: &str) -> Vec<WikiLinkMatch> {
                         alias,
                         anchor,
                         position: matches.len(),
+                        offset: index,
                         context: line_context(&chars, index),
                     });
                 }
@@ -518,6 +533,113 @@ pub fn parse_wikilinks(markdown: &str) -> Vec<WikiLinkMatch> {
         index += 1;
     }
     matches
+}
+
+/// 解析 `[文字](目标)` 形式的链接（与双向链接共用「忽略代码区域」规则）。
+pub fn parse_markdown_links(markdown: &str) -> Vec<MarkdownLinkMatch> {
+    let chars: Vec<char> = markdown.chars().collect();
+    let parsable = mask_code_regions(&chars);
+    let mut matches = Vec::new();
+    let mut index = 0usize;
+
+    while index + 2 < chars.len() {
+        if parsable[index] && chars[index] == ']' && chars[index + 1] == '(' {
+            // 向前找配对的 `[`
+            let mut open = None;
+            let mut probe = index;
+            while probe > 0 {
+                probe -= 1;
+                if chars[probe] == '\n' {
+                    break;
+                }
+                if chars[probe] == '[' {
+                    open = Some(probe);
+                    break;
+                }
+            }
+            if let Some(open) = open {
+                // 找 `)` 结束
+                let mut end = None;
+                let mut cursor = index + 2;
+                while cursor < chars.len() {
+                    if chars[cursor] == '\n' {
+                        break;
+                    }
+                    if chars[cursor] == ')' {
+                        end = Some(cursor);
+                        break;
+                    }
+                    cursor += 1;
+                }
+                if let Some(end) = end {
+                    let text: String = chars[open + 1..index].iter().collect();
+                    let raw_target: String = chars[index + 2..end].iter().collect();
+                    let target = raw_target.trim();
+                    if !target.is_empty() && !target.starts_with('#') {
+                        let is_external =
+                            target.starts_with("http://") || target.starts_with("https://");
+                        matches.push(MarkdownLinkMatch {
+                            target: target.to_string(),
+                            text: Some(text.trim().to_string()).filter(|value| !value.is_empty()),
+                            offset: open,
+                            context: line_context(&chars, open),
+                            is_external,
+                        });
+                    }
+                    index = end + 1;
+                    continue;
+                }
+            }
+        }
+        index += 1;
+    }
+    matches
+}
+
+/// 把 `[[旧标题…]]` 改写为 `[[新标题…]]`（保留锚点与别名），返回新文本与改写处数。
+///
+/// 用于「重命名笔记后自动重连」：只改写双向链接的目标部分，
+/// 代码块与行内代码中的内容保持不变。
+pub fn rewrite_wikilink_target(body: &str, old_title: &str, new_title: &str) -> (String, usize) {
+    let chars: Vec<char> = body.chars().collect();
+    let parsable = mask_code_regions(&chars);
+    let old_key = old_title.trim().to_lowercase();
+    let mut out = String::with_capacity(body.len());
+    let mut index = 0usize;
+    let mut rewritten = 0usize;
+
+    while index < chars.len() {
+        if parsable[index]
+            && chars[index] == '['
+            && index + 1 < chars.len()
+            && chars[index + 1] == '['
+        {
+            if let Some(end) = find_wikilink_end(&chars, &parsable, index + 2) {
+                let inner: String = chars[index + 2..end].iter().collect();
+                if let Some((target, alias, anchor)) = parse_wikilink_inner(&inner) {
+                    if target.trim().to_lowercase() == old_key {
+                        out.push_str("[[");
+                        out.push_str(new_title);
+                        if let Some(anchor) = &anchor {
+                            out.push('#');
+                            out.push_str(anchor);
+                        }
+                        if let Some(alias) = &alias {
+                            out.push('|');
+                            out.push_str(alias);
+                        }
+                        out.push_str("]]");
+                        rewritten += 1;
+                        index = end + 2;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+    (out, rewritten)
 }
 
 /// 找出 `[[` 之后的结束位置（`]` 的下标）。
@@ -606,7 +728,7 @@ fn line_context(chars: &[char], at: usize) -> String {
     let offset = at - line_start;
     let half = LINK_CONTEXT_CHARS / 2;
     let mut from = offset.saturating_sub(half);
-    let mut to = (from + LINK_CONTEXT_CHARS).min(line.len());
+    let to = (from + LINK_CONTEXT_CHARS).min(line.len());
     if to - from < LINK_CONTEXT_CHARS {
         from = to.saturating_sub(LINK_CONTEXT_CHARS);
     }
@@ -774,6 +896,31 @@ mod wikilink_tests {
         assert!(matches[0].context.contains("[[目标笔记]]"));
         assert!(matches[0].context.chars().count() <= LINK_CONTEXT_CHARS + 2);
         assert!(matches[0].context.starts_with('…'));
+    }
+
+    #[test]
+    fn parses_markdown_links_and_flags_external() {
+        let matches = parse_markdown_links(
+            "内部 [设计稿](01_技术/设计稿.md)，外部 [官网](https://example.com)，锚点 [跳转](#小节)，代码 `[不该解析](a.md)`。",
+        );
+        assert_eq!(matches.len(), 2, "{matches:?}");
+        assert_eq!(matches[0].target, "01_技术/设计稿.md");
+        assert_eq!(matches[0].text.as_deref(), Some("设计稿"));
+        assert!(!matches[0].is_external);
+        assert_eq!(matches[1].target, "https://example.com");
+        assert!(matches[1].is_external);
+    }
+
+    #[test]
+    fn rewrites_wikilink_targets_keeping_alias_and_anchor() {
+        let body = "见 [[旧标题]]、[[旧标题|别名]]、[[旧标题#小节]]，以及 [[别的笔记]] 与 `[[旧标题]]`。";
+        let (updated, count) = rewrite_wikilink_target(body, "旧标题", "新标题");
+        assert_eq!(count, 3, "{updated}");
+        assert!(updated.contains("[[新标题]]"));
+        assert!(updated.contains("[[新标题|别名]]"));
+        assert!(updated.contains("[[新标题#小节]]"));
+        assert!(updated.contains("[[别的笔记]]"), "其它链接不受影响");
+        assert!(updated.contains("`[[旧标题]]`"), "行内代码内的内容不改写");
     }
 }
 

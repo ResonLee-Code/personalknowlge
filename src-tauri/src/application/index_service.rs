@@ -26,6 +26,7 @@ use crate::repositories::{
 };
 
 use super::context::WorkspaceContext;
+use super::link_service::LinkService;
 
 /// 扫描结果。
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
@@ -508,6 +509,13 @@ impl IndexService {
             self.mark_indexed(&id)?;
         }
         report.added += 1;
+        // 采纳外部文件后，指向该标题的未解析链接应自动连接
+        if let Err(error) = LinkService::new(Arc::clone(&self.ctx)).on_note_available(&note, &stored.body)
+        {
+            report
+                .warnings
+                .push(format!("{relative} 建立链接失败：{}", error.message));
+        }
         Ok(())
     }
 
@@ -600,6 +608,13 @@ impl IndexService {
         } else {
             self.mark_indexed(&note.id)?;
         }
+        if let Err(error) =
+            LinkService::new(Arc::clone(&self.ctx)).refresh_note_links(note, &stored.body)
+        {
+            report
+                .warnings
+                .push(format!("{} 更新链接失败：{}", note.file_path, error.message));
+        }
         Ok(())
     }
 
@@ -608,6 +623,7 @@ impl IndexService {
             SqliteNoteRepository.set_status(conn, note_id, NoteStatus::Missing, None)
         })?;
         self.remove_note(note_id)?;
+        let _ = LinkService::new(Arc::clone(&self.ctx)).on_note_unavailable(note_id);
         Ok(())
     }
 

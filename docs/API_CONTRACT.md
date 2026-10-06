@@ -146,7 +146,24 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 | `app_log_path` | `string \| null` |
 | `app_ready` | `boolean` |
 
-## 9. 前端服务层
+## 9. 双向链接（V1.1 M1）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `links_get_backlinks` | `{ noteId }` | `Backlink[]`（来源笔记 + 上下文 + 锚点 + 更新时间） |
+| `links_get_outgoing` | `{ noteId }` | `OutgoingLink[]`（目标标题、是否已解析、类型、上下文） |
+| `links_get_unresolved` | — | `UnresolvedLink[]`（全库未解析链接，可一键建笔记） |
+| `links_get_counts` | `{ noteId }` | `{ backlinks, outgoing, unresolved }` |
+| `links_rebuild` | — | `LinkRebuildReport`（扫描笔记数、链接数、已解析/未解析、耗时） |
+
+解析规则：`[[标题]]`、`[[标题|别名]]`、`[[标题#小节]]` 与相对 Markdown 链接；
+忽略围栏代码块与行内代码中的链接；目标解析顺序为
+标题（大小写不敏感）→ 工作区相对路径 → 文件名 → 笔记 id；
+外链以 `linkType = "url"` 记录但不参与反链与未解析统计。
+链接属于**可重建派生数据**：`links_rebuild` 可从 Markdown 全量恢复。
+保存、导入、外部修改、重命名、删除与恢复都会自动维护链接。
+
+## 10. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 

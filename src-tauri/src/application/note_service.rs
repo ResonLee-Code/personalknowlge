@@ -21,6 +21,7 @@ use crate::repositories::{NoteRepository, SqliteNoteRepository, trash_path_of};
 
 use super::context::WorkspaceContext;
 use super::index_service::IndexService;
+use super::link_service::LinkService;
 use super::tag_service::TagService;
 
 pub struct NoteService {
@@ -154,6 +155,7 @@ impl NoteService {
             self.tags().set_note_tags(&id, &tags)?;
         }
         self.reindex(&id)?;
+        self.refresh_links(&note, &body);
         self.emit_change("created", &id);
         self.detail(note)
     }
@@ -272,6 +274,7 @@ impl NoteService {
         };
 
         let updated = self.note_or_err(&note.id)?;
+        self.refresh_outgoing_links(&updated, &input.content);
         self.emit_change("updated", &note.id);
         Ok(SaveNoteResult {
             note: updated,
@@ -351,6 +354,13 @@ impl NoteService {
             )
         })?;
         self.reindex(&note.id)?;
+        if let Ok(updated) = self.note_or_err(&note.id) {
+            self.refresh_outgoing_links(&updated, &stored.body);
+        }
+        // 指向旧标题的链接自动重连（含改写来源笔记正文）
+        if let Err(error) = self.links().on_note_renamed(&note.id, &note.title, &title) {
+            tracing::warn!(target: "links", "重连双向链接失败：{}", error.message);
+        }
         self.emit_change("renamed", &note.id);
         self.detail(self.note_or_err(&note.id)?)
     }
@@ -415,6 +425,9 @@ impl NoteService {
             )
         })?;
         self.reindex(&note.id)?;
+        if let Ok(updated) = self.note_or_err(&note.id) {
+            self.refresh_outgoing_links(&updated, &stored.body);
+        }
         self.emit_change("moved", &note.id);
         self.detail(self.note_or_err(&note.id)?)
     }
@@ -453,6 +466,7 @@ impl NoteService {
             SqliteNoteRepository.set_status(conn, &note.id, NoteStatus::Deleted, trash_path.as_deref())
         })?;
         let _ = self.index().remove_note(&note.id);
+        let _ = self.links().on_note_unavailable(&note.id);
         self.emit_change("deleted", &note.id);
         Ok(())
     }
@@ -487,6 +501,11 @@ impl NoteService {
             )
         })?;
         self.reindex(&note.id)?;
+        if let Ok(stored) = self.ctx.storage.read_note(&restored) {
+            if let Ok(updated) = self.note_or_err(&note.id) {
+                self.refresh_links(&updated, &stored.body);
+            }
+        }
         self.emit_change("restored", &note.id);
         self.detail(self.note_or_err(&note.id)?)
     }
@@ -550,6 +569,9 @@ impl NoteService {
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
         self.ctx.storage.write_atomic(&note.file_path, &markdown)?;
         self.reindex(&note.id)?;
+        if let Ok(updated) = self.note_or_err(&note.id) {
+            self.refresh_outgoing_links(&updated, &stored.body);
+        }
         self.emit_change("tags", &note.id);
         self.detail(self.note_or_err(&note.id)?)
     }
@@ -598,6 +620,24 @@ impl NoteService {
     fn reindex(&self, note_id: &str) -> Result<()> {
         let note = self.note_or_err(note_id)?;
         self.index().reindex_note(&note)
+    }
+
+    fn links(&self) -> LinkService {
+        LinkService::new(Arc::clone(&self.ctx))
+    }
+
+    /// 刷新出链，并把指向该标题的未解析链接绑定到这篇笔记（创建/恢复后调用）。
+    fn refresh_links(&self, note: &Note, body: &str) {
+        if let Err(error) = self.links().on_note_available(note, body) {
+            tracing::warn!(target: "links", "更新双向链接失败：{}", error.message);
+        }
+    }
+
+    /// 只刷新这篇笔记的出链（正文变化时调用）。
+    fn refresh_outgoing_links(&self, note: &Note, body: &str) {
+        if let Err(error) = self.links().refresh_note_links(note, body) {
+            tracing::warn!(target: "links", "更新出链失败：{}", error.message);
+        }
     }
 
     fn emit_change(&self, kind: &str, note_id: &str) {
