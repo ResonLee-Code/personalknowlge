@@ -21,7 +21,12 @@ use personal_knowledge_os_lib::domain::graph::GraphQuery;
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
-const NOTE_COUNT: usize = 3000;
+fn note_count() -> usize {
+    std::env::var("BENCH_NOTES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(3000)
+}
 /// 每篇笔记的出链数量（形成 ~6000 条边的稠密图谱）
 const LINKS_PER_NOTE: usize = 2;
 
@@ -81,11 +86,12 @@ fn bench_graph_with_3000_notes() {
     let _ = category_dirs;
     assert_eq!(dirs.len(), 8, "应有 8 个基准分类目录");
 
+    let note_total = note_count();
     let started = Instant::now();
-    for index in 0..NOTE_COUNT {
+    for index in 0..note_total {
         let mut body = format!("# 基准笔记 {index}\n\n用于图谱与检索的合成数据。\n\n");
         for offset in 1..=LINKS_PER_NOTE {
-            let target = (index + offset * 37) % NOTE_COUNT;
+            let target = (index + offset * 37) % note_total;
             body.push_str(&format!("- 参考 [[基准笔记 {target}]]\n"));
         }
         let directory = root.join(&dirs[index % dirs.len()]);
@@ -95,24 +101,28 @@ fn bench_graph_with_3000_notes() {
 
     // 扫描采纳：文件监听与显式扫描可能并发（同一路径重复插入会触发唯一约束），
     // 因此这里按「重试 + 轮询」等待全部笔记进入库，测的是真实落地时间。
+    let disk_files = context.storage.list_markdown_files().map(|files| files.len()).unwrap_or(0);
+    println!("磁盘上可识别的 Markdown 文件：{disk_files}（期望 {}）", note_total + 1);
     let started = Instant::now();
     let index_service = IndexService::new(Arc::clone(&context));
+    let mut last_error = String::new();
     let mut added = 0i64;
     loop {
-        if let Ok(report) = index_service.scan_workspace() {
-            added += report.added;
+        match index_service.scan_workspace() {
+            Ok(report) => added += report.added,
+            Err(error) => last_error = error.message.clone(),
         }
         let active = NoteService::new(Arc::clone(&context))
             .list(Default::default())
             .map(|result| result.total)
             .unwrap_or(0);
-        if active as usize >= NOTE_COUNT + 1 {
+        if active as usize >= note_total + 1 {
             break;
         }
         assert!(
-            started.elapsed().as_secs() < 180,
-            "扫描超时：仅入库 {} 篇",
-            added
+            started.elapsed().as_secs() < 60,
+            "扫描超时：入库 {} 篇，active={}，最后一次错误：{}",
+            added, active, last_error
         );
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
@@ -153,7 +163,7 @@ fn bench_graph_with_3000_notes() {
     let started = Instant::now();
     let focused = graph
         .graph(GraphQuery {
-            focus_note_id: Some(ids[100].clone()),
+            focus_note_id: Some(ids[ids.len() / 2].clone()),
             hops: Some(2),
             ..Default::default()
         })
@@ -171,7 +181,7 @@ fn bench_graph_with_3000_notes() {
         .unwrap_or(0);
     let knowledge_bytes = dir_size(&root.join(".knowledge"));
 
-    println!("\n===== 知识图谱基准（{NOTE_COUNT} 篇笔记，每篇 {LINKS_PER_NOTE} 条出链）=====");
+    println!("\n===== 知识图谱基准（{note_total} 篇笔记，每篇 {LINKS_PER_NOTE} 条出链）=====");
     println!("写入 Markdown 文件      : {:?}", write_elapsed);
     println!(
         "扫描采纳（含解析链接）  : {:?}（累计新增 {} 篇）",
@@ -222,5 +232,5 @@ fn bench_graph_with_3000_notes() {
         "graph_get 全量查询超过 1.5s：{:?}",
         all_elapsed
     );
-    assert_eq!(all.total_nodes, NOTE_COUNT + 1, "欢迎笔记 + 合成笔记");
+    assert_eq!(all.total_nodes, note_total + 1, "欢迎笔记 + 合成笔记");
 }
