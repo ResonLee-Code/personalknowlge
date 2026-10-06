@@ -418,3 +418,33 @@ export interface LinkRebuildReport {
   unresolved: number;
   durationMs: number;
 }
+
+/** 附件落盘（V1.1 M2） */
+export interface SaveAttachmentInput {
+  noteId?: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
+  /** 原始 Base64 或完整的 data URL */
+  dataBase64: string;
+}
+
+export interface SavedAttachment {
+  relativePath: string;
+  linkPath: string;
+  absolutePath: string;
+  fileName: string;
+  bytes: number;
+  isImage: boolean;
+}
+
+export interface ReadAttachmentInput {
+  noteId?: string | null;
+  /** 正文里的原始链接目标 */
+  source: string;
+}
+
+export interface AttachmentData {
+  dataUrl: string;
+  mimeType: string;
+  bytes: number;
+}

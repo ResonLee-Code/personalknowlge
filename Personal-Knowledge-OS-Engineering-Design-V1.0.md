@@ -2262,6 +2262,17 @@ Personal Knowledge OS V1.0 不以功能数量作为成功标准，而以以下�
 | `LinkService` + 5 个 `links_*` 命令 | 增量维护、重命名重连并改写正文、删除解绑/恢复重绑、全量重建 | `docs/ARCHITECTURE.md` 5.1 |
 | 反向链接面板与引用计数 | 编辑器底部面板、元信息栏计数、首页未解析链接卡片 | `docs/UI_SPECIFICATION.md` |
 
+### C.3.2 超出 V1.0 范围的增补（V1.1 M2-1：编辑体验）
+
+正文的编辑器一章只定义了「编辑 / 预览 / 自动保存」，V1.1 增补了下列高频能力：
+
+| 增补 | 说明 | 对应文档 |
+|---|---|---|
+| 图片与附件粘贴落盘 | 粘贴/拖入图片写入 `attachments/YYYY-MM/`，正文插入相对链接；预览内联显示 | `docs/ARCHITECTURE.md` 5.2 |
+| 附件命令 | `attachment_save`（20 MB 上限）、`attachment_read`（仅工作区内相对路径，预览 8 MB 上限） | `docs/API_CONTRACT.md` |
+| 编辑器大纲 | 解析 `#` 层级生成右侧大纲，点击跳转 | `docs/UI_SPECIFICATION.md` |
+| `⌘/Ctrl + P` 快速切换 | 按标题模糊匹配快速打开笔记（与 ⌘K 的正文检索分工） | `docs/UI_SPECIFICATION.md` |
+
 ## C.4 第 29 章 Sprint 完成情况
 
 | Sprint | 内容 | 状态 |

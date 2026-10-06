@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 表现层 | 界面与交互，不直接访问 SQLite 与文件系统 | `src/` |
 | 命令层 | Tauri 命令，参数校验与线程调度 | `src-tauri/src/commands/` |
-| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接） | `src-tauri/src/application/` |
+| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件） | `src-tauri/src/application/` |
 | 领域层 | 数据结构与不变量，不依赖框架 | `src-tauri/src/domain/` |
 | 仓储层 | 隔离 SQL 细节（trait + SQLite 实现） | `src-tauri/src/repositories/` |
 | 基础设施层 | SQLite、Markdown 存储、FTS5、文件监听、备份、frontmatter、docx 生成 | `src-tauri/src/infrastructure/` |
@@ -20,7 +20,7 @@ React UI (src/)
    ▼
 commands/            ← 只做转发；阻塞任务交给 async_runtime::spawn_blocking
    ▼
-application/         ← NoteService / CategoryService / TagService / SearchService / BackupService / LinkService / IndexService / WorkspaceService
+application/         ← NoteService / CategoryService / TagService / SearchService / BackupService / LinkService / AttachmentService / IndexService / WorkspaceService
    ▼
 domain/  +  repositories/  +  infrastructure/
    ▼
@@ -147,3 +147,19 @@ linkService (src/services/linkService.ts)
 ```
 
 链接读取失败时组件降级为空列表并在控制台留痕，不阻塞编辑（链接只是派生数据）。
+
+### 5.2 附件读写（V1.1 M2-1）
+
+```text
+编辑器粘贴/拖入图片
+  → 前端读取为 data URL
+  → invoke attachment_save { noteId, fileName, mimeType, dataBase64 }
+  → AttachmentService：Base64 解码 → attachments/YYYY-MM/ 原子写入
+  → 返回 linkPath（相对当前笔记目录）→ 插入正文 ![](linkPath)
+Markdown 预览
+  → img src 是工作区相对路径时 invoke attachment_read → data URL 内联显示
+```
+
+约束：单文件 20 MB、单张预览内联 8 MB；`attachment_read` 只接受工作区内的相对路径，
+越界路径（`../` 越出根目录）与外部 URL 一律拒绝。附件是普通文件，不进入 `notes` 表。
+Base64 编解码由 `core::base64` 自带实现（避免为单点需求引入新依赖）。

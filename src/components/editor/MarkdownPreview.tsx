@@ -1,14 +1,79 @@
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ExternalLink } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 
 import { EmptyState } from '@/components/ui/empty-state';
 import { isTauriRuntime } from '@/services/api';
+import { attachmentService } from '@/services/attachmentService';
+
+/** 会话内缓存已解析的图片 data URL（key = 笔记 id + 原始 src）。 */
+const imageCache = new Map<string, string>();
+
+/** 只把工作区内的相对路径交给后端读取；外链、data URL、绝对路径原样使用。 */
+function isWorkspaceRelative(source: string): boolean {
+  const value = source.trim();
+  if (!value) return false;
+  if (value.startsWith('#') || value.startsWith('/')) return false;
+  return !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value);
+}
+
+/**
+ * 预览中的图片：相对路径 → 通过后端读成 data URL。
+ *
+ * 直接用 `<img src="../attachments/…">` 在桌面外壳里无法访问工作区文件，
+ * 因此这里按需读取并内联；读取失败时保留原始 `src`（显示为破图，但正文不受影响）。
+ */
+function AttachmentImage({
+  src,
+  alt,
+  noteId,
+  ...props
+}: React.ImgHTMLAttributes<HTMLImageElement> & { noteId?: string | null }) {
+  const cacheKey = src ? `${noteId ?? ''}\u0000${src}` : '';
+  const [resolved, setResolved] = useState<string | undefined>(() =>
+    cacheKey ? imageCache.get(cacheKey) : undefined,
+  );
+
+  useEffect(() => {
+    if (!src || !cacheKey || !isWorkspaceRelative(src) || imageCache.has(cacheKey)) return;
+    let cancelled = false;
+    void attachmentService
+      .read({ noteId: noteId ?? null, source: src })
+      .then((data) => {
+        imageCache.set(cacheKey, data.dataUrl);
+        if (!cancelled) setResolved(data.dataUrl);
+      })
+      .catch(() => {
+        // 读取失败：静默保留原始路径，控制台不刷错误（图片只是展示层）
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [src, cacheKey, noteId]);
+
+  return (
+    <img
+      {...props}
+      src={resolved ?? src}
+      alt={alt ?? ''}
+      loading="lazy"
+      className="max-h-[420px] rounded-md border border-[var(--border-subtle)]"
+    />
+  );
+}
 
 /** Markdown 预览：不启用原始 HTML，避免执行笔记中的脚本（设计文档 6.3）。 */
-export function MarkdownPreview({ content }: { content: string }) {
+export function MarkdownPreview({
+  content,
+  noteId,
+}: {
+  content: string;
+  /** 当前笔记 id；用于把相对图片路径解析到工作区 */
+  noteId?: string | null;
+}) {
   if (!content.trim()) {
     return (
       <EmptyState
@@ -46,6 +111,9 @@ export function MarkdownPreview({ content }: { content: string }) {
               {children}
               <ExternalLink className="ml-0.5 inline h-3 w-3 opacity-60" />
             </a>
+          ),
+          img: ({ src, alt, ...props }) => (
+            <AttachmentImage key={src ?? ''} src={src} alt={alt} noteId={noteId} {...props} />
           ),
           table: ({ children, ...props }) => (
             <div className="overflow-x-auto">

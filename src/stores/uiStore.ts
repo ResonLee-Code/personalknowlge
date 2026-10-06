@@ -31,6 +31,7 @@ interface UiState {
   fontSize: number;
   commandPaletteOpen: boolean;
   newNoteDialogOpen: boolean;
+  quickSwitcherOpen: boolean;
   setSidebarWidth: (width: number) => void;
   setListWidth: (width: number) => void;
   setEditorSplitRatio: (ratio: number) => void;
@@ -40,6 +41,7 @@ interface UiState {
   setFontSize: (size: number) => void;
   setCommandPaletteOpen: (open: boolean) => void;
   setNewNoteDialogOpen: (open: boolean) => void;
+  setQuickSwitcherOpen: (open: boolean) => void;
   applyThemeToDocument: () => void;
   applyPreferences: (preferences: UiPreferences) => void;
 }
@@ -55,6 +57,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   fontSize: 15,
   commandPaletteOpen: false,
   newNoteDialogOpen: false,
+  quickSwitcherOpen: false,
   setSidebarWidth: (sidebarWidth) => {
     // 取整：Retina 屏上 clientX 可能是小数，后端按整数像素存储
     const clamped = Math.round(Math.min(420, Math.max(180, sidebarWidth)));
@@ -78,6 +81,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   setFontSize: (fontSize) => set({ fontSize: Math.min(24, Math.max(12, fontSize)) }),
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
   setNewNoteDialogOpen: (newNoteDialogOpen) => set({ newNoteDialogOpen }),
+  setQuickSwitcherOpen: (quickSwitcherOpen) => set({ quickSwitcherOpen }),
   applyThemeToDocument: () => {
     const { theme } = get();
     if (typeof document === 'undefined') return;

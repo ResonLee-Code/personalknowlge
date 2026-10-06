@@ -2,6 +2,7 @@
 //!
 //! 每个服务都围绕一个已打开的工作区（`WorkspaceContext`）工作。
 
+pub mod attachment_service;
 pub mod backup_service;
 pub mod category_service;
 pub mod context;
@@ -29,3 +30,4 @@ pub use registry::WorkspaceRegistryStore;
 pub use search_service::SearchService;
 pub use tag_service::TagService;
 pub use workspace_service::WorkspaceService;
+pub use attachment_service::{AttachmentService, SaveAttachmentInput, SavedAttachment};

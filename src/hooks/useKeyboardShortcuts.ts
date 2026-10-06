@@ -4,6 +4,7 @@ interface ShortcutHandlers {
   onNewNote?: () => void;
   onSearch?: () => void;
   onSave?: () => void;
+  onQuickSwitch?: () => void;
   onFocusEditor?: () => void;
   onCloseNote?: () => void;
   onDelete?: () => void;
@@ -25,6 +26,11 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
       if (meta && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         handlers.onSearch?.();
+        return;
+      }
+      if (meta && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        handlers.onQuickSwitch?.();
         return;
       }
       if (meta && event.key.toLowerCase() === 'n') {

@@ -204,6 +204,62 @@ pub fn normalize_relative(value: &str) -> String {
     value.replace('\\', "/").trim_start_matches("./").to_string()
 }
 
+/// 计算 `target` 相对目录 `from_dir` 的相对路径（两侧都是工作区相对路径）。
+///
+/// 用于把附件的工作区相对路径转换成可直接写进正文的 Markdown 链接，例如：
+/// 笔记在 `20_技术/索引.md`、附件在 `attachments/2026-10/x.png` →
+/// `../attachments/2026-10/x.png`。
+pub fn relative_from(from_dir: &str, target: &str) -> String {
+    let from: Vec<&str> = from_dir
+        .split('/')
+        .map(str::trim)
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect();
+    let to: Vec<&str> = target
+        .split('/')
+        .map(str::trim)
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect();
+
+    let common = from
+        .iter()
+        .zip(to.iter())
+        .take_while(|(left, right)| left == right)
+        .count();
+
+    let mut parts: Vec<String> = std::iter::repeat_n("..".to_string(), from.len() - common)
+        .chain(to[common..].iter().map(|part| (*part).to_string()))
+        .collect();
+    if parts.is_empty() {
+        parts.push(".".to_string());
+    }
+    parts.join("/")
+}
+
+/// 拼接工作区相对目录与链接目标，并归一化 `.` / `..`。
+///
+/// 返回 `None` 表示路径越出工作区（调用方应拒绝而不是静默回退）。
+pub fn join_and_normalize(dir: &str, target: &str) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    for part in dir.split('/').chain(target.replace('\\', "/").split('/')) {
+        let part = part.trim();
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            if parts.pop().is_none() {
+                return None;
+            }
+            continue;
+        }
+        parts.push(part.to_string());
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts.join("/"))
+}
+
 /// 判断文件名是否是临时/编辑器中间文件。
 pub fn is_temporary_file_name(name: &str) -> bool {
     if name.starts_with(TEMP_PREFIX) || name.starts_with("~$") {
@@ -341,5 +397,44 @@ mod tests {
         assert!(is_temporary_file_name("~$note.md"));
         assert!(is_temporary_file_name("note.swp"));
         assert!(!is_temporary_file_name("note.md"));
+    }
+
+    #[test]
+    fn relative_from_builds_markdown_friendly_paths() {
+        assert_eq!(
+            relative_from("20_技术", "attachments/2026-10/shot.png"),
+            "../attachments/2026-10/shot.png"
+        );
+        assert_eq!(
+            relative_from("20_技术/子目录", "attachments/2026-10/shot.png"),
+            "../../attachments/2026-10/shot.png"
+        );
+        assert_eq!(
+            relative_from("00_Inbox", "attachments/2026-10/shot.png"),
+            "../attachments/2026-10/shot.png"
+        );
+        // 同一目录下只保留文件名
+        assert_eq!(relative_from("attachments/2026-10", "attachments/2026-10/a.png"), "a.png");
+        assert_eq!(relative_from("", "attachments/a.png"), "attachments/a.png");
+    }
+
+    #[test]
+    fn join_and_normalize_resolves_dot_segments() {
+        assert_eq!(
+            join_and_normalize("20_技术", "../attachments/2026-10/a.png").as_deref(),
+            Some("attachments/2026-10/a.png")
+        );
+        // 相对路径相对于所在目录解析：Inbox 里的 `attachments/a.png` 指向 Inbox 子目录
+        assert_eq!(
+            join_and_normalize("00_Inbox", "attachments/a.png").as_deref(),
+            Some("00_Inbox/attachments/a.png")
+        );
+        assert_eq!(
+            join_and_normalize("20_技术/子目录", "../../attachments/a.png").as_deref(),
+            Some("attachments/a.png")
+        );
+        // 越出工作区
+        assert!(join_and_normalize("20_技术", "../../../etc/passwd").is_none());
+        assert!(join_and_normalize("", "").is_none());
     }
 }

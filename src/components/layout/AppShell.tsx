@@ -3,6 +3,7 @@ import { Outlet, useNavigate } from 'react-router-dom';
 
 import { GlobalSearchDialog } from '@/components/search/GlobalSearchDialog';
 import { NewNoteDialog } from '@/components/notes/NewNoteDialog';
+import { QuickSwitcherDialog } from '@/components/search/QuickSwitcherDialog';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { ROUTES } from '@/lib/constants';
 import { useNotesStore } from '@/stores/notesStore';
@@ -17,16 +18,19 @@ export function AppShell() {
   const navigate = useNavigate();
   const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
   const setNewNoteDialogOpen = useUiStore((state) => state.setNewNoteDialogOpen);
+  const setQuickSwitcherOpen = useUiStore((state) => state.setQuickSwitcherOpen);
   const selectedId = useNotesStore((state) => state.selectedId);
   const removeNote = useNotesStore((state) => state.remove);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const openSearch = useCallback(() => setCommandPaletteOpen(true), [setCommandPaletteOpen]);
   const openNewNote = useCallback(() => setNewNoteDialogOpen(true), [setNewNoteDialogOpen]);
+  const openQuickSwitcher = useCallback(() => setQuickSwitcherOpen(true), [setQuickSwitcherOpen]);
 
   useKeyboardShortcuts({
     onSearch: openSearch,
     onNewNote: openNewNote,
+    onQuickSwitch: openQuickSwitcher,
     onDelete: () => {
       if (selectedId) setDeleteTarget(selectedId);
     },
@@ -47,6 +51,7 @@ export function AppShell() {
       </div>
       <StatusBar />
       <GlobalSearchDialog />
+      <QuickSwitcherDialog />
       <NewNoteDialog />
       {deleteTarget ? (
         <ConfirmDeleteDialog
@@ -87,8 +92,7 @@ function ConfirmDeleteDialog({
       <AlertDialogContent>
         <AlertDialogTitle>删除这篇笔记？</AlertDialogTitle>
         <AlertDialogDescription>
-          笔记会移动到回收站（<code>.trash</code>），可以随时恢复。
-          对应笔记 ID：{noteId}
+          笔记会移动到回收站（<code>.trash</code>），可以随时恢复。 对应笔记 ID：{noteId}
         </AlertDialogDescription>
         <AlertDialogFooter>
           <AlertDialogCancel onClick={onCancel}>取消</AlertDialogCancel>

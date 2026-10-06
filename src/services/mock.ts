@@ -6,6 +6,7 @@
  * 该实现对真正的工作区没有副作用。
  */
 
+import { LINK_CONTEXT_CHARS, maskCodeRegions } from '@/lib/markdown';
 import type {
   AppError,
   AppSettings,
@@ -271,7 +272,14 @@ function openWorkspace(name: string, root: string): WorkspaceOpenResult {
     indexStatus: indexStatus(),
     warnings: [],
     initialized: true,
-    scan: { added: 0, updated: 0, missing: 0, unchanged: state.notes.length, durationMs: 1, warnings: [] },
+    scan: {
+      added: 0,
+      updated: 0,
+      missing: 0,
+      unchanged: state.notes.length,
+      durationMs: 1,
+      warnings: [],
+    },
   };
 }
 
@@ -317,7 +325,8 @@ function listNotes(query: NoteListQuery = {}) {
   }
   if (query.inboxOnly) items = items.filter((note) => !note.categoryId);
   if (query.favoriteOnly) items = items.filter((note) => note.favorite);
-  if (query.tagId) items = items.filter((note) => (state.noteTags[note.id] ?? []).includes(query.tagId!));
+  if (query.tagId)
+    items = items.filter((note) => (state.noteTags[note.id] ?? []).includes(query.tagId!));
   if (query.keyword) {
     const keyword = query.keyword.toLowerCase();
     items = items.filter(
@@ -435,7 +444,8 @@ function searchNotes(query: SearchQuery) {
   let notes = state.notes.filter((note) => note.status === 'active');
   if (query.categoryId) notes = notes.filter((note) => note.categoryId === query.categoryId);
   if (query.favoriteOnly) notes = notes.filter((note) => note.favorite);
-  if (query.tagId) notes = notes.filter((note) => (state.noteTags[note.id] ?? []).includes(query.tagId!));
+  if (query.tagId)
+    notes = notes.filter((note) => (state.noteTags[note.id] ?? []).includes(query.tagId!));
   if (query.scopeNoteId) notes = notes.filter((note) => note.id === query.scopeNoteId);
 
   const lower = keyword.toLowerCase();
@@ -474,92 +484,11 @@ function searchNotes(query: SearchQuery) {
 // `[[标题]]` / `[[标题|别名]]` / `[[标题#小节]]`、忽略围栏代码块与行内代码、
 // 上下文摘要取所在行（过长时截断）。这样在不启动桌面外壳时也能完整预览反链面板。
 
-const LINK_CONTEXT_CHARS = 120;
-
 interface MockWikiLink {
   target: string;
   alias: string | null;
   anchor: string | null;
   context: string;
-}
-
-/** 标记不可解析的位置（围栏代码块 + 行内代码）。 */
-function maskCodeRegions(text: string): boolean[] {
-  const chars = [...text];
-  const parsable = chars.map(() => true);
-
-  // 1) 围栏代码块（``` 或 ~~~，允许更长围栏与 info string）
-  let lineStart = 0;
-  let inFence = false;
-  let fenceChar = '`';
-  let fenceLen = 0;
-  for (let index = 0; index <= chars.length; index += 1) {
-    if (index === chars.length || chars[index] === '\n') {
-      const trimmed = chars.slice(lineStart, index).join('').trim();
-      const marker = trimmed[0];
-      const fenceRun = trimmed.match(/^[`~]+/)?.[0].length ?? 0;
-      const isFence =
-        fenceRun >= 3 &&
-        (marker === '`' || marker === '~') &&
-        [...trimmed].every((ch) => ch === '`' || ch === '~' || /\s/.test(ch) || /[A-Za-z0-9]/.test(ch));
-      if (isFence) {
-        if (!inFence) {
-          inFence = true;
-          fenceChar = marker;
-          fenceLen = fenceRun;
-        } else if (marker === fenceChar && fenceRun >= fenceLen) {
-          inFence = false;
-        }
-        for (let offset = lineStart; offset < index; offset += 1) parsable[offset] = false;
-      } else if (inFence) {
-        for (let offset = lineStart; offset < index; offset += 1) parsable[offset] = false;
-      }
-      lineStart = index + 1;
-    }
-  }
-
-  // 2) 行内代码（成对反引号，不跨行）
-  let cursor = 0;
-  while (cursor < chars.length) {
-    if (chars[cursor] === '`' && parsable[cursor]) {
-      let run = 1;
-      while (cursor + run < chars.length && chars[cursor + run] === '`' && parsable[cursor + run]) {
-        run += 1;
-      }
-      let probe = cursor + run;
-      let closing: number | null = null;
-      while (probe < chars.length) {
-        if (chars[probe] === '\n') break;
-        if (chars[probe] === '`' && parsable[probe]) {
-          let closeRun = 1;
-          while (
-            probe + closeRun < chars.length &&
-            chars[probe + closeRun] === '`' &&
-            parsable[probe + closeRun]
-          ) {
-            closeRun += 1;
-          }
-          if (closeRun === run) {
-            closing = probe;
-            break;
-          }
-          probe += closeRun;
-          continue;
-        }
-        probe += 1;
-      }
-      if (closing === null) {
-        cursor += run;
-      } else {
-        for (let offset = cursor; offset < closing + run; offset += 1) parsable[offset] = false;
-        cursor = closing + run;
-      }
-    } else {
-      cursor += 1;
-    }
-  }
-
-  return parsable;
 }
 
 function lineContext(chars: string[], at: number): string {
@@ -828,9 +757,15 @@ export async function handleMockInvoke(
         : null;
     case 'workspace_create':
     case 'workspace_open':
-      return openWorkspace(String(payload.name ?? '预览知识库'), String(payload.root ?? '~/MockKnowledge'));
+      return openWorkspace(
+        String(payload.name ?? '预览知识库'),
+        String(payload.root ?? '~/MockKnowledge'),
+      );
     case 'workspace_switch':
-      return openWorkspace(state.workspace?.name ?? '预览知识库', state.workspace?.rootPath ?? '~/MockKnowledge');
+      return openWorkspace(
+        state.workspace?.name ?? '预览知识库',
+        state.workspace?.rootPath ?? '~/MockKnowledge',
+      );
     case 'workspace_close':
       state.workspace = null;
       persist();
@@ -961,10 +896,7 @@ export async function handleMockInvoke(
       return state.notes.filter((note) => note.status === status).length;
     }
     case 'note_import':
-      fail(
-        'INVALID_INPUT',
-        '浏览器预览模式无法读取本地文件，请在桌面应用中使用「导入外部文件」。',
-      );
+      fail('INVALID_INPUT', '浏览器预览模式无法读取本地文件，请在桌面应用中使用「导入外部文件」。');
       break;
     case 'links_get_backlinks':
       requireWorkspace();
@@ -982,10 +914,13 @@ export async function handleMockInvoke(
       requireWorkspace();
       return mockRebuild();
     case 'note_export':
-      fail(
-        'INVALID_INPUT',
-        '浏览器预览模式不支持导出到本地文件，请在桌面应用中使用「导出」。',
-      );
+      fail('INVALID_INPUT', '浏览器预览模式不支持导出到本地文件，请在桌面应用中使用「导出」。');
+      break;
+    case 'attachment_save':
+      fail('INVALID_INPUT', '浏览器预览模式无法写入本地文件，请在桌面应用中使用图片粘贴。');
+      break;
+    case 'attachment_read':
+      fail('INVALID_INPUT', '浏览器预览模式无法读取工作区内的图片。');
       break;
     case 'category_list':
       requireWorkspace();

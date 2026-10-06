@@ -163,7 +163,21 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 链接属于**可重建派生数据**：`links_rebuild` 可从 Markdown 全量恢复。
 保存、导入、外部修改、重命名、删除与恢复都会自动维护链接。
 
-## 10. 前端服务层
+## 10. 附件（V1.1 M2）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `attachment_save` | `{ input: { noteId?, fileName?, mimeType?, dataBase64 } }` | `SavedAttachment`（工作区相对路径、可写入正文的 `linkPath`、绝对路径、字节数、是否图片） |
+| `attachment_read` | `{ input: { noteId?, source } }` | `AttachmentData`（`dataUrl`、`mimeType`、`bytes`） |
+
+- `dataBase64` 接受原始 Base64 或完整 `data:image/png;base64,…`；
+  单文件上限 20 MB，扩展名优先取文件名、其次由 MIME 推断、未知类型显示为 `.bin`；
+- 落盘位置：`attachments/YYYY-MM/<时间戳>-<清洗后的原名>-<短ID>.<扩展名>`，
+  附件不进入 `notes` 表，也不会被笔记扫描当作笔记；
+- `attachment_read` 只接受**工作区内的相对路径**（`http/https/data/asset` 与越界路径一律拒绝），
+  单张预览上限 8 MB，返回 data URL 供 Markdown 预览内联显示。
+
+## 11. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 
@@ -172,6 +186,6 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
   便于在没有桌面外壳时开发与验证界面。
 
 按领域拆分的服务模块：`workspaceService`、`noteService`、`categoryService`、`tagService`、
-`searchService`、`backupService`、`linkService`（第 9 节的 5 个 `links_*` 命令）。
+`searchService`、`backupService`、`linkService`（第 9 节）、`attachmentService`（第 10 节）。
 浏览器预览后端对 `links_*` 提供与 Rust 端一致的解析实现，
 因此反链面板、引用计数与未解析链接在纯前端预览下同样可用。

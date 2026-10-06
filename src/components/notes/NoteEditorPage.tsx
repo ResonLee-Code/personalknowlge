@@ -7,6 +7,7 @@ import {
   FolderInput,
   FolderOpen,
   Link2,
+  ListTree,
   MoreHorizontal,
   Pencil,
   Save,
@@ -24,6 +25,7 @@ import { BacklinkPanel } from '@/components/editor/BacklinkPanel';
 import { ConflictDialog } from '@/components/editor/ConflictDialog';
 import { MarkdownEditor } from '@/components/editor/MarkdownEditor';
 import { MarkdownPreview } from '@/components/editor/MarkdownPreview';
+import { OutlinePanel } from '@/components/editor/OutlinePanel';
 import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
@@ -42,8 +44,16 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/badge';
 import { useAutosave } from '@/hooks/useAutosave';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import {
+  attachmentAltText,
+  buildImageMarkdown,
+  mimeFromDataUrl,
+  readFileAsDataUrl,
+} from '@/lib/attachment';
+import { errorMessage, formatDateTime, formatRelative } from '@/lib/format';
+import { parseOutline } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
+import { attachmentService } from '@/services/attachmentService';
 import { linkService } from '@/services/linkService';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { isTauriRuntime } from '@/services/api';
@@ -51,6 +61,8 @@ import { useNotesStore } from '@/stores/notesStore';
 import { LAYOUT_DEFAULTS, useUiStore } from '@/stores/uiStore';
 import { persistLayoutPreferences, useWorkspaceStore } from '@/stores/workspaceStore';
 import type { LinkCounts } from '@/types';
+import { EditorView } from '@codemirror/view';
+import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 
 /** 笔记编辑器（设计文档 16.5）。 */
 export function NoteEditorPage() {
@@ -93,10 +105,57 @@ export function NoteEditorPage() {
   const [countsFor, setCountsFor] = useState<string | null>(null);
   /** 保存 / 重命名后递增，驱动反向链接面板重新拉取派生数据 */
   const [linkRevision, setLinkRevision] = useState(0);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  /** 当前光标所在标题的偏移，用于大纲高亮 */
+  const [activeHeadingOffset, setActiveHeadingOffset] = useState<number | null>(null);
+  const editorViewRef = useRef<ReactCodeMirrorRef | null>(null);
 
   const signature = `${content}\u0000${title}\u0000${tags.join(',')}`;
 
   const bumpLinkRevision = useCallback(() => setLinkRevision((value) => value + 1), []);
+
+  const headings = useMemo(() => parseOutline(content), [content]);
+  const activeNoteId = detail?.note.id ?? null;
+
+  /** 粘贴 / 拖入图片：落盘到 attachments/ 并把相对路径插进正文（V1.1 M2-1）。 */
+  const handleAttachFiles = useCallback(
+    async (files: File[]): Promise<string | null> => {
+      const snippets: string[] = [];
+      for (const file of files) {
+        try {
+          const dataUrl = await readFileAsDataUrl(file);
+          const saved = await attachmentService.save({
+            noteId: activeNoteId,
+            fileName: file.name || null,
+            mimeType: mimeFromDataUrl(dataUrl) ?? file.type ?? null,
+            dataBase64: dataUrl,
+          });
+          snippets.push(buildImageMarkdown(saved.linkPath, attachmentAltText(file.name)));
+        } catch (error) {
+          toast.error(errorMessage(error));
+        }
+      }
+      if (snippets.length === 0) return null;
+      toast.success(
+        snippets.length === 1
+          ? '图片已保存到 attachments/'
+          : `已保存 ${snippets.length} 张图片到 attachments/`,
+      );
+      return snippets.join('\n');
+    },
+    [activeNoteId],
+  );
+
+  const jumpToHeading = useCallback((offset: number) => {
+    const view = editorViewRef.current?.view;
+    if (!view) return;
+    view.dispatch({
+      selection: { anchor: offset },
+      effects: EditorView.scrollIntoView(offset, { y: 'start' }),
+    });
+    view.focus();
+    setActiveHeadingOffset(offset);
+  }, []);
 
   const { saveNow, resetBaseline } = useAutosave({
     enabled: settings?.autosaveEnabled ?? false,
@@ -135,6 +194,7 @@ export function NoteEditorPage() {
       setContent(detail.content);
       setTitle(detail.note.title);
       setTags(detail.tags.map((tag) => tag.name));
+      setActiveHeadingOffset(null);
       baseHash.current = detail.note.contentHash ?? null;
       resetBaseline(
         `${detail.content}\u0000${detail.note.title}\u0000${detail.tags
@@ -305,6 +365,18 @@ export function NoteEditorPage() {
         <SaveStatusBadge status={saveStatus} detail={saveError} />
 
         <div className="ml-auto flex items-center gap-1">
+          {editorMode !== 'preview' ? (
+            <Button
+              size="icon"
+              variant="ghost"
+              title={outlineOpen ? '隐藏大纲' : '显示大纲'}
+              aria-pressed={outlineOpen}
+              className={cn(outlineOpen && 'text-[var(--brand)]')}
+              onClick={() => setOutlineOpen((value) => !value)}
+            >
+              <ListTree className="h-4 w-4" />
+            </Button>
+          ) : null}
           <Button
             size="icon"
             variant="ghost"
@@ -411,8 +483,7 @@ export function NoteEditorPage() {
           {linkCounts && countsFor === note.id ? (
             <>
               <span className="flex items-center gap-1" title="有多少篇笔记引用了本篇">
-                <Link2 className="h-3 w-3" />
-                被 {linkCounts.backlinks} 篇引用
+                <Link2 className="h-3 w-3" />被 {linkCounts.backlinks} 篇引用
               </span>
               <span className="flex items-center gap-1" title="本篇引用了多少处笔记">
                 引用 {linkCounts.outgoing} 篇
@@ -444,46 +515,57 @@ export function NoteEditorPage() {
         />
       </div>
 
-      <div ref={attachSplitContainer} className="flex min-h-0 flex-1">
-        {editorMode !== 'preview' ? (
-          <div
-            ref={editorWrapper}
-            data-testid="editor-pane"
-            className={cn(
-              'min-w-0 overflow-hidden',
-              editorMode === 'split' ? 'shrink-0' : 'flex-1',
-            )}
-            style={editorMode === 'split' ? { width: `${editorSplitRatio * 100}%` } : undefined}
-          >
-            <MarkdownEditor
-              value={content}
-              theme={theme}
-              fontSize={fontSize}
-              readOnly={readOnly}
-              onChange={(value) => {
-                setContent(value);
-                markDirty();
-              }}
+      <div className="flex min-h-0 flex-1">
+        <div ref={attachSplitContainer} className="flex min-h-0 min-w-0 flex-1">
+          {editorMode !== 'preview' ? (
+            <div
+              ref={editorWrapper}
+              data-testid="editor-pane"
+              className={cn(
+                'min-w-0 overflow-hidden',
+                editorMode === 'split' ? 'shrink-0' : 'flex-1',
+              )}
+              style={editorMode === 'split' ? { width: `${editorSplitRatio * 100}%` } : undefined}
+            >
+              <MarkdownEditor
+                viewRef={editorViewRef}
+                value={content}
+                theme={theme}
+                fontSize={fontSize}
+                readOnly={readOnly}
+                onAttachFiles={readOnly ? undefined : handleAttachFiles}
+                onChange={(value) => {
+                  setContent(value);
+                  markDirty();
+                }}
+              />
+            </div>
+          ) : null}
+          {editorMode === 'split' ? (
+            <ResizeHandle
+              side="left"
+              label="调整编辑 / 预览比例"
+              value={editorSplitRatio}
+              min={0.3}
+              max={0.7}
+              scale={splitWidth > 0 ? 1 / splitWidth : 0}
+              onChange={setEditorSplitRatio}
+              onCommit={persistLayoutPreferences}
+              onReset={() => setEditorSplitRatio(LAYOUT_DEFAULTS.editorSplitRatio)}
             />
-          </div>
-        ) : null}
-        {editorMode === 'split' ? (
-          <ResizeHandle
-            side="left"
-            label="调整编辑 / 预览比例"
-            value={editorSplitRatio}
-            min={0.3}
-            max={0.7}
-            scale={splitWidth > 0 ? 1 / splitWidth : 0}
-            onChange={setEditorSplitRatio}
-            onCommit={persistLayoutPreferences}
-            onReset={() => setEditorSplitRatio(LAYOUT_DEFAULTS.editorSplitRatio)}
-          />
-        ) : null}
-        {editorMode !== 'edit' ? (
+          ) : null}
+          {editorMode !== 'edit' ? (
           <div data-testid="preview-pane" className="min-w-0 flex-1 overflow-auto">
-            <MarkdownPreview content={content} />
+            <MarkdownPreview content={content} noteId={note.id} />
           </div>
+          ) : null}
+        </div>
+        {outlineOpen && editorMode !== 'preview' ? (
+          <OutlinePanel
+            headings={headings}
+            activeOffset={activeHeadingOffset}
+            onJump={jumpToHeading}
+          />
         ) : null}
       </div>
 

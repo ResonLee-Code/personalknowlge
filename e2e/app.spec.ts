@@ -97,9 +97,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   // 分栏可拖拽：向右拖动列表把手应加宽列表
   const listPanel = page.getByTestId('note-list-panel');
   const beforeBox = await listPanel.boundingBox();
-  const handleBox = await page
-    .getByRole('separator', { name: '调整笔记列表宽度' })
-    .boundingBox();
+  const handleBox = await page.getByRole('separator', { name: '调整笔记列表宽度' }).boundingBox();
   if (!beforeBox || !handleBox) throw new Error('未找到列表或分栏把手');
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
   await page.mouse.down();
@@ -127,7 +125,10 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
 
   // 13. 笔记导出入口（四种格式）
   await page.goto('/#/notes');
-  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await page
+    .getByRole('button', { name: /SQLite 全文搜索学习笔记/ })
+    .first()
+    .click();
   await expect(page.locator('.cm-content')).toBeVisible();
   await page.getByRole('button', { name: '更多操作' }).click();
   await page.getByRole('menuitem', { name: /导出（Markdown/ }).click();
@@ -151,7 +152,10 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
 
   // 15. 分屏比例拖拽：编辑栏宽度应跟随指针（回归：首次进入时比例换算错误导致跳变）
   await page.goto('/#/notes');
-  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await page
+    .getByRole('button', { name: /SQLite 全文搜索学习笔记/ })
+    .first()
+    .click();
   await expect(page.locator('.cm-content')).toBeVisible();
   const editorPane = page.getByTestId('editor-pane');
   const paneBefore = await editorPane.boundingBox();
@@ -173,14 +177,20 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   // 16. 切换笔记不应重置编辑模式（回归：切换后回到预览）
   await page.getByRole('button', { name: '编辑', exact: true }).click();
   await expect(page.locator('.cm-content')).toBeVisible();
-  await page.getByRole('button', { name: /欢迎使用 Personal Knowledge OS/ }).first().click();
+  await page
+    .getByRole('button', { name: /欢迎使用 Personal Knowledge OS/ })
+    .first()
+    .click();
   await expect(page.locator('.cm-content')).toBeVisible();
 
   // 分屏模式下切换笔记同样保持：编辑区与预览区都应存在
   await page.getByRole('button', { name: '分屏', exact: true }).click();
   await expect(page.getByTestId('editor-pane')).toBeVisible();
   await expect(page.getByTestId('preview-pane')).toBeVisible();
-  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await page
+    .getByRole('button', { name: /SQLite 全文搜索学习笔记/ })
+    .first()
+    .click();
   await expect(page.getByTestId('editor-pane')).toBeVisible();
   await expect(page.getByTestId('preview-pane')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '15-edit-mode-kept.png') });
@@ -201,12 +211,33 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.screenshot({ path: path.join(SHOTS, '16-backlink-panel.png') });
 
   // 打开被引用的笔记，应看到来自「索引设计笔记」的反链与上下文
-  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await page
+    .getByRole('button', { name: /SQLite 全文搜索学习笔记/ })
+    .first()
+    .click();
   await expect(page.getByTestId('backlink-item').first()).toContainText('索引设计笔记');
   await expect(page.getByTestId('backlink-item').first()).toContainText(
     '参考 [[SQLite 全文搜索学习笔记]]',
   );
   await page.screenshot({ path: path.join(SHOTS, '17-backlink-from-source.png') });
+
+  // 18. 编辑器大纲（V1.1 M2-1）：解析标题层级并支持点击跳转
+  await page.getByRole('button', { name: '显示大纲' }).click();
+  await expect(page.getByTestId('outline-panel')).toBeVisible();
+  await expect(page.getByTestId('outline-item').first()).toContainText('全文搜索');
+  await page.getByTestId('outline-item').first().click();
+  await page.screenshot({ path: path.join(SHOTS, '18-outline.png') });
+  await page.getByRole('button', { name: '隐藏大纲' }).click();
+  await expect(page.getByTestId('outline-panel')).toHaveCount(0);
+
+  // 19. ⌘/Ctrl + P 快速切换笔记（按标题模糊匹配）
+  await page.keyboard.press('Meta+p');
+  await expect(page.getByLabel('按标题跳转')).toBeVisible();
+  await page.keyboard.type('索引设计');
+  await expect(page.getByTestId('quick-switch-item').first()).toContainText('索引设计笔记');
+  await page.screenshot({ path: path.join(SHOTS, '19-quick-switcher.png') });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue('索引设计笔记');
 
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();

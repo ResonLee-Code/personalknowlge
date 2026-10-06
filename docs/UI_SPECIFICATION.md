@@ -59,6 +59,7 @@ AppShell
 │           ├── MarkdownPreview (react-markdown + remark-gfm + rehype-highlight)
 │           ├── TagEditor
 │           ├── BacklinkPanel      → 反向链接 + 本篇未解析链接
+│           ├── OutlinePanel       → `#` 标题大纲，点击跳转
 │           └── ConflictDialog / MoveNoteDialog / RenameFileDialog
 └── StatusBar             → 索引状态、统计、运行模式、错误摘要
 GlobalSearchDialog（⌘K 面板）、NewNoteDialog（⌘N）
@@ -95,6 +96,16 @@ GlobalSearchDialog（⌘K 面板）、NewNoteDialog（⌘N）
 - 链接数据属于可重建派生数据：读取失败时面板降级为空列表，不阻塞编辑；
   保存成功后计数与面板自动刷新。
 
+### 编辑体验（V1.1 M2-1 增补）
+
+- **图片粘贴/拖拽**：编辑器内粘贴或拖入图片即写入 `attachments/YYYY-MM/`，
+  正文插入相对当前笔记目录的链接；预览会内联显示工作区内的相对图片；
+  超过 20 MB 的附件提示改用「导入外部文件」，读取失败时保留原始链接（不阻塞编辑）；
+- **大纲**：工具栏「大纲」按钮（编辑 / 分屏模式）打开右侧大纲栏，按层级缩进列出 `#` 标题，
+  点击跳转并高亮；没有标题时给出 `.md` 书写引导；
+- **快速切换**：`⌘/Ctrl + P` 打开标题快速切换面板（模糊匹配、↑↓ 选择、回车打开、Esc 关闭）；
+- 大纲栏宽度固定 190px，不参与分屏比例换算，因此拖拽分屏把手的手感不受影响。
+
 ## 4. 编辑器行为（设计文档 16.5）
 
 | 状态 | 表现 |
@@ -120,6 +131,7 @@ GlobalSearchDialog（⌘K 面板）、NewNoteDialog（⌘N）
 | --- | --- | --- |
 | 新建笔记 | Ctrl + N | ⌘ + N |
 | 全局搜索 | Ctrl + K | ⌘ + K |
+| 快速切换笔记 | Ctrl + P | ⌘ + P |
 | 保存 | Ctrl + S | ⌘ + S |
 | 聚焦编辑器 | Ctrl + E | ⌘ + E |
 | 关闭当前笔记 | Ctrl + W | ⌘ + W |
