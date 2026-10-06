@@ -43,14 +43,24 @@ impl GraphService {
             tag_id: query.tag_id.clone(),
             keyword: query.keyword.clone(),
             status: Some(NoteStatus::Active),
-            page: Some(1),
-            page_size: Some(10_000),
             ..Default::default()
         };
-        let (notes, _) = self
-            .ctx
-            .db
-            .with_conn(|conn| SqliteNoteRepository.list(conn, &workspace_id, &list_query))?;
+        // 仓储单页上限 500，图谱需要完整节点集 → 按页取全部
+        let mut notes = Vec::new();
+        let mut page = 1i64;
+        loop {
+            let mut paged = list_query.clone();
+            paged.page = Some(page);
+            let (batch, total) = self.ctx.db.with_conn(|conn| {
+                SqliteNoteRepository.list(conn, &workspace_id, &paged)
+            })?;
+            let batch_len = batch.len();
+            notes.extend(batch);
+            if batch_len == 0 || notes.len() as i64 >= total || page >= 100 {
+                break;
+            }
+            page += 1;
+        }
 
         let updated_after = query.updated_after.clone();
         let candidates: Vec<_> = notes

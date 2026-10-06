@@ -69,6 +69,16 @@ impl LinkService {
     /// 保存 / 导入 / 外部修改后刷新某篇笔记的出链。
     pub fn refresh_note_links(&self, note: &Note, body: &str) -> Result<usize> {
         let index = self.title_index()?;
+        self.refresh_note_links_with_index(note, body, &index)
+    }
+
+    /// 复用已构建的标题索引写入链接（批量场景避免重复加载索引）。
+    fn refresh_note_links_with_index(
+        &self,
+        note: &Note,
+        body: &str,
+        index: &TitleIndex,
+    ) -> Result<usize> {
         let rows = self.collect_rows(note, body, &index)?;
         let count = rows.len();
         self.ctx.db.with_transaction(|tx| {
@@ -173,15 +183,12 @@ impl LinkService {
         let notes = self.ctx.db.with_conn(|conn| {
             SqliteNoteRepository.list_by_status(conn, self.workspace_id(), NoteStatus::Active)
         })?;
-        self.ctx
-            .db
-            .with_conn(|conn| self.repo.clear_workspace(conn, self.workspace_id()))?;
-
-        let mut links = 0i64;
-        let mut resolved = 0i64;
+        // 标题索引与正文只读一次：旧实现每篇笔记都重建索引并单独开事务，3000 篇下退化为 O(N²)
+        let index = self.title_index()?;
+        let mut bodies: Vec<(Note, String)> = Vec::with_capacity(notes.len());
         for note in &notes {
-            let body = match self.ctx.storage.read_note(&note.file_path) {
-                Ok(stored) => stored.body,
+            match self.ctx.storage.read_note(&note.file_path) {
+                Ok(stored) => bodies.push((note.clone(), stored.body)),
                 Err(error) => {
                     tracing::warn!(
                         target: "links",
@@ -189,17 +196,28 @@ impl LinkService {
                         note.file_path,
                         error.message
                     );
-                    continue;
                 }
-            };
-            let count = self.refresh_note_links(note, &body)? as i64;
-            links += count;
-            let (_, _, unresolved) = self
-                .ctx
-                .db
-                .with_conn(|conn| self.repo.counts(conn, &note.id))?;
-            resolved += count - unresolved;
+            }
         }
+
+        let mut links = 0i64;
+        let mut unresolved = 0i64;
+        self.ctx.db.with_transaction(|tx| {
+            self.repo.clear_workspace(tx, self.workspace_id())?;
+            for (note, body) in &bodies {
+                let rows = self.collect_rows(note, body, &index)?;
+                for row in &rows {
+                    self.repo.insert(tx, self.workspace_id(), &note.id, row)?;
+                }
+                links += rows.len() as i64;
+                unresolved += rows
+                    .iter()
+                    .filter(|row| row.target_note_id.is_none() && row.link_type != LinkType::Url)
+                    .count() as i64;
+            }
+            Ok(())
+        })?;
+        let resolved = links - unresolved;
 
         let report = LinkRebuildReport {
             scanned_notes: notes.len() as i64,

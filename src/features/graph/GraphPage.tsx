@@ -31,6 +31,8 @@ export function GraphPage() {
   const [categoryId, setCategoryId] = useState('');
   const [tagId, setTagId] = useState('');
   const [includeOrphans, setIncludeOrphans] = useState(true);
+  /** 时间过滤：''=全部，7/30/90=最近 N 天（按 updatedAt 过滤） */
+  const [recent, setRecent] = useState('');
   const [focusId, setFocusId] = useState<string | null>(null);
   const [hops, setHops] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -39,11 +41,15 @@ export function GraphPage() {
   const load = useCallback(async () => {
     const requestId = requestRef.current + 1;
     requestRef.current = requestId;
+    const updatedAfter = recent
+      ? new Date(Date.now() - Number(recent) * 24 * 60 * 60 * 1000).toISOString()
+      : null;
     const next = await graphService
       .get({
         categoryId: categoryId || null,
         tagId: tagId || null,
         includeOrphans,
+        updatedAfter,
         focusNoteId: focusId,
         hops,
       })
@@ -55,7 +61,7 @@ export function GraphPage() {
     setData(next);
     setError(null);
     if (selectedId && !next.nodes.some((node) => node.id === selectedId)) setSelectedId(null);
-  }, [categoryId, tagId, includeOrphans, focusId, hops, selectedId]);
+  }, [categoryId, tagId, includeOrphans, recent, focusId, hops, selectedId]);
 
   useEffect(() => {
     void load();
@@ -128,6 +134,17 @@ export function GraphPage() {
             />
             孤立节点
           </label>
+          <select
+            aria-label="按更新时间筛选图谱"
+            value={recent}
+            onChange={(event) => setRecent(event.target.value)}
+            className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs text-[var(--ink)]"
+          >
+            <option value="">全部时间</option>
+            <option value="7">最近 7 天</option>
+            <option value="30">最近 30 天</option>
+            <option value="90">最近 90 天</option>
+          </select>
           <Button
             size="sm"
             variant={focusId ? 'default' : 'secondary'}

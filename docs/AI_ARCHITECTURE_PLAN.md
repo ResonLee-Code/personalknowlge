@@ -56,8 +56,17 @@
 ### 3.1 关键接口（Rust）
 
 ```rust
-// ai/provider.rs —— 模型接入层：本地与远程实现同一个 trait
-pub trait LlmProvider: Send + Sync {
+// ai/decision.rs —— 决策模型（Jev / 本地小模型）：类型化 + 校准置信度
+pub trait DecisionModel: Send + Sync {
+    fn id(&self) -> &'static str;                        // "jev" / "local.rules"
+    fn is_local(&self) -> bool;
+    /// 输入状态 + 候选 schema，输出「枚举值 + 置信度」（不会产生类型错误）
+    fn decide<T: DecisionSchema>(&self, state: DecisionState, schema: &T)
+        -> Result<CalibratedDecision<T::Choice>>;
+}
+
+// ai/provider.rs —— 生成模型（LLM）：本地与远程实现同一个 trait
+pub trait GenerativeModel: Send + Sync {
     fn id(&self) -> &'static str;                       // "local.ollama" / "remote.openai"
     fn is_local(&self) -> bool;                          // 决定是否允许携带正文
     fn capabilities(&self) -> ProviderCapabilities;      // 是否支持流式 / 工具调用 / 长度上限
@@ -110,11 +119,65 @@ pub struct AiAnswer {
 2. **第二阶段（可选增强）**：引入 embedding + 本地向量索引（文件存储，随工作区走），
    与 FTS 结果做加权融合（RRF）；索引可一键重建 / 删除，不参与备份的关键路径。
 
-> 说明：需求里提到的 **JEV** 我按「向量检索/嵌入组件」理解并落在这一层的 `VectorRetriever` 位置；
-> 若 JEV 是指别的机制（例如某种推理引擎或运行时），告诉我它的准确定义，
-> 我会调整本节命名与接口而不是重写架构 —— 因为决策层只依赖 `Retriever` trait。
+## 5. Jev（TypeSafe AI）/ System One Model 的结合方向
 
-## 5. 隐私与开关（默认最保守）
+### 5.1 它是什么（2026-10-07 依据官方资料核实）
+
+TypeSafe AI 于 2026-09-15 发布 **System One Model** 与首个模型 **Jev**（early access），
+官网与博客（typesafe.ai/blog/introducing-system-one-models-and-jev）要点：
+
+- 定位：**「frontier-intelligence 的函数调用」——非结构化状态进，类型化概率决策出**；
+- 输出：**类型安全**（候选集合与结构事先声明，模型不会产生类型错误）、每条结果都带
+  **校准过的概率/置信度**；不生成字符串，因此不存在「文本幻觉」这种失效模式；
+- 采样：**并行采样**（一次查询生成全部输出），端到端 **70–500ms**，官方称比同级别 LLM 快 40–200×；
+- 训练方法：**RLCD（Reinforcement Learning for Calibrated Decisions）**，
+  优化目标是「决策 + 诚实的置信度」，而不是人类偏好文本；
+- 成本：输入 $0.042/MTok，输出计费为 0；适合高频、低成本的决策调用；
+- 适用场景（官方列举）：AI 工作流 /「智能 if 语句」（分类、路由、打分、抽取、分支）、
+  实时应用、以及 **score / judge / verify / guardrail**（含给 LLM 输出做校验）。
+
+### 5.2 与本项目架构的对应关系
+
+Jev 正对应用户需求里的「**AI Decision Layer**」中的**决策**部分，而 LLM 负责**生成**部分，
+两者不是替代关系而是分工：
+
+| 职责 | 谁来做 | 本项目的落点 |
+| --- | --- | --- |
+| 意图识别、能力路由、是否外发、成本/配额判断 | **Jev**（类型化 + 置信度 + 毫秒级） | `application/ai/decision.rs` |
+| 工具选择与参数抽取（读哪篇笔记、查什么关键词） | **Jev**（结构化输出，直接反序列化即可） | `ai/decision.rs` → `ai/tools/*` |
+| 结果打分 / 重排 / 校验（含对 LLM 输出的 guardrail） | **Jev** | `ai/verify.rs` |
+| 摘要、问答、改写等**文本生成** | **LLM**（本地优先） | `ai/provider.rs` |
+
+因此接口层做一个小调整：决策层不再只依赖 `LlmProvider`，而是拆成两个 trait ——
+`DecisionModel`（Jev 或本地小模型，输入 schema + 状态，输出带置信度的类型化决策）与
+`GenerativeModel`（LLM）。这样既能只用 Jev（不需要生成文本时），也能只用 LLM（缺失决策模型时降级），
+还能「LLM 生成 + Jev 校验」组合使用。
+
+### 5.3 在本应用里可以先做什么（按价值排序）
+
+1. **意图路由**：把「用户这句话想要什么」（新建 / 搜索 / 关联 / 总结 / 提问）从提示词工程
+   变成类型化分类，置信度低于阈值时回退到规则或询问用户；
+2. **链接目标消歧**：`[[索引设计]]` 命中多篇同名笔记时，用分类 / 标签 / 最近编辑 / 上下文
+   打分选出最可能的目标（这正是「同名冲突同分类优先」规则想解决的问题）；
+3. **导入分流**：导入外部目录时判断每篇属于哪个分类、是否重复、是否需要合并；
+4. **搜索结果重排**：在 FTS 召回之后给候选打分排序（结合用户当前笔记上下文）；
+5. **冲突处理建议**：外部修改冲突时，判断「保留本地 / 采用磁盘 / 合并」并给出置信度；
+6. **图谱辅助**：社区命名、孤立节点归类建议（与 M3 图谱联动）；
+7. **LLM 输出校验**：把 LLM 的摘要/标签建议交给 Jev 打分，低于阈值不展示，减少误导。
+
+### 5.4 风险与约束（必须写进实现）
+
+- **远程依赖与隐私**：Jev 目前是云端服务（early access）。这与本项目「本地优先」冲突，
+  因此它必须和远程 LLM 走同一道闸门：默认关闭、每次调用显式授权、只发送必要片段
+  （默认只发标题与检索命中片段，不发整篇正文）；
+- **不做单点依赖**：决策层必须能在「没有 Jev」时用启发式规则降级（当前排序规则、
+  同名冲突策略都已经是可复用的基线）；
+- **可观测**：每次决策记录 `capability / 置信度 / 是否降级 / 是否外发 / 耗时`，
+  便于复盘「AI 为什么这么做」；
+- **契约优先**：先定义 schema（Rust 类型 + serde），再谈接哪个模型 —— 这也是 Jev 的核心卖点，
+  用它时我们天然拿到类型安全与校准置信度。
+
+## 6. 隐私与开关（默认最保守）
 
 | 开关 | 默认 | 说明 |
 | --- | --- | --- |
@@ -127,7 +190,7 @@ pub struct AiAnswer {
 事件与审计：每次决策记录 `intent / capability / provider / 是否外发 / 耗时` 到日志
 （不含正文），便于用户自查。
 
-## 6. 分阶段落地
+## 7. 分阶段落地
 
 | 阶段 | 内容 | 依赖 |
 | --- | --- | --- |
@@ -141,7 +204,7 @@ pub struct AiAnswer {
 **验收口径**：A2 起，任意能力必须满足 —— 无网络可用（本地模型）、回答带引用、
 关闭总开关后界面无残留入口、任何写回都需要用户确认。
 
-## 7. 与现有模块的边界
+## 8. 与现有模块的边界
 
 - 复用：`SearchService`（FTS）、`LinkService`（关联）、`NoteService`（只读路径）；
 - 不侵入：AI 不进入保存/索引写入路径，除非用户确认建议，且确认后仍走 `note_save`；
