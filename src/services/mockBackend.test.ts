@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { linkService } from '@/services/linkService';
 import { noteService } from '@/services/noteService';
 import { categoryService } from '@/services/categoryService';
 import { searchService } from '@/services/searchService';
@@ -107,5 +108,78 @@ describe('浏览器预览后端', () => {
       code: 'INVALID_INPUT',
       message: expect.stringContaining('桌面应用'),
     });
+  });
+
+  it('解析双向链接：反向链接、出链、未解析与计数', async () => {
+    await workspaceService.create('测试库', '/tmp/mock');
+    const target = await noteService.create({ title: '索引设计' });
+    const source = await noteService.create({
+      title: '查询优化',
+      initialContent: '参考 [[索引设计|倒排索引]]，另见 [[还没写的笔记]]。',
+    });
+
+    const backlinks = await linkService.backlinks(target.note.id);
+    expect(backlinks).toHaveLength(1);
+    expect(backlinks[0]).toMatchObject({
+      noteId: source.note.id,
+      title: '查询优化',
+    });
+    expect(backlinks[0]?.context).toContain('[[索引设计|倒排索引]]');
+
+    const outgoing = await linkService.outgoing(source.note.id);
+    expect(outgoing).toHaveLength(2);
+    expect(outgoing[0]).toMatchObject({
+      targetTitle: '索引设计',
+      targetNoteId: target.note.id,
+      targetExists: true,
+      linkType: 'wikilink',
+    });
+    expect(outgoing[1]).toMatchObject({ targetTitle: '还没写的笔记', targetExists: false });
+
+    const counts = await linkService.counts(target.note.id);
+    expect(counts).toEqual({ backlinks: 1, outgoing: 0, unresolved: 0 });
+    const sourceCounts = await linkService.counts(source.note.id);
+    expect(sourceCounts).toEqual({ backlinks: 0, outgoing: 2, unresolved: 1 });
+
+    const unresolved = await linkService.unresolved();
+    expect(unresolved).toHaveLength(1);
+    expect(unresolved[0]).toMatchObject({
+      sourceNoteId: source.note.id,
+      sourceTitle: '查询优化',
+      targetTitle: '还没写的笔记',
+    });
+  });
+
+  it('忽略代码块内的 [[…]]，并支持锚点', async () => {
+    await workspaceService.create('测试库', '/tmp/mock');
+    const note = await noteService.create({
+      title: '解析规则',
+      initialContent: [
+        '正文链接 [[目标笔记#小节]]',
+        '',
+        '```rust',
+        '// [[代码块里的链接不算]]',
+        '```',
+        '',
+        '行内代码 `[[也不算]]` 结束。',
+      ].join('\n'),
+    });
+
+    const outgoing = await linkService.outgoing(note.note.id);
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]).toMatchObject({ targetTitle: '目标笔记', anchor: '小节' });
+  });
+
+  it('重建链接索引返回统计信息', async () => {
+    await workspaceService.create('测试库', '/tmp/mock');
+    await noteService.create({ title: 'A' });
+    await noteService.create({ title: 'B', initialContent: '链接 [[A]] 与 [[缺失]]' });
+
+    const report = await linkService.rebuild();
+    expect(report.links).toBe(2);
+    expect(report.resolved).toBe(1);
+    expect(report.unresolved).toBe(1);
+    // 创建工作区会预置一篇欢迎笔记，因此是 3 篇
+    expect(report.scannedNotes).toBe(3);
   });
 });

@@ -9,18 +9,23 @@
 import type {
   AppError,
   AppSettings,
+  Backlink,
   BackupInfo,
   Category,
   CategoryNode,
   CreateNoteInput,
   IndexStatus,
+  LinkCounts,
+  LinkRebuildReport,
   Note,
   NoteDetail,
   NoteListQuery,
   NoteSummary,
+  OutgoingLink,
   SaveNoteInput,
   SearchQuery,
   TextSegment,
+  UnresolvedLink,
   Workspace,
   WorkspaceOpenResult,
 } from '@/types';
@@ -463,6 +468,299 @@ function searchNotes(query: SearchQuery) {
   };
 }
 
+// ---------------------------------------------------------------- 双向链接（V1.1 M1）
+//
+// 浏览器预览模式下的链接解析。规则与 Rust 端 `core/text.rs` 保持一致：
+// `[[标题]]` / `[[标题|别名]]` / `[[标题#小节]]`、忽略围栏代码块与行内代码、
+// 上下文摘要取所在行（过长时截断）。这样在不启动桌面外壳时也能完整预览反链面板。
+
+const LINK_CONTEXT_CHARS = 120;
+
+interface MockWikiLink {
+  target: string;
+  alias: string | null;
+  anchor: string | null;
+  context: string;
+}
+
+/** 标记不可解析的位置（围栏代码块 + 行内代码）。 */
+function maskCodeRegions(text: string): boolean[] {
+  const chars = [...text];
+  const parsable = chars.map(() => true);
+
+  // 1) 围栏代码块（``` 或 ~~~，允许更长围栏与 info string）
+  let lineStart = 0;
+  let inFence = false;
+  let fenceChar = '`';
+  let fenceLen = 0;
+  for (let index = 0; index <= chars.length; index += 1) {
+    if (index === chars.length || chars[index] === '\n') {
+      const trimmed = chars.slice(lineStart, index).join('').trim();
+      const marker = trimmed[0];
+      const fenceRun = trimmed.match(/^[`~]+/)?.[0].length ?? 0;
+      const isFence =
+        fenceRun >= 3 &&
+        (marker === '`' || marker === '~') &&
+        [...trimmed].every((ch) => ch === '`' || ch === '~' || /\s/.test(ch) || /[A-Za-z0-9]/.test(ch));
+      if (isFence) {
+        if (!inFence) {
+          inFence = true;
+          fenceChar = marker;
+          fenceLen = fenceRun;
+        } else if (marker === fenceChar && fenceRun >= fenceLen) {
+          inFence = false;
+        }
+        for (let offset = lineStart; offset < index; offset += 1) parsable[offset] = false;
+      } else if (inFence) {
+        for (let offset = lineStart; offset < index; offset += 1) parsable[offset] = false;
+      }
+      lineStart = index + 1;
+    }
+  }
+
+  // 2) 行内代码（成对反引号，不跨行）
+  let cursor = 0;
+  while (cursor < chars.length) {
+    if (chars[cursor] === '`' && parsable[cursor]) {
+      let run = 1;
+      while (cursor + run < chars.length && chars[cursor + run] === '`' && parsable[cursor + run]) {
+        run += 1;
+      }
+      let probe = cursor + run;
+      let closing: number | null = null;
+      while (probe < chars.length) {
+        if (chars[probe] === '\n') break;
+        if (chars[probe] === '`' && parsable[probe]) {
+          let closeRun = 1;
+          while (
+            probe + closeRun < chars.length &&
+            chars[probe + closeRun] === '`' &&
+            parsable[probe + closeRun]
+          ) {
+            closeRun += 1;
+          }
+          if (closeRun === run) {
+            closing = probe;
+            break;
+          }
+          probe += closeRun;
+          continue;
+        }
+        probe += 1;
+      }
+      if (closing === null) {
+        cursor += run;
+      } else {
+        for (let offset = cursor; offset < closing + run; offset += 1) parsable[offset] = false;
+        cursor = closing + run;
+      }
+    } else {
+      cursor += 1;
+    }
+  }
+
+  return parsable;
+}
+
+function lineContext(chars: string[], at: number): string {
+  let start = 0;
+  for (let index = at - 1; index >= 0; index -= 1) {
+    if (chars[index] === '\n') {
+      start = index + 1;
+      break;
+    }
+  }
+  let end = chars.length;
+  for (let index = at; index < chars.length; index += 1) {
+    if (chars[index] === '\n') {
+      end = index;
+      break;
+    }
+  }
+  const line = chars.slice(start, end);
+  if (line.length <= LINK_CONTEXT_CHARS) return line.join('').trim();
+
+  const offset = at - start;
+  const half = Math.floor(LINK_CONTEXT_CHARS / 2);
+  let from = Math.max(0, offset - half);
+  const to = Math.min(line.length, from + LINK_CONTEXT_CHARS);
+  if (to - from < LINK_CONTEXT_CHARS) from = Math.max(0, to - LINK_CONTEXT_CHARS);
+  const body = line.slice(from, to).join('').trim();
+  return `${from > 0 ? '…' : ''}${body}${to < line.length ? '…' : ''}`;
+}
+
+function splitUnescaped(value: string, separator: string): [string, string | null] {
+  const chars = [...value];
+  for (let index = 0; index < chars.length; index += 1) {
+    if (chars[index] === '\\') {
+      index += 1;
+      continue;
+    }
+    if (chars[index] === separator) {
+      return [chars.slice(0, index).join(''), chars.slice(index + 1).join('')];
+    }
+  }
+  return [value, null];
+}
+
+function unescapeLinkText(value: string): string {
+  return value.split('\\|').join('|').split('\\#').join('#').split('\\]').join(']');
+}
+
+function parseWikiLinkInner(
+  inner: string,
+): { target: string; alias: string | null; anchor: string | null } | null {
+  const [targetPart, aliasPart] = splitUnescaped(inner, '|');
+  const [titlePart, anchorPart] = splitUnescaped(targetPart, '#');
+  const target = unescapeLinkText(titlePart.trim());
+  if (!target) return null;
+  return {
+    target,
+    alias: aliasPart ? unescapeLinkText(aliasPart.trim()) || null : null,
+    anchor: anchorPart ? unescapeLinkText(anchorPart.trim()) || null : null,
+  };
+}
+
+function findWikiLinkEnd(chars: string[], parsable: boolean[], start: number): number | null {
+  let index = start;
+  while (index < chars.length) {
+    const ch = chars[index];
+    if (ch === '\n') return null;
+    if (ch === ']' && chars[index + 1] === ']' && parsable[index]) return index;
+    if (ch === '[' && chars[index + 1] === '[') return null;
+    index += 1;
+  }
+  return null;
+}
+
+/** 解析正文中的双向链接。 */
+function parseWikilinks(content: string): MockWikiLink[] {
+  const chars = [...content];
+  const parsable = maskCodeRegions(content);
+  const links: MockWikiLink[] = [];
+  let index = 0;
+  while (index + 1 < chars.length) {
+    if (parsable[index] && chars[index] === '[' && chars[index + 1] === '[') {
+      const end = findWikiLinkEnd(chars, parsable, index + 2);
+      if (end !== null) {
+        const parsed = parseWikiLinkInner(chars.slice(index + 2, end).join(''));
+        if (parsed) links.push({ ...parsed, context: lineContext(chars, index) });
+        index = end + 2;
+        continue;
+      }
+    }
+    index += 1;
+  }
+  return links;
+}
+
+function activeNotes(): Note[] {
+  return state.notes.filter((note) => note.status === 'active');
+}
+
+/** 目标解析：标题（忽略大小写）→ 相对路径 → 文件名。 */
+function resolveLinkTarget(target: string): Note | undefined {
+  const needle = target.trim().toLowerCase();
+  if (!needle) return undefined;
+  const notes = activeNotes();
+  const byTitle = notes.find((note) => note.title.toLowerCase() === needle);
+  if (byTitle) return byTitle;
+
+  const normalized = needle.replace(/\\/g, '/').replace(/^\.\//, '');
+  const candidates = normalized.endsWith('.md') ? [normalized] : [normalized, `${normalized}.md`];
+  return notes.find((note) => {
+    const path = note.filePath.toLowerCase().replace(/\\/g, '/');
+    const fileName = path.split('/').pop() ?? '';
+    return candidates.some(
+      (candidate) =>
+        path === candidate ||
+        path.endsWith(`/${candidate}`) ||
+        fileName === candidate ||
+        fileName.replace(/\.md$/, '') === candidate,
+    );
+  });
+}
+
+function wikiLinkRows(): Array<{ source: Note; link: MockWikiLink; target?: Note }> {
+  const rows: Array<{ source: Note; link: MockWikiLink; target?: Note }> = [];
+  activeNotes().forEach((source) => {
+    parseWikilinks(state.contents[source.id] ?? '').forEach((link) => {
+      rows.push({ source, link, target: resolveLinkTarget(link.target) });
+    });
+  });
+  return rows;
+}
+
+function mockBacklinks(noteId: string): Backlink[] {
+  const seen = new Set<string>();
+  const backlinks: Backlink[] = [];
+  wikiLinkRows().forEach(({ source, link, target }) => {
+    if (!target || target.id !== noteId) return;
+    const key = `${source.id}\u0000${link.context}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    backlinks.push({
+      noteId: source.id,
+      title: source.title,
+      filePath: source.filePath,
+      context: link.context,
+      anchor: link.anchor,
+      updatedAt: source.updatedAt,
+    });
+  });
+  return backlinks;
+}
+
+function mockOutgoing(noteId: string): OutgoingLink[] {
+  const note = state.notes.find((item) => item.id === noteId);
+  if (!note) return [];
+  return parseWikilinks(state.contents[noteId] ?? '').map((link) => {
+    const target = resolveLinkTarget(link.target);
+    return {
+      targetTitle: link.target,
+      targetNoteId: target?.id ?? null,
+      targetExists: Boolean(target),
+      anchor: link.anchor,
+      linkType: 'wikilink',
+      context: link.context,
+    };
+  });
+}
+
+function mockUnresolved(): UnresolvedLink[] {
+  return wikiLinkRows()
+    .filter((row) => !row.target)
+    .map((row) => ({
+      sourceNoteId: row.source.id,
+      sourceTitle: row.source.title,
+      targetTitle: row.link.target,
+      context: row.link.context,
+    }));
+}
+
+function mockCounts(noteId: string): LinkCounts {
+  const rows = wikiLinkRows();
+  const outgoing = rows.filter((row) => row.source.id === noteId);
+  return {
+    backlinks: rows.filter((row) => row.target?.id === noteId).length,
+    outgoing: outgoing.length,
+    unresolved: outgoing.filter((row) => !row.target).length,
+  };
+}
+
+function mockRebuild(): LinkRebuildReport {
+  const startedAt = Date.now();
+  const rows = wikiLinkRows();
+  const resolved = rows.filter((row) => Boolean(row.target)).length;
+  return {
+    scannedNotes: activeNotes().length,
+    links: rows.length,
+    resolved,
+    unresolved: rows.length - resolved,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
 function categoryTree(): CategoryNode[] {
   const build = (parentId: string | null, depth: number): CategoryNode[] =>
     state.categories
@@ -668,6 +966,21 @@ export async function handleMockInvoke(
         '浏览器预览模式无法读取本地文件，请在桌面应用中使用「导入外部文件」。',
       );
       break;
+    case 'links_get_backlinks':
+      requireWorkspace();
+      return mockBacklinks(String(payload.noteId ?? ''));
+    case 'links_get_outgoing':
+      requireWorkspace();
+      return mockOutgoing(String(payload.noteId ?? ''));
+    case 'links_get_unresolved':
+      requireWorkspace();
+      return mockUnresolved();
+    case 'links_get_counts':
+      requireWorkspace();
+      return mockCounts(String(payload.noteId ?? ''));
+    case 'links_rebuild':
+      requireWorkspace();
+      return mockRebuild();
     case 'note_export':
       fail(
         'INVALID_INPUT',

@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 表现层 | 界面与交互，不直接访问 SQLite 与文件系统 | `src/` |
 | 命令层 | Tauri 命令，参数校验与线程调度 | `src-tauri/src/commands/` |
-| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份） | `src-tauri/src/application/` |
+| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接） | `src-tauri/src/application/` |
 | 领域层 | 数据结构与不变量，不依赖框架 | `src-tauri/src/domain/` |
 | 仓储层 | 隔离 SQL 细节（trait + SQLite 实现） | `src-tauri/src/repositories/` |
 | 基础设施层 | SQLite、Markdown 存储、FTS5、文件监听、备份、frontmatter、docx 生成 | `src-tauri/src/infrastructure/` |
@@ -20,7 +20,7 @@ React UI (src/)
    ▼
 commands/            ← 只做转发；阻塞任务交给 async_runtime::spawn_blocking
    ▼
-application/         ← NoteService / CategoryService / TagService / SearchService / BackupService / IndexService / WorkspaceService
+application/         ← NoteService / CategoryService / TagService / SearchService / BackupService / LinkService / IndexService / WorkspaceService
    ▼
 domain/  +  repositories/  +  infrastructure/
    ▼
@@ -129,3 +129,21 @@ Markdown 文件 + SQLite（WAL）+ FTS5 索引 + 回收站
    避免引入重量级排版引擎与字体嵌入。
 9. **设置数值宽容解析**：`UpdateSettingsInput` 的像素/延迟字段同时接受整数与小数并四舍五入，
    以兼容 Retina 屏下拖拽产生的浮点坐标（`clientWidth`/`clientX` 可能是小数）。
+10. **双向链接是「可重建派生数据」**（V1.1 M1）：`note_links` 表不参与正文存储，
+    完全可由 Markdown 正文重建（`links_rebuild`）。写入时机与 FTS 索引一致（保存 / 导入 /
+    外部修改 / 创建 / 恢复 / 重命名 / 删除），因此链接与正文不会出现长期漂移；
+    重命名会同步改写来源笔记正文里的 `[[旧标题…]]`，保留别名与锚点。
+    目标解析顺序：标题（大小写不敏感）→ 工作区相对路径 → 文件名 → 笔记 id。
+
+### 5.1 双向链接的前端结构（V1.1 M1-3）
+
+```text
+linkService (src/services/linkService.ts)
+  → commands: links_get_backlinks / links_get_outgoing / links_get_unresolved /
+              links_get_counts / links_rebuild
+  → 组件：BacklinkPanel（编辑器底部）、UnresolvedLinksCard（首页）
+浏览器预览：src/services/mock.ts 用与 Rust 端一致的规则在内存中解析 [[…]]，
+            反链面板、引用计数与未解析链接在 `pnpm dev` 下同样可用。
+```
+
+链接读取失败时组件降级为空列表并在控制台留痕，不阻塞编辑（链接只是派生数据）。

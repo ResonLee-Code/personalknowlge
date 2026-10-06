@@ -170,3 +170,8 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 归一化错误（字符串 / 对象 / 未知异常 → `AppError`）；
 - 浏览器预览模式（`pnpm dev` 且无 Tauri 运行时）下自动切换到内存后端 `src/services/mock.ts`，
   便于在没有桌面外壳时开发与验证界面。
+
+按领域拆分的服务模块：`workspaceService`、`noteService`、`categoryService`、`tagService`、
+`searchService`、`backupService`、`linkService`（第 9 节的 5 个 `links_*` 命令）。
+浏览器预览后端对 `links_*` 提供与 Rust 端一致的解析实现，
+因此反链面板、引用计数与未解析链接在纯前端预览下同样可用。

@@ -185,6 +185,29 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByTestId('preview-pane')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '15-edit-mode-kept.png') });
 
+  // 17. 双向链接：反向链接面板 + 未解析链接一键创建（V1.1 M1-3）
+  await page.goto('/#/notes');
+  await page.getByRole('button', { name: '新建笔记' }).first().click();
+  await page.getByLabel('标题').fill('索引设计笔记');
+  await page
+    .getByLabel('初始内容（可选）')
+    .fill('参考 [[SQLite 全文搜索学习笔记]]，另见 [[尚未存在的笔记]]。');
+  await page.getByRole('button', { name: '创建笔记' }).click();
+  await expect(page.locator('.cm-content')).toBeVisible();
+
+  // 本篇有一处未解析链接，可一键创建；元信息栏显示引用计数
+  await expect(page.getByTestId('unresolved-item')).toHaveCount(1);
+  await expect(page.getByTestId('backlink-panel')).toContainText('被 0 篇引用');
+  await page.screenshot({ path: path.join(SHOTS, '16-backlink-panel.png') });
+
+  // 打开被引用的笔记，应看到来自「索引设计笔记」的反链与上下文
+  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await expect(page.getByTestId('backlink-item').first()).toContainText('索引设计笔记');
+  await expect(page.getByTestId('backlink-item').first()).toContainText(
+    '参考 [[SQLite 全文搜索学习笔记]]',
+  );
+  await page.screenshot({ path: path.join(SHOTS, '17-backlink-from-source.png') });
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

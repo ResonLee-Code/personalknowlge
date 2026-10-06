@@ -1,23 +1,26 @@
 import {
   Check,
   Columns2,
+  Download,
   Eye,
   FileText,
   FolderInput,
   FolderOpen,
-  Download,
+  Link2,
   MoreHorizontal,
   Pencil,
   Save,
   Star,
   StarOff,
   Trash2,
+  Unlink2,
   Undo2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
+import { BacklinkPanel } from '@/components/editor/BacklinkPanel';
 import { ConflictDialog } from '@/components/editor/ConflictDialog';
 import { MarkdownEditor } from '@/components/editor/MarkdownEditor';
 import { MarkdownPreview } from '@/components/editor/MarkdownPreview';
@@ -41,11 +44,13 @@ import { Skeleton } from '@/components/ui/badge';
 import { useAutosave } from '@/hooks/useAutosave';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { linkService } from '@/services/linkService';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { isTauriRuntime } from '@/services/api';
 import { useNotesStore } from '@/stores/notesStore';
 import { LAYOUT_DEFAULTS, useUiStore } from '@/stores/uiStore';
 import { persistLayoutPreferences, useWorkspaceStore } from '@/stores/workspaceStore';
+import type { LinkCounts } from '@/types';
 
 /** 笔记编辑器（设计文档 16.5）。 */
 export function NoteEditorPage() {
@@ -83,8 +88,15 @@ export function NoteEditorPage() {
   const editorWrapper = useRef<HTMLDivElement | null>(null);
   const [splitWidth, setSplitWidth] = useState(0);
   const splitObserver = useRef<ResizeObserver | null>(null);
+  const [linkCounts, setLinkCounts] = useState<LinkCounts | null>(null);
+  /** 引用计数对应的笔记 id，避免切换笔记瞬间显示上一篇的计数 */
+  const [countsFor, setCountsFor] = useState<string | null>(null);
+  /** 保存 / 重命名后递增，驱动反向链接面板重新拉取派生数据 */
+  const [linkRevision, setLinkRevision] = useState(0);
 
   const signature = `${content}\u0000${title}\u0000${tags.join(',')}`;
+
+  const bumpLinkRevision = useCallback(() => setLinkRevision((value) => value + 1), []);
 
   const { saveNow, resetBaseline } = useAutosave({
     enabled: settings?.autosaveEnabled ?? false,
@@ -108,6 +120,7 @@ export function NoteEditorPage() {
         const latest = useNotesStore.getState().detail;
         baseHash.current = latest?.note.contentHash ?? null;
         resetBaseline(`${content}\u0000${title}\u0000${tags.join(',')}`);
+        bumpLinkRevision();
       }
       return ok;
     },
@@ -131,6 +144,26 @@ export function NoteEditorPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail?.note.id]);
+
+  // 引用计数（元信息栏）：随笔记切换与保存刷新
+  useEffect(() => {
+    const noteId = detail?.note.id;
+    if (!noteId) return;
+    let cancelled = false;
+    linkService
+      .counts(noteId)
+      .then((next) => {
+        if (cancelled) return;
+        setLinkCounts(next);
+        setCountsFor(noteId);
+      })
+      .catch(() => {
+        // 链接是派生数据，读取失败时隐藏计数即可
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.note.id, linkRevision]);
 
   const focusEditor = useCallback(() => {
     const element = editorWrapper.current?.querySelector('.cm-content');
@@ -375,6 +408,23 @@ export function NoteEditorPage() {
           </span>
           <span>更新于 {formatDateTime(note.updatedAt)}</span>
           <span>{words} 字</span>
+          {linkCounts && countsFor === note.id ? (
+            <>
+              <span className="flex items-center gap-1" title="有多少篇笔记引用了本篇">
+                <Link2 className="h-3 w-3" />
+                被 {linkCounts.backlinks} 篇引用
+              </span>
+              <span className="flex items-center gap-1" title="本篇引用了多少处笔记">
+                引用 {linkCounts.outgoing} 篇
+              </span>
+              {linkCounts.unresolved > 0 ? (
+                <span className="flex items-center gap-1 text-amber-600">
+                  <Unlink2 className="h-3 w-3" />
+                  {linkCounts.unresolved} 处未解析
+                </span>
+              ) : null}
+            </>
+          ) : null}
           {note.status === 'deleted' ? (
             <span className="text-red-500">位于回收站（只读）</span>
           ) : null}
@@ -437,6 +487,8 @@ export function NoteEditorPage() {
         ) : null}
       </div>
 
+      <BacklinkPanel noteId={note.id} refreshKey={linkRevision} />
+
       <ConflictDialog onKeepLocal={() => setForceOverwrite(true)} />
       {moveOpen ? (
         <MoveNoteDialog
@@ -449,7 +501,10 @@ export function NoteEditorPage() {
         <RenameFileDialog
           noteId={note.id}
           initialTitle={note.title}
-          onClose={() => setRenameOpen(false)}
+          onClose={() => {
+            setRenameOpen(false);
+            bumpLinkRevision();
+          }}
         />
       ) : null}
       {exportOpen ? (

@@ -376,3 +376,45 @@ export interface ExportNoteResult {
   printReady: boolean;
   html?: string | null;
 }
+
+/** 双向链接（V1.1 M1） */
+export type LinkType = 'wikilink' | 'markdown' | 'url';
+
+export interface Backlink {
+  noteId: string;
+  title: string;
+  filePath: string;
+  context: string;
+  anchor?: string | null;
+  updatedAt: string;
+}
+
+export interface OutgoingLink {
+  targetTitle: string;
+  targetNoteId?: string | null;
+  targetExists: boolean;
+  anchor?: string | null;
+  linkType: LinkType;
+  context: string;
+}
+
+export interface UnresolvedLink {
+  sourceNoteId: string;
+  sourceTitle: string;
+  targetTitle: string;
+  context: string;
+}
+
+export interface LinkCounts {
+  backlinks: number;
+  outgoing: number;
+  unresolved: number;
+}
+
+export interface LinkRebuildReport {
+  scannedNotes: number;
+  links: number;
+  resolved: number;
+  unresolved: number;
+  durationMs: number;
+}

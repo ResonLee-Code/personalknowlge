@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/badge';
+import { UnresolvedLinksCard } from '@/components/notes/UnresolvedLinksCard';
 import { formatRelative } from '@/lib/format';
 import { ROUTES } from '@/lib/constants';
 import { noteService } from '@/services/noteService';
@@ -170,35 +171,39 @@ export function DashboardPage() {
             )}
           </div>
 
-          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4">
-            <h2 className="mb-2 text-sm font-semibold text-[var(--ink)]">索引状态</h2>
-            <dl className="space-y-1.5 text-xs text-[var(--ink-muted)]">
-              <div className="flex justify-between">
-                <dt>状态</dt>
-                <dd>{indexStatus?.state ?? 'ready'}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>已索引 / 全部</dt>
-                <dd>
-                  {indexStatus?.indexedNotes ?? 0} / {indexStatus?.totalNotes ?? 0}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>最近重建</dt>
-                <dd>{indexStatus?.lastRebuiltAt ? formatRelative(indexStatus.lastRebuiltAt) : '—'}</dd>
-              </div>
-            </dl>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-3"
-              onClick={() =>
-                void rebuildIndex().then(() => toast.success('索引已重建'))
-              }
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              重建索引
-            </Button>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4">
+              <h2 className="mb-2 text-sm font-semibold text-[var(--ink)]">索引状态</h2>
+              <dl className="space-y-1.5 text-xs text-[var(--ink-muted)]">
+                <div className="flex justify-between">
+                  <dt>状态</dt>
+                  <dd>{indexStatus?.state ?? 'ready'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt>已索引 / 全部</dt>
+                  <dd>
+                    {indexStatus?.indexedNotes ?? 0} / {indexStatus?.totalNotes ?? 0}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt>最近重建</dt>
+                  <dd>
+                    {indexStatus?.lastRebuiltAt ? formatRelative(indexStatus.lastRebuiltAt) : '—'}
+                  </dd>
+                </div>
+              </dl>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-3"
+                onClick={() => void rebuildIndex().then(() => toast.success('索引已重建'))}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                重建索引
+              </Button>
+            </div>
+
+            <UnresolvedLinksCard />
           </div>
         </section>
       </div>

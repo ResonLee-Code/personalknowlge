@@ -58,6 +58,7 @@ AppShell
 │           ├── MarkdownEditor (CodeMirror 6)
 │           ├── MarkdownPreview (react-markdown + remark-gfm + rehype-highlight)
 │           ├── TagEditor
+│           ├── BacklinkPanel      → 反向链接 + 本篇未解析链接
 │           └── ConflictDialog / MoveNoteDialog / RenameFileDialog
 └── StatusBar             → 索引状态、统计、运行模式、错误摘要
 GlobalSearchDialog（⌘K 面板）、NewNoteDialog（⌘N）
@@ -81,6 +82,18 @@ GlobalSearchDialog（⌘K 面板）、NewNoteDialog（⌘N）
 - 编辑页「更多操作 → 导出」提供四种格式：Markdown（原样，含 frontmatter）、
   网页 HTML（自包含，可打印为 PDF）、Word (.docx)、PDF（打印视图另存）；
 - 首页、设置、分类、标签等页面内容占满可用宽度（宽屏下采用两列布局），不再留出大片空白。
+
+### 双向链接（V1.1 M1-3 增补）
+
+- 编辑器底部固定「反向链接」面板，可折叠：标题栏显示「被 N 篇引用」，有未解析链接时显示琥珀色计数；
+- 反链条目展示来源标题 + 上下文摘要 + 相对时间，点击跳转到来源笔记；
+- 面板下半部分列出本篇未解析的 `[[…]]`，点「创建」按目标标题新建笔记，
+  后端自动重绑并刷新面板；
+- 编辑器元信息栏显示 `被 N 篇引用 / 引用 M 篇`，未解析时追加 `N 处未解析`（琥珀色）；
+- 首页右下「未解析链接」卡片汇总全库未解析链接（默认 5 条，其余给出剩余数量提示），
+  支持一键创建与跳转来源；
+- 链接数据属于可重建派生数据：读取失败时面板降级为空列表，不阻塞编辑；
+  保存成功后计数与面板自动刷新。
 
 ## 4. 编辑器行为（设计文档 16.5）
 
