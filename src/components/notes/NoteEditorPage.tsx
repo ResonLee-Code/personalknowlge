@@ -50,11 +50,13 @@ import {
   mimeFromDataUrl,
   readFileAsDataUrl,
 } from '@/lib/attachment';
+import { ROUTES } from '@/lib/constants';
 import { errorMessage, formatDateTime, formatRelative } from '@/lib/format';
 import { parseOutline } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { attachmentService } from '@/services/attachmentService';
 import { linkService } from '@/services/linkService';
+import { noteService } from '@/services/noteService';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { isTauriRuntime } from '@/services/api';
 import { useNotesStore } from '@/stores/notesStore';
@@ -156,6 +158,54 @@ export function NoteEditorPage() {
     view.focus();
     setActiveHeadingOffset(offset);
   }, []);
+
+  // ---------------------------------------------------- 双向链接（V1.1 M2-2）
+  const [wikilinkTitles, setWikilinkTitles] = useState<string[]>([]);
+  const [wikilinkTargets, setWikilinkTargets] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!activeNoteId) return;
+    let cancelled = false;
+    void Promise.all([
+      noteService
+        .list({ status: 'active', sort: 'titleAsc', pageSize: 500 })
+        .catch(() => null),
+      linkService.outgoing(activeNoteId).catch(() => []),
+    ]).then(([list, outgoing]) => {
+      if (cancelled) return;
+      setWikilinkTitles((list?.items ?? []).map((item) => item.title));
+      const map: Record<string, string> = {};
+      outgoing.forEach((link) => {
+        if (link.targetNoteId) map[link.targetTitle.toLowerCase()] = link.targetNoteId;
+      });
+      setWikilinkTargets(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeNoteId, linkRevision]);
+
+  const getWikilinkTitles = useCallback(() => wikilinkTitles, [wikilinkTitles]);
+  const resolveWikilink = useCallback(
+    (target: string) => wikilinkTargets[target.trim().toLowerCase()] ?? null,
+    [wikilinkTargets],
+  );
+  /** 预览里点击 chip：已存在则跳转，未解析则按标题创建后打开 */
+  const openWikilink = useCallback(
+    async (target: string) => {
+      const existing = wikilinkTargets[target.trim().toLowerCase()];
+      if (existing) {
+        navigate(ROUTES.note(existing));
+        return;
+      }
+      const created = await useNotesStore.getState().create({ title: target });
+      if (created) {
+        toast.success(`已创建「${created.note.title}」`);
+        navigate(ROUTES.note(created.note.id));
+      }
+    },
+    [navigate, wikilinkTargets],
+  );
 
   const { saveNow, resetBaseline } = useAutosave({
     enabled: settings?.autosaveEnabled ?? false,
@@ -527,13 +577,14 @@ export function NoteEditorPage() {
               )}
               style={editorMode === 'split' ? { width: `${editorSplitRatio * 100}%` } : undefined}
             >
-              <MarkdownEditor
-                viewRef={editorViewRef}
-                value={content}
-                theme={theme}
-                fontSize={fontSize}
-                readOnly={readOnly}
-                onAttachFiles={readOnly ? undefined : handleAttachFiles}
+            <MarkdownEditor
+              viewRef={editorViewRef}
+              value={content}
+              theme={theme}
+              fontSize={fontSize}
+              readOnly={readOnly}
+              onAttachFiles={readOnly ? undefined : handleAttachFiles}
+              getWikilinkTitles={readOnly ? undefined : getWikilinkTitles}
                 onChange={(value) => {
                   setContent(value);
                   markDirty();
@@ -556,7 +607,12 @@ export function NoteEditorPage() {
           ) : null}
           {editorMode !== 'edit' ? (
           <div data-testid="preview-pane" className="min-w-0 flex-1 overflow-auto">
-            <MarkdownPreview content={content} noteId={note.id} />
+            <MarkdownPreview
+              content={content}
+              noteId={note.id}
+              resolveWikilink={resolveWikilink}
+              onOpenWikilink={(target) => void openWikilink(target)}
+            />
           </div>
           ) : null}
         </div>

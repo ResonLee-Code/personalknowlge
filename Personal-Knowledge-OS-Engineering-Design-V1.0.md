@@ -2272,6 +2272,8 @@ Personal Knowledge OS V1.0 不以功能数量作为成功标准，而以以下�
 | 附件命令 | `attachment_save`（20 MB 上限）、`attachment_read`（仅工作区内相对路径，预览 8 MB 上限） | `docs/API_CONTRACT.md` |
 | 编辑器大纲 | 解析 `#` 层级生成右侧大纲，点击跳转 | `docs/UI_SPECIFICATION.md` |
 | `⌘/Ctrl + P` 快速切换 | 按标题模糊匹配快速打开笔记（与 ⌘K 的正文检索分工） | `docs/UI_SPECIFICATION.md` |
+| `[[` 自动补全 | 输入 `[[` 弹出标题候选并自动补 `]]` | `docs/UI_SPECIFICATION.md` |
+| 预览 chip | `[[标题]]` 渲染为 chip：已解析跳转、未解析一键创建 | `docs/ARCHITECTURE.md` 5.1 |
 
 ## C.4 第 29 章 Sprint 完成情况
 

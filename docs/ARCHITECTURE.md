@@ -148,6 +148,19 @@ linkService (src/services/linkService.ts)
 
 链接读取失败时组件降级为空列表并在控制台留痕，不阻塞编辑（链接只是派生数据）。
 
+编辑器侧的 `[[` 补全与预览 chip（V1.1 M2-2）：
+
+```text
+MarkdownEditor
+  → autocompletion(override: [wikilinkCompletionSource(getTitles)])   ← 标题候选来自 noteService.list
+MarkdownPreview
+  → preprocessWikilinks：[[标题|别名]] → [别名](#wikilink/<目标>)
+  → a 渲染器识别 #wikilink/ 前缀 → chip（已解析跳转 / 未解析一键创建）
+```
+
+解析语义集中在 `src/lib/wikilink.ts`：Rust 的 `core/text.rs`、浏览器预览后端与前端
+共用同一套规则（`[[标题]]`、别名、锚点、转义、忽略代码区域），避免多处实现漂移。
+
 ### 5.2 附件读写（V1.1 M2-1）
 
 ```text

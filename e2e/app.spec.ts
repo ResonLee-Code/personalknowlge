@@ -239,6 +239,16 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.keyboard.press('Enter');
   await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue('索引设计笔记');
 
+  // 20. 预览里的双向链接 chip（V1.1 M2-2）：已解析可跳转、未解析可创建
+  await expect(page.getByTestId('wikilink-chip')).toHaveCount(2);
+  await expect(page.getByTestId('wikilink-chip').first()).toHaveText('SQLite 全文搜索学习笔记');
+  await expect(page.getByTestId('wikilink-chip').nth(1)).toHaveText('尚未存在的笔记');
+  await page.screenshot({ path: path.join(SHOTS, '20-wikilink-chips.png') });
+  await page.getByTestId('wikilink-chip').first().click();
+  await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue(
+    'SQLite 全文搜索学习笔记',
+  );
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

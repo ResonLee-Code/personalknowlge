@@ -6,7 +6,7 @@
  * 该实现对真正的工作区没有副作用。
  */
 
-import { LINK_CONTEXT_CHARS, maskCodeRegions } from '@/lib/markdown';
+import { parseWikilinks, type WikiLinkToken } from '@/lib/wikilink';
 import type {
   AppError,
   AppSettings,
@@ -484,103 +484,14 @@ function searchNotes(query: SearchQuery) {
 // `[[标题]]` / `[[标题|别名]]` / `[[标题#小节]]`、忽略围栏代码块与行内代码、
 // 上下文摘要取所在行（过长时截断）。这样在不启动桌面外壳时也能完整预览反链面板。
 
-interface MockWikiLink {
-  target: string;
-  alias: string | null;
-  anchor: string | null;
-  context: string;
-}
-
-function lineContext(chars: string[], at: number): string {
-  let start = 0;
-  for (let index = at - 1; index >= 0; index -= 1) {
-    if (chars[index] === '\n') {
-      start = index + 1;
-      break;
-    }
-  }
-  let end = chars.length;
-  for (let index = at; index < chars.length; index += 1) {
-    if (chars[index] === '\n') {
-      end = index;
-      break;
-    }
-  }
-  const line = chars.slice(start, end);
-  if (line.length <= LINK_CONTEXT_CHARS) return line.join('').trim();
-
-  const offset = at - start;
-  const half = Math.floor(LINK_CONTEXT_CHARS / 2);
-  let from = Math.max(0, offset - half);
-  const to = Math.min(line.length, from + LINK_CONTEXT_CHARS);
-  if (to - from < LINK_CONTEXT_CHARS) from = Math.max(0, to - LINK_CONTEXT_CHARS);
-  const body = line.slice(from, to).join('').trim();
-  return `${from > 0 ? '…' : ''}${body}${to < line.length ? '…' : ''}`;
-}
-
-function splitUnescaped(value: string, separator: string): [string, string | null] {
-  const chars = [...value];
-  for (let index = 0; index < chars.length; index += 1) {
-    if (chars[index] === '\\') {
-      index += 1;
-      continue;
-    }
-    if (chars[index] === separator) {
-      return [chars.slice(0, index).join(''), chars.slice(index + 1).join('')];
-    }
-  }
-  return [value, null];
-}
-
-function unescapeLinkText(value: string): string {
-  return value.split('\\|').join('|').split('\\#').join('#').split('\\]').join(']');
-}
-
-function parseWikiLinkInner(
-  inner: string,
-): { target: string; alias: string | null; anchor: string | null } | null {
-  const [targetPart, aliasPart] = splitUnescaped(inner, '|');
-  const [titlePart, anchorPart] = splitUnescaped(targetPart, '#');
-  const target = unescapeLinkText(titlePart.trim());
-  if (!target) return null;
-  return {
-    target,
-    alias: aliasPart ? unescapeLinkText(aliasPart.trim()) || null : null,
-    anchor: anchorPart ? unescapeLinkText(anchorPart.trim()) || null : null,
-  };
-}
-
-function findWikiLinkEnd(chars: string[], parsable: boolean[], start: number): number | null {
-  let index = start;
-  while (index < chars.length) {
-    const ch = chars[index];
-    if (ch === '\n') return null;
-    if (ch === ']' && chars[index + 1] === ']' && parsable[index]) return index;
-    if (ch === '[' && chars[index + 1] === '[') return null;
-    index += 1;
-  }
-  return null;
-}
-
-/** 解析正文中的双向链接。 */
-function parseWikilinks(content: string): MockWikiLink[] {
-  const chars = [...content];
-  const parsable = maskCodeRegions(content);
-  const links: MockWikiLink[] = [];
-  let index = 0;
-  while (index + 1 < chars.length) {
-    if (parsable[index] && chars[index] === '[' && chars[index + 1] === '[') {
-      const end = findWikiLinkEnd(chars, parsable, index + 2);
-      if (end !== null) {
-        const parsed = parseWikiLinkInner(chars.slice(index + 2, end).join(''));
-        if (parsed) links.push({ ...parsed, context: lineContext(chars, index) });
-        index = end + 2;
-        continue;
-      }
-    }
-    index += 1;
-  }
-  return links;
+function wikiLinkRows(): Array<{ source: Note; link: WikiLinkToken; target?: Note }> {
+  const rows: Array<{ source: Note; link: WikiLinkToken; target?: Note }> = [];
+  activeNotes().forEach((source) => {
+    parseWikilinks(state.contents[source.id] ?? '').forEach((link) => {
+      rows.push({ source, link, target: resolveLinkTarget(link.target) });
+    });
+  });
+  return rows;
 }
 
 function activeNotes(): Note[] {
@@ -608,16 +519,6 @@ function resolveLinkTarget(target: string): Note | undefined {
         fileName.replace(/\.md$/, '') === candidate,
     );
   });
-}
-
-function wikiLinkRows(): Array<{ source: Note; link: MockWikiLink; target?: Note }> {
-  const rows: Array<{ source: Note; link: MockWikiLink; target?: Note }> = [];
-  activeNotes().forEach((source) => {
-    parseWikilinks(state.contents[source.id] ?? '').forEach((link) => {
-      rows.push({ source, link, target: resolveLinkTarget(link.target) });
-    });
-  });
-  return rows;
 }
 
 function mockBacklinks(noteId: string): Backlink[] {
