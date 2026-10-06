@@ -1,6 +1,11 @@
 # AI 能力框架规划（AI Decision Layer）
 
 > 状态：**规划稿**（2026-10-07 确认「现在就为未来 AI 引入预留框架结构」）。
+>
+> 文档分工：产品/架构层的重新定义见
+> [Personal-Knowledge-OS-Jev-Architecture-V2.0.md](../Personal-Knowledge-OS-Jev-Architecture-V2.0.md)；
+> 差距盘点、技术选型调研与下一代路线见 [NEXT_GEN_ANALYSIS.md](./NEXT_GEN_ANALYSIS.md)；
+> 本文只定义**实现层接口与边界**（trait / 命令 / 开关）。
 > 本文只定义**框架与边界**，不实现模型调用；落地排期见 [ROADMAP.md](./ROADMAP.md) 的 V3.0。
 > 原则与设计文档一致：**本地优先、可关闭、可离线、不阻塞编辑器**。
 

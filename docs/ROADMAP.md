@@ -103,6 +103,8 @@
 
 ## V3.0 计划（AI 能力）
 
+- 产品/架构定义：`Personal-Knowledge-OS-Jev-Architecture-V2.0.md`（仓库根目录）
+- 差距盘点与技术调研：[NEXT_GEN_ANALYSIS.md](./NEXT_GEN_ANALYSIS.md)（N1–N9 路线）
 - 框架规划已就绪：[AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md)
   （AI 决策层 + 模型接入层 + 检索层 + 工具层 + 隐私开关矩阵）
 - [ ] A1 决策层与工具层骨架（`ai_*` 命令，不接模型）

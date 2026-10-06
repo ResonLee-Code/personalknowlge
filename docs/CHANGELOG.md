@@ -137,6 +137,19 @@
 | `graph_get` 分类过滤 / 2 跳聚焦 | 22.0 / 22.9 ms | 22.8 / 83.6 ms |
 | `database.sqlite` / `.knowledge` | 6.7 / 10.8 MB | 6.7 / 11.6 MB |
 
+### 图谱细节与下一代技术分析（V1.1.2 开发中）
+
+- 图谱：新增**社区粒度**选择（模块度分辨率 0.5 / 1 / 1.5 / 2，仅在按社区着色时出现）；
+  导出新增**「导出含标题」开关**——开启后 PNG（离屏重绘全部标题）与 SVG 都会标注每个节点标题，
+  便于把图谱直接贴给他人；
+- 新增 [NEXT_GEN_ANALYSIS.md](./NEXT_GEN_ANALYSIS.md)：对
+  `Personal-Knowledge-OS-Jev-Architecture-V2.0.md` 做全面分析——
+  现状差距矩阵（已实现 7 项 / 缺失 10 项）、对文档的 5 点修正、关键技术调研
+  （向量检索三方案对比并推荐纯 Rust 暴力检索、嵌入模型选型、分块策略、四层 Confidence 的可计算来源、
+  Jev 契约与未核实项、评估方法）、N1–N9 下一代路线与风险；
+- [AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md) 与 [ROADMAP.md](./ROADMAP.md)
+  增加文档分工说明（产品定义 / 实现接口 / 下一代分析）。
+
 ### M1-1 双向链接地基（已完成）
 
 - 新增迁移 `003_note_links.sql`：`note_links` 表 + 4 个索引，`SCHEMA_VERSION` 升到 3；

@@ -23,6 +23,8 @@ interface ForceGraphProps {
   onExportSvg?: (svg: string) => void;
   /** 导出时写入的图例 */
   legend?: ExportLegendItem[];
+  /** 导出时是否标注全部节点标题（默认只标枢纽） */
+  exportAllLabels?: boolean;
 }
 
 /**
@@ -43,6 +45,7 @@ export function ForceGraph({
   onExportPng,
   onExportSvg,
   legend = [],
+  exportAllLabels = false,
 }: ForceGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -412,6 +415,23 @@ export function ForceGraph({
                   context.fillRect(0, 0, output.width, output.height);
                   context.drawImage(canvas, 0, 0);
                   const ratio = output.width / (canvas.clientWidth || output.width);
+                  if (exportAllLabels) {
+                    // 导出时才补全标题：屏幕上为保持清爽只画枢纽，导出件需要能独立读懂
+                    context.save();
+                    context.scale(ratio, ratio);
+                    context.translate(viewRef.current.offsetX, viewRef.current.offsetY);
+                    context.scale(viewRef.current.scale, viewRef.current.scale);
+                    context.font = `${11 / viewRef.current.scale}px ui-sans-serif, system-ui, sans-serif`;
+                    context.fillStyle = 'rgba(71, 85, 105, 1)';
+                    context.textAlign = 'center';
+                    context.textBaseline = 'top';
+                    for (const node of state.nodes) {
+                      const title = nodes.find((item) => item.id === node.id)?.title ?? node.id;
+                      const text = title.length > 16 ? `${title.slice(0, 15)}…` : title;
+                      context.fillText(text, node.x, node.y + node.radius + 2);
+                    }
+                    context.restore();
+                  }
                   context.save();
                   context.scale(ratio, ratio);
                   drawLegendOnCanvas(
@@ -448,9 +468,10 @@ export function ForceGraph({
                       y: node.y,
                       radius: node.radius,
                       color: colors?.get(node.id) ?? categoryColor(node.categoryId),
-                      label: node.degree >= 3 || state.nodes.length <= 30
-                        ? nodes.find((item) => item.id === node.id)?.title
-                        : undefined,
+                      label:
+                        exportAllLabels || node.degree >= 3 || state.nodes.length <= 30
+                          ? nodes.find((item) => item.id === node.id)?.title
+                          : undefined,
                     })),
                     edges: state.edges.flatMap((edge) => {
                       const sourceIndex = state.index.get(edge.source);

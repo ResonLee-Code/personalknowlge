@@ -41,6 +41,10 @@ export function GraphPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** 着色模式：按分类，或按社区（连通分量） */
   const [colorMode, setColorMode] = useState<'category' | 'community'>('category');
+  /** 社区粒度（模块度分辨率）：越大社区越细 */
+  const [resolution, setResolution] = useState(1);
+  /** 导出时是否标注全部节点标题 */
+  const [exportAllLabels, setExportAllLabels] = useState(false);
   const requestRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -73,8 +77,8 @@ export function GraphPage() {
   }, [load]);
 
   const communities = useMemo(
-    () => detectCommunities((data?.nodes ?? []).map((node) => node.id), data?.edges ?? []),
-    [data],
+    () => detectCommunities((data?.nodes ?? []).map((node) => node.id), data?.edges ?? [], { resolution }),
+    [data, resolution],
   );
   const nodeColors = useMemo(() => {
     const colors = new Map<string, string>();
@@ -217,6 +221,28 @@ export function GraphPage() {
             <option value="category">按分类着色</option>
             <option value="community">按社区着色</option>
           </select>
+          {colorMode === 'community' ? (
+            <select
+              aria-label="社区粒度"
+              value={resolution}
+              onChange={(event) => setResolution(Number(event.target.value))}
+              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs text-[var(--ink)]"
+              title="粒度越大社区越细"
+            >
+              <option value={0.5}>粒度：粗</option>
+              <option value={1}>粒度：标准</option>
+              <option value={1.5}>粒度：细</option>
+              <option value={2}>粒度：很细</option>
+            </select>
+          ) : null}
+          <label className="flex items-center gap-1 text-xs text-[var(--ink-muted)]">
+            <input
+              type="checkbox"
+              checked={exportAllLabels}
+              onChange={(event) => setExportAllLabels(event.target.checked)}
+            />
+            导出含标题
+          </label>
           <Button
             size="sm"
             variant={focusId ? 'default' : 'secondary'}
@@ -294,6 +320,7 @@ export function GraphPage() {
               legend={legend}
               onExportPng={(dataUrl) => void exportPng(dataUrl)}
               onExportSvg={(svg) => void exportSvg(svg)}
+              exportAllLabels={exportAllLabels}
             />
           )}
         </div>
