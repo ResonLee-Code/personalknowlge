@@ -8,10 +8,10 @@
 | --- | --- | --- |
 | 表现层 | 界面与交互，不直接访问 SQLite 与文件系统 | `src/` |
 | 命令层 | Tauri 命令，参数校验与线程调度 | `src-tauri/src/commands/` |
-| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、备份） | `src-tauri/src/application/` |
+| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份） | `src-tauri/src/application/` |
 | 领域层 | 数据结构与不变量，不依赖框架 | `src-tauri/src/domain/` |
 | 仓储层 | 隔离 SQL 细节（trait + SQLite 实现） | `src-tauri/src/repositories/` |
-| 基础设施层 | SQLite、Markdown 存储、FTS5、文件监听、备份、frontmatter | `src-tauri/src/infrastructure/` |
+| 基础设施层 | SQLite、Markdown 存储、FTS5、文件监听、备份、frontmatter、docx 生成 | `src-tauri/src/infrastructure/` |
 | 通用能力 | 错误、ID、哈希、时间、文本、路径、日志、事件 | `src-tauri/src/core/` |
 
 ```text
@@ -99,6 +99,8 @@ Markdown 文件 + SQLite（WAL）+ FTS5 索引 + 回收站
 | 全文搜索 | `infrastructure::fts::SearchIndex` trait | `SqliteSearchIndex`（FTS5） |
 | 元数据存储 | `repositories::*Repository` trait | SQLite 实现 |
 | 文件正文 | `infrastructure::markdown_storage::MarkdownStorage` | 本地文件 + 原子写入 |
+| 文档导出 | `application::export_service::ExportService` + `infrastructure::docx` | Markdown / HTML / Word(docx) / PDF 打印视图 |
+| 外部导入 | `application::import_service::ImportService` | Markdown / 文本文件与目录，复制语义 |
 | 事件出口 | `core::events::EventSink` trait | `TauriEventSink` / `NoopEventSink`（测试） |
 | 文件监听 | `infrastructure::watcher` | 原生事件 + `PollWatcher` 兜底 |
 
@@ -120,3 +122,10 @@ Markdown 文件 + SQLite（WAL）+ FTS5 索引 + 回收站
    并在状态栏与提示中说明，保证「外部编辑」场景在任意环境可用。
 6. **路由使用 HashRouter**：桌面外壳以静态资源方式加载单页应用，哈希路由避免刷新 404。
 7. **Inbox 不是分类**：`00_Inbox` 目录代表「未分类」，扫描已有目录时不会为它创建分类记录。
+8. **导入 / 导出作为独立应用服务**：`application::ImportService` 负责把工作区外的
+   Markdown / 文本（或整个目录）复制进知识库并保留 frontmatter 元数据；
+   `application::ExportService` 负责单篇导出，其中 Word 由
+   `infrastructure::docx` 生成 OOXML（不依赖外部工具），PDF 走「打印视图 + 系统打印面板」，
+   避免引入重量级排版引擎与字体嵌入。
+9. **设置数值宽容解析**：`UpdateSettingsInput` 的像素/延迟字段同时接受整数与小数并四舍五入，
+   以兼容 Retina 屏下拖拽产生的浮点坐标（`clientWidth`/`clientX` 可能是小数）。

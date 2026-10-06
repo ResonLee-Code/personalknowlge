@@ -2,6 +2,27 @@
 
 适用于 Personal Knowledge OS V1.0（Windows 10 1809 及以上 / Windows 11，x64）。
 
+## 版本状态（重要）
+
+| 项目 | 现状 |
+| --- | --- |
+| 应用代码 | 已更新到 V1.0.1（含导入、导出、分栏拖拽、布局与流程修复） |
+| Windows 安装包 | ⏸ **仍是 V1.0.0（2026-09-24）构建**，未包含 V1.0.1 改动；按约定等待版本确认后再同步 |
+| macOS 安装包 | ✅ V1.0.1 已构建 |
+
+确认版本后重新打包（macOS/Linux 交叉编译 + NSIS）：
+
+```bash
+export ZIG=/path/to/zig
+scripts/cross/build-windows.sh              # 交叉编译 exe
+scripts/windows/build-installer.sh          # 生成 NSIS 安装包与便携版
+```
+
+在 Windows 机器上可执行 `.\scripts\windows\build-windows.ps1`，
+或触发 `.github/workflows/windows-release.yml`（在 Windows 运行器上构建并跑测试）。
+
+下方安装与使用说明对两个版本都适用；V1.0.1 新增的导入 / 导出 / 分栏能力会在同步后的安装包中生效。
+
 ## 一、安装前准备
 
 | 项目 | 要求 | 说明 |

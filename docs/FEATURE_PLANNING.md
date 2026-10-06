@@ -9,7 +9,7 @@
 前提约束不变：本地优先、单用户、数据是用户自己的 Markdown 文件、
 V1.x 不引入云端与账号体系（见 [ARCHITECTURE.md](./ARCHITECTURE.md) 第 5 节）。
 
-## 1. 现状（V1.0 + 本次增量）
+## 1. 现状（V1.0.1）
 
 | 能力 | 状态 |
 | --- | --- |
@@ -18,7 +18,9 @@ V1.x 不引入云端与账号体系（见 [ARCHITECTURE.md](./ARCHITECTURE.md) �
 | 检索 | 全文搜索（中文双字短语 + 英文前缀）、摘要与高亮、分类/标签/收藏/时间过滤、索引重建 |
 | 数据 | 原子写入、哈希冲突检测、ZIP 备份 + 校验、Markdown 导出 |
 | 外部协作 | 文件监听（原生 + 轮询兜底）、外部修改采纳、缺失文件标记 |
-| **导入** | **本次新增**：Markdown / 文本文件与目录导入（保留 frontmatter 的 id/title/tags/时间），复制语义、体积与数量上限、跳过原因可见 |
+| 导入 | Markdown / 文本文件与目录导入（保留 frontmatter 的 id/title/tags/时间），复制语义、体积与数量上限、跳过原因可见 |
+| 导出 | 单篇 → Markdown / HTML / Word(.docx) / PDF(打印视图)；整库 → Markdown 目录导出与 ZIP 备份 |
+| 布局 | 三处分栏可拖拽（侧边栏 / 笔记列表 / 编辑与预览比例），双击复位、方向键微调，宽度随工作区记忆 |
 
 ## 2. 对标语雀 / 飞书云文档
 
@@ -93,7 +95,7 @@ CREATE INDEX IF NOT EXISTS idx_note_links_type   ON note_links(link_type);
 | `[[标题\|别名]]` | 带别名 | 显示别名，指向标题 |
 | `[[标题#小节]]` | 指向小节 | 记录 `target_anchor`，打开时滚动定位 |
 | `[[标题#^块]]` | 块引用（预留） | 记录锚点，V2 再实现块级定位 |
-| `[文字](相对路径.md)` | 相对 Markdown 链接 | 按工作区相对路径解析 |
+| `[文字](相对路径.md)`（示例，非真实链接） | 相对 Markdown 链接 | 按工作区相对路径解析 |
 | `[文字](https://…)` | 外链 | `link_type='url'`，不入图 |
 
 解析细节（必须写进实现与测试）：
@@ -213,3 +215,6 @@ links_rebuild()                  -> LinkRebuildReport
 不改变 [ARCHITECTURE.md](./ARCHITECTURE.md) 的分层与数据原则：
 知识图谱属于**派生索引**，任何时刻都可以从 Markdown 重建，
 因此不会让用户数据被专有格式锁定。
+
+> 具体排期、里程碑与需要确认的决策点见 [PLAN_V1.1.md](./PLAN_V1.1.md)；
+> 已完成的变化见 [CHANGELOG.md](./CHANGELOG.md)。

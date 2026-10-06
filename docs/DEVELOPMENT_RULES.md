@@ -83,3 +83,29 @@ cd src-tauri && cargo fmt --check && cargo test --offline
 cd .. && pnpm lint && pnpm test && pnpm build
 pnpm build && pnpm test:e2e      # 端到端 UI 验证，截图输出到 docs/screenshots
 ```
+
+## 8. 文档同步规则
+
+> 文档与代码必须同步演进，避免「实现已变、文档还停在旧描述」。
+
+每次提交按下表更新文档：
+
+| 变更类型 | 必须更新 |
+| --- | --- |
+| 新增能力 / 行为调整 | `docs/CHANGELOG.md`（用户可见的变化）、受影响的设计文档 |
+| 新增或修改命令、DTO、错误码 | `docs/API_CONTRACT.md` |
+| 界面布局、交互、快捷键变化 | `docs/UI_SPECIFICATION.md`（必要时重跑 E2E 更新 `docs/screenshots/`） |
+| 模块划分、数据流、与设计文档的差异 | `docs/ARCHITECTURE.md` |
+| 表结构或迁移 | `docs/DATABASE_SCHEMA.md` + 新增迁移文件 |
+| 阶段完成 / 排期调整 | `docs/ROADMAP.md`、`docs/PLAN_V1.1.md` |
+
+版本号在 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`
+与 `docs/CHANGELOG.md` 四处必须一致。
+
+## 9. 跨平台产物更新规则
+
+- 修改代码后**不要自动**重新生成另一平台的安装包；
+- 更新 Windows/macOS 安装包前先确认目标版本号，再执行打包脚本；
+- 打包后必须记录：产物路径、SHA-256、构建时间与验收结果，并同步到
+  `docs/CHANGELOG.md` 的「产物」小节；
+- 未在真机验证的产物必须显式标注「未在真机验证」，不得表述为已验证。

@@ -1,7 +1,10 @@
-# Personal Knowledge OS V1.0
+# Personal Knowledge OS
 
 本地优先的个人知识管理桌面应用。笔记正文以 Markdown 文件保存在用户自己的目录中，
 SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeScript。
+
+**当前版本：V1.0.1**（2026-10-07）—— 在 V1.0.0 基础上补齐导入 / 导出 / 分栏布局并修复若干缺陷，
+变更明细见 [docs/CHANGELOG.md](./docs/CHANGELOG.md)；下一阶段安排见 [docs/PLAN_V1.1.md](./docs/PLAN_V1.1.md)。
 
 本仓库是 [Personal-Knowledge-OS-Engineering-Design-V1.0.md](./Personal-Knowledge-OS-Engineering-Design-V1.0.md)
 工程设计的实现：第一阶段只做好**记录、分类、搜索**，同时保证数据自主、可备份、可扩展。
@@ -21,6 +24,7 @@ SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeSc
 | 外部编辑 | 文件监听（原生事件 + 轮询兜底）、自动采纳外部新增/修改、标记缺失文件、忽略自身写入回声 |
 | 数据安全 | 原子写入、内容哈希冲突检测、回收站、ZIP 备份与校验、Markdown 导出、路径穿越防护 |
 | 界面 | 三栏工作台、全局搜索面板（⌘/Ctrl + K）、编辑/分屏/预览、深浅主题、空状态、状态栏 |
+| 视图模式 | 编辑 / 分屏 / 预览切换后立即记住；分屏比例可拖拽调整（0.3–0.7） |
 
 ## 技术栈
 
@@ -70,6 +74,11 @@ cargo build                  # 构建桌面二进制
 [`docs/screenshots/`](./docs/screenshots)，由 `pnpm test:e2e` 自动生成。
 
 ## 下载与安装
+
+| 平台 | 状态 |
+| --- | --- |
+| macOS（V1.0.1） | ✅ 已构建：`src-tauri/target/release/bundle/{macos,dmg}/` |
+| Windows（V1.0.0） | ⏸ 待确认后同步：`dist-windows/` 现有安装包与便携版仍为 2026-09-24 构建，不含 V1.0.1 改动 |
 
 ### Windows（x64）
 
@@ -134,3 +143,5 @@ MyKnowledge/
 - [开发规范](./docs/DEVELOPMENT_RULES.md)
 - [开发路线](./docs/ROADMAP.md)
 - [功能规划（对标语雀/飞书 + 知识图谱）](./docs/FEATURE_PLANNING.md)
+- [变更记录](./docs/CHANGELOG.md)
+- [下一阶段计划（V1.1）](./docs/PLAN_V1.1.md)
