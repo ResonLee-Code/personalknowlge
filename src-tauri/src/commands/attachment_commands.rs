@@ -3,7 +3,8 @@
 use tauri::State;
 
 use crate::application::attachment_service::{
-    AttachmentData, AttachmentService, ReadAttachmentInput, SaveAttachmentInput, SavedAttachment,
+    AttachmentData, AttachmentListReport, AttachmentReference, AttachmentService,
+    ReadAttachmentInput, SaveAttachmentInput, SavedAttachment,
 };
 use crate::core::error::Result;
 use crate::state::AppState;
@@ -28,4 +29,31 @@ pub async fn attachment_read(
 ) -> Result<AttachmentData> {
     let context = state.inner.context()?;
     run(move || AttachmentService::new(context).read(input)).await
+}
+
+/// 列出附件（含引用它的笔记），供附件管理界面使用。
+#[tauri::command]
+pub async fn attachment_list(state: State<'_, AppState>) -> Result<AttachmentListReport> {
+    let context = state.inner.context()?;
+    run(move || AttachmentService::new(context).list()).await
+}
+
+/// 删除附件（仅限 attachments/ 目录）。
+#[tauri::command]
+pub async fn attachment_delete(
+    state: State<'_, AppState>,
+    relative_path: String,
+) -> Result<u64> {
+    let context = state.inner.context()?;
+    run(move || AttachmentService::new(context).remove(&relative_path)).await
+}
+
+/// 查询某个附件被哪些笔记引用。
+#[tauri::command]
+pub async fn attachment_references(
+    state: State<'_, AppState>,
+    relative_path: String,
+) -> Result<Vec<AttachmentReference>> {
+    let context = state.inner.context()?;
+    run(move || AttachmentService::new(context).references(&relative_path)).await
 }

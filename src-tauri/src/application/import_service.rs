@@ -46,6 +46,9 @@ pub struct ImportNotesInput {
     /// 目标分类；为空时导入到 Inbox
     #[serde(default)]
     pub category_id: Option<String>,
+    /// 是否保留源目录结构（目录导入时在目标分类下重建子目录，并保留原文件名）
+    #[serde(default)]
+    pub preserve_structure: Option<bool>,
 }
 
 /// 成功导入的一篇笔记。
@@ -103,14 +106,19 @@ impl ImportService {
             None => (None, INBOX_DIR.to_string(), String::new()),
         };
 
+        let preserve_structure = input.preserve_structure.unwrap_or(false);
         let mut report = ImportReport { imported: Vec::new(), skipped: Vec::new(), total: 0, failed: 0 };
-        let mut files: Vec<PathBuf> = Vec::new();
+        // (文件, 该文件的导入根目录) —— 保留目录结构时用它算子路径
+        let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
         for raw in &input.paths {
             let path = PathBuf::from(raw);
             if path.is_dir() {
-                self.collect_directory(&path, &mut files, &mut report);
+                let mut collected: Vec<PathBuf> = Vec::new();
+                self.collect_directory(&path, &mut collected, &mut report);
+                files.extend(collected.into_iter().map(|file| (file, path.clone())));
             } else if path.is_file() {
-                files.push(path);
+                let root = path.parent().map(Path::to_path_buf).unwrap_or_default();
+                files.push((path, root));
             } else {
                 report.failed += 1;
                 report.skipped.push(SkippedFile {
@@ -126,7 +134,7 @@ impl ImportService {
             report.failed += files.len() - MAX_FILES;
             for extra in files.drain(MAX_FILES..) {
                 report.skipped.push(SkippedFile {
-                    source_path: extra.to_string_lossy().to_string(),
+                    source_path: extra.0.to_string_lossy().to_string(),
                     reason: format!("超过单次导入上限（{MAX_FILES} 个文件）"),
                 });
             }
@@ -134,15 +142,30 @@ impl ImportService {
         report.total = files.len() + report.skipped.len();
 
         let mut seen_ids: HashSet<String> = HashSet::new();
-        for file in files {
-            match self.import_file(&file, category_id.as_deref(), &directory, &category_path, &mut seen_ids) {
+        for (file, root) in files {
+            let source_path = file.to_string_lossy().to_string();
+            // 保留目录结构：把「相对于导入根目录」的子路径原样搬到目标分类下
+            let sub_directory = if preserve_structure {
+                file.parent()
+                    .and_then(|parent| parent.strip_prefix(&root).ok())
+                    .map(|sub| sub.to_string_lossy().replace('\\', "/"))
+                    .filter(|sub| !sub.is_empty())
+            } else {
+                None
+            };
+            match self.import_file(
+                &file,
+                category_id.as_deref(),
+                &directory,
+                &category_path,
+                &mut seen_ids,
+                sub_directory.as_deref(),
+                preserve_structure,
+            ) {
                 Ok(imported) => report.imported.push(imported),
                 Err(error) => {
                     report.failed += 1;
-                    report.skipped.push(SkippedFile {
-                        source_path: file.to_string_lossy().to_string(),
-                        reason: error.message,
-                    });
+                    report.skipped.push(SkippedFile { source_path, reason: error.message });
                 }
             }
         }
@@ -200,6 +223,8 @@ impl ImportService {
         directory: &str,
         category_path: &str,
         seen_ids: &mut HashSet<String>,
+        sub_directory: Option<&str>,
+        preserve_file_name: bool,
     ) -> Result<ImportedNote> {
         if !is_supported(path) {
             return Err(AppError::invalid_input(format!(
@@ -278,8 +303,20 @@ impl ImportService {
             extra: source.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &body);
-        let file_name = note_file_name(&title, &now_file_timestamp());
-        let relative = self.ctx.storage.create_note_file(directory, &file_name, &markdown)?;
+        // 目标目录：保留目录结构时在目标分类下重建子目录
+        let target_directory = match sub_directory {
+            Some(sub) => crate::infrastructure::markdown_storage::join_relative(directory, sub),
+            None => directory.to_string(),
+        };
+        let file_name = if preserve_file_name {
+            // 保留原文件名（去扩展名后交给 create_note_file 去重与清洗）
+            path.file_stem()
+                .map(|stem| stem.to_string_lossy().to_string())
+                .unwrap_or_else(|| note_file_name(&title, &now_file_timestamp()))
+        } else {
+            note_file_name(&title, &now_file_timestamp())
+        };
+        let relative = self.ctx.storage.create_note_file(&target_directory, &file_name, &markdown)?;
 
         let note = Note {
             id: id.clone(),

@@ -215,7 +215,24 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - `degree` 是**本次结果内**的邻居数（同一对笔记多条链接算一个邻居），截断后重新计算；
 - 图谱是派生数据：不落库，`links_rebuild` 可从 Markdown 整体修复。
 
-## 14. 类型化关系（N2）
+## 14. 附件管理（V1.1.2）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `attachment_list` | — | `{ items: AttachmentEntry[], totalBytes, referencedCount }`；每个条目含 `relativePath / fileName / month / bytes / modifiedAt / references[]` |
+| `attachment_delete` | `{ relativePath }` | `u64`（释放的字节数） |
+| `attachment_references` | `{ relativePath }` | `AttachmentReference[]`（引用它的笔记） |
+
+- 引用识别：遍历活跃笔记正文，提取 `attachments/…` 形式的路径（含 `../attachments/…` 相对写法）；
+- 删除只允许 `attachments/` 目录内的文件，越界路径直接拒绝；
+- 附件是普通文件，不进入 `notes` 表；删除后正文里的引用会失效（界面在确认框中列出被引用情况）。
+
+### 导入新增选项（V1.1.2）
+
+`note_import` 的 `input` 新增 `preserveStructure?: boolean`：为 `true` 时，
+目录导入会在目标分类下重建子目录并保留原文件名。
+
+## 15. 类型化关系（N2）
 
 | 命令 | 参数 | 返回 |
 | --- | --- | --- |
@@ -231,7 +248,7 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 重命名目标笔记会改写来源 frontmatter 里的 `target`；目标被删除时派生关系解绑
   （声明保留，目标恢复后重建即可复原）。
 
-## 15. 前端服务层
+## 16. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 

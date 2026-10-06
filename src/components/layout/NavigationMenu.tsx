@@ -1,6 +1,7 @@
 import {
   FileText,
   FolderTree,
+  HardDrive,
   Inbox,
   LayoutDashboard,
   Network,
@@ -31,6 +32,7 @@ export function NavigationMenu() {
     { to: ROUTES.inbox, label: 'Inbox', icon: Inbox, count: stats.inboxCount },
     { to: ROUTES.favorites, label: '收藏', icon: Star },
     { to: ROUTES.graph, label: '知识图谱', icon: Network },
+    { to: ROUTES.attachments, label: '附件', icon: HardDrive },
     { to: ROUTES.categories, label: '分类', icon: FolderTree, count: stats.categoryCount },
     { to: ROUTES.tags, label: '标签', icon: Tags, count: stats.tagCount },
     { to: ROUTES.trash, label: '回收站', icon: Trash2, count: stats.trashCount },

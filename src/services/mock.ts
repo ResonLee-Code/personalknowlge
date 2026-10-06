@@ -962,6 +962,15 @@ export async function handleMockInvoke(
     case 'attachment_save':
       fail('INVALID_INPUT', '浏览器预览模式无法写入本地文件，请在桌面应用中使用图片粘贴。');
       break;
+    case 'attachment_list':
+      requireWorkspace();
+      return { items: [], totalBytes: 0, referencedCount: 0 };
+    case 'attachment_delete':
+      fail('INVALID_INPUT', '浏览器预览模式无法删除本地附件，请在桌面应用中使用附件管理。');
+      break;
+    case 'attachment_references':
+      requireWorkspace();
+      return [];
     case 'attachment_read':
       fail('INVALID_INPUT', '浏览器预览模式无法读取工作区内的图片。');
       break;

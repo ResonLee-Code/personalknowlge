@@ -251,6 +251,7 @@ function CreateForm({ categoryId, onClose }: { categoryId: string; onClose: () =
 
 function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () => void }) {
   const navigate = useNavigate();
+  const [preserveStructure, setPreserveStructure] = useState(false);
   const refreshNotes = useNotesStore((state) => state.refresh);
   const refreshStats = useWorkspaceStore((state) => state.refreshStats);
   const [paths, setPaths] = useState<string[]>([]);
@@ -296,6 +297,7 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
       const result = await noteService.importFiles({
         paths,
         categoryId: categoryId || null,
+        preserveStructure,
       });
       await refreshNotes();
       await refreshStats();
@@ -410,6 +412,16 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
             源文件不会被修改。
           </p>
         )}
+
+        <label className="flex items-center gap-2 text-xs text-[var(--ink-muted)]">
+          <input
+            type="checkbox"
+            checked={preserveStructure}
+            disabled={!desktop}
+            onChange={(event) => setPreserveStructure(event.target.checked)}
+          />
+          保留目录结构（在目标分类下重建子目录，并保留原文件名）
+        </label>
 
         {paths.length > 0 ? (
           <ul className="max-h-40 space-y-1 overflow-auto text-xs text-[var(--ink-muted)]">

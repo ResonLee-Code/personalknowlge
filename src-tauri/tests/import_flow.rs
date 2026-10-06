@@ -64,6 +64,59 @@ impl Fixture {
 }
 
 #[test]
+fn preserves_directory_structure_and_file_names_when_requested() {
+    let fixture = Fixture::new();
+    let root = fixture.write_source("项目A/设计/架构.md", "# 架构\n\n保留结构");
+    let _ = root;
+    fixture.write_source("项目A/设计/接口.md", "# 接口");
+    fixture.write_source("项目A/README.md", "# 说明");
+    let source_root = fixture.source.to_string_lossy().to_string();
+
+    // 平铺导入（默认）：文件直接落在目标目录，文件名带时间戳
+    let flat = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![source_root.clone()],
+            category_id: None,
+            preserve_structure: None,
+        })
+        .expect("平铺导入");
+    assert_eq!(flat.imported.len(), 3);
+    assert!(flat
+        .imported
+        .iter()
+        .all(|item| !item.file_path.contains("项目A")), "默认不保留目录结构：{}", flat.imported[0].file_path);
+
+    // 保留结构导入：重建子目录并保留原文件名
+    let structured = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![source_root],
+            category_id: None,
+            preserve_structure: Some(true),
+        })
+        .expect("结构化导入");
+    assert_eq!(structured.imported.len(), 3);
+    let paths: Vec<&str> = structured
+        .imported
+        .iter()
+        .map(|item| item.file_path.as_str())
+        .collect();
+    assert!(paths.iter().any(|path| path.ends_with("00_Inbox/项目A/设计/架构.md")), "{paths:?}");
+    assert!(paths.iter().any(|path| path.ends_with("00_Inbox/项目A/设计/接口.md")), "{paths:?}");
+    assert!(paths.iter().any(|path| path.ends_with("00_Inbox/项目A/README.md")), "{paths:?}");
+
+    // 结构保留后，文件真的在磁盘上，并且能被扫描为笔记
+    let workspace_root = fixture.root.clone();
+    assert!(workspace_root.join("00_Inbox/项目A/设计/架构.md").is_file());
+    let listed = fixture.notes().list(Default::default()).expect("列表");
+    assert!(listed
+        .items
+        .iter()
+        .any(|item| item.file_path == "00_Inbox/项目A/设计/架构.md"));
+}
+
+#[test]
 fn imports_markdown_with_frontmatter_preserving_metadata() {
     let fixture = Fixture::new();
     let source = fixture.write_source(
@@ -73,7 +126,7 @@ fn imports_markdown_with_frontmatter_preserving_metadata() {
 
     let report = fixture
         .imports()
-        .import(ImportNotesInput { paths: vec![source.clone()], category_id: None })
+        .import(ImportNotesInput { paths: vec![source.clone()], category_id: None , preserve_structure: None })
         .expect("导入应成功");
 
     assert_eq!(report.imported.len(), 1, "跳过项：{:?}", report.skipped);
@@ -120,6 +173,7 @@ fn imports_plain_text_into_selected_category() {
         .imports()
         .import(ImportNotesInput {
             paths: vec![source],
+            preserve_structure: None,
             category_id: Some(category.id.clone()),
         })
         .expect("导入应成功");
@@ -148,6 +202,7 @@ fn imports_directory_recursively_and_ignores_unsupported_files() {
         .imports()
         .import(ImportNotesInput {
             paths: vec![fixture.source.to_string_lossy().to_string()],
+            preserve_structure: None,
             category_id: None,
         })
         .expect("导入目录");
@@ -169,7 +224,7 @@ fn duplicate_ids_and_repeat_imports_do_not_collide() {
 
     let report = fixture
         .imports()
-        .import(ImportNotesInput { paths: vec![first, second], category_id: None })
+        .import(ImportNotesInput { paths: vec![first, second], category_id: None, preserve_structure: None })
         .expect("同批导入");
     assert_eq!(report.imported.len(), 2);
     assert_ne!(
@@ -183,6 +238,7 @@ fn duplicate_ids_and_repeat_imports_do_not_collide() {
         .imports()
         .import(ImportNotesInput {
             paths: vec![fixture.source.join("one.md").to_string_lossy().to_string()],
+            preserve_structure: None,
             category_id: None,
         })
         .expect("重复导入");
@@ -202,6 +258,7 @@ fn reports_missing_and_oversized_files_without_failing_the_batch() {
         .imports()
         .import(ImportNotesInput {
             paths: vec![ok, missing, big.to_string_lossy().to_string()],
+            preserve_structure: None,
             category_id: None,
         })
         .expect("整批不应失败");
@@ -218,14 +275,14 @@ fn rejects_empty_selection_and_unknown_category() {
     let fixture = Fixture::new();
     let error = fixture
         .imports()
-        .import(ImportNotesInput { paths: Vec::new(), category_id: None })
+        .import(ImportNotesInput { paths: Vec::new(), category_id: None , preserve_structure: None })
         .expect_err("空选择应报错");
     assert_eq!(error.code, personal_knowledge_os_lib::core::error::ErrorCode::InvalidInput);
 
     let source = fixture.write_source("a.md", "---\nid: note_x\n---\n\n正文\n");
     let error = fixture
         .imports()
-        .import(ImportNotesInput { paths: vec![source], category_id: Some("cat_missing".into()) })
+        .import(ImportNotesInput { paths: vec![source], category_id: Some("cat_missing".into()) , preserve_structure: None })
         .expect_err("分类不存在应报错");
     assert_eq!(
         error.code,

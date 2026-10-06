@@ -341,6 +341,8 @@ export interface ImportNotesInput {
   paths: string[];
   /** 目标分类；为空时导入到 Inbox */
   categoryId?: string | null;
+  /** 目录导入时是否保留源目录结构（重建子目录 + 保留原文件名） */
+  preserveStructure?: boolean | null;
 }
 
 export interface ImportedNote {
@@ -422,6 +424,27 @@ export interface LinkRebuildReport {
   resolved: number;
   unresolved: number;
   durationMs: number;
+}
+
+/** 附件管理（V1.1.2） */
+export interface AttachmentReference {
+  noteId: string;
+  title: string;
+}
+
+export interface AttachmentEntry {
+  relativePath: string;
+  fileName: string;
+  month: string;
+  bytes: number;
+  modifiedAt: string;
+  references: AttachmentReference[];
+}
+
+export interface AttachmentListReport {
+  items: AttachmentEntry[];
+  totalBytes: number;
+  referencedCount: number;
 }
 
 /** 类型化关系（N2） */

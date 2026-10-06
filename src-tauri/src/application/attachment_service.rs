@@ -8,6 +8,7 @@
 //! - 文件名统一为 `时间戳-清洗后的原名-短 ID.扩展名`，避免重名与非法字符；
 //! - 返回的 `linkPath` 已经相对当前笔记所在目录，正文里直接写 `![](linkPath)` 即可。
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,7 @@ use crate::core::paths::{ATTACHMENTS_DIR, join_and_normalize, relative_from};
 use crate::core::text::sanitize_file_name;
 use crate::core::time::now_file_timestamp;
 use crate::infrastructure::markdown_storage::parent_relative;
+use crate::domain::note::NoteStatus;
 use crate::repositories::{NoteRepository, SqliteNoteRepository};
 
 use super::context::WorkspaceContext;
@@ -79,6 +81,37 @@ pub struct AttachmentData {
     pub data_url: String,
     pub mime_type: String,
     pub bytes: u64,
+}
+
+/// 附件清单条目（V1.1.2 附件管理）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentEntry {
+    /// 工作区相对路径
+    pub relative_path: String,
+    pub file_name: String,
+    /// `YYYY-MM`（来自目录名，缺失时按修改时间推断）
+    pub month: String,
+    pub bytes: u64,
+    pub modified_at: String,
+    /// 引用了该附件的笔记（用于删除前的风险提示）
+    pub references: Vec<AttachmentReference>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentReference {
+    pub note_id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentListReport {
+    pub items: Vec<AttachmentEntry>,
+    pub total_bytes: u64,
+    /// 有笔记引用的附件数量
+    pub referenced_count: usize,
 }
 
 pub struct AttachmentService {
@@ -231,6 +264,148 @@ impl AttachmentService {
             bytes: bytes.len() as u64,
         })
     }
+
+    /// 列出附件并标注引用它的笔记（一次遍历正文，避免 N×M 扫描）。
+    pub fn list(&self) -> Result<AttachmentListReport> {
+        let files = self.ctx.storage.list_attachments()?;
+        if files.is_empty() {
+            return Ok(AttachmentListReport {
+                items: Vec::new(),
+                total_bytes: 0,
+                referenced_count: 0,
+            });
+        }
+
+        // 1) 先用「路径 → 条目索引」建表：正文里出现的是结尾片段（可能带 ../）
+        let mut by_suffix: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut items: Vec<AttachmentEntry> = Vec::with_capacity(files.len());
+        for relative in &files {
+            let absolute = self.ctx.paths.resolve_relative(relative)?;
+            let metadata = std::fs::metadata(&absolute).ok();
+            let bytes = metadata.as_ref().map(|meta| meta.len()).unwrap_or(0);
+            let modified_at = metadata
+                .as_ref()
+                .and_then(|meta| meta.modified().ok())
+                .map(crate::core::time::system_time_to_iso)
+                .unwrap_or_else(crate::core::time::now_iso);
+            let file_name = relative
+                .rsplit('/')
+                .next()
+                .unwrap_or(relative)
+                .to_string();
+            let month = relative
+                .split('/')
+                .nth(1)
+                .unwrap_or("未分月")
+                .to_string();
+            let index = items.len();
+            by_suffix
+                .entry(relative.clone())
+                .or_default()
+                .push(index);
+            items.push(AttachmentEntry {
+                relative_path: relative.clone(),
+                file_name,
+                month,
+                bytes,
+                modified_at,
+                references: Vec::new(),
+            });
+        }
+
+        // 2) 遍历活跃笔记正文，找出写了 `attachments/...` 的引用
+        let notes = self.ctx.db.with_conn(|conn| {
+            SqliteNoteRepository.list_by_status(conn, &self.ctx.workspace.id, NoteStatus::Active)
+        })?;
+        for note in notes {
+            let Ok(stored) = self.ctx.storage.read_note(&note.file_path) else {
+                continue;
+            };
+            let mut seen: HashSet<usize> = HashSet::new();
+            for target in extract_attachment_targets(&stored.body) {
+                let Some(indexes) = by_suffix.get(&target) else {
+                    continue;
+                };
+                for index in indexes {
+                    if !seen.insert(*index) {
+                        continue;
+                    }
+                    items[*index].references.push(AttachmentReference {
+                        note_id: note.id.clone(),
+                        title: note.title.clone(),
+                    });
+                }
+            }
+        }
+
+        let total_bytes = items.iter().map(|item| item.bytes).sum();
+        let referenced_count = items
+            .iter()
+            .filter(|item| !item.references.is_empty())
+            .count();
+        Ok(AttachmentListReport { items, total_bytes, referenced_count })
+    }
+
+    /// 删除附件（只允许 `attachments/` 下的文件）。返回释放的字节数。
+    ///
+    /// 调用方负责确认风险：仍然被笔记引用时只给警告，不阻止删除
+    /// （用户可能正在清理误粘贴的图片，引用由笔记自己承担）。
+    pub fn remove(&self, relative_path: &str) -> Result<u64> {
+        let relative = relative_path.trim().replace('\\', "/");
+        if !relative.starts_with(&format!("{ATTACHMENTS_DIR}/")) {
+            return Err(AppError::new(
+                ErrorCode::PathInvalid,
+                "只能删除附件目录中的文件。",
+            ));
+        }
+        let absolute = self.ctx.paths.resolve_relative(&relative)?;
+        let bytes = std::fs::metadata(&absolute).map(|meta| meta.len()).unwrap_or(0);
+        std::fs::remove_file(&absolute).map_err(|error| {
+            AppError::new(ErrorCode::IoError, format!("删除附件失败：{error}"))
+        })?;
+        Ok(bytes)
+    }
+
+    /// 供附件管理界面展示「引用了该附件的笔记」。
+    pub fn references(&self, relative_path: &str) -> Result<Vec<AttachmentReference>> {
+        let report = self.list()?;
+        Ok(report
+            .items
+            .into_iter()
+            .find(|item| item.relative_path == relative_path.trim().replace('\\', "/"))
+            .map(|item| item.references)
+            .unwrap_or_default())
+    }
+}
+
+/// 从正文里提取 `attachments/...` 形式的附件路径（去掉 `../` 前缀与结尾标点）。
+fn extract_attachment_targets(body: &str) -> Vec<String> {
+    const MARKER: &str = "attachments/";
+    let mut targets = Vec::new();
+    let bytes = body.as_bytes();
+    let mut index = 0usize;
+    while let Some(found) = body[index..].find(MARKER) {
+        let start = index + found;
+        let mut end = start;
+        while end < bytes.len() {
+            let ch = bytes[end] as char;
+            if ch.is_whitespace() || matches!(ch, ')' | '"' | '\'' | '<' | '>' | ']' | '}') {
+                break;
+            }
+            end += 1;
+        }
+        let candidate = body[start..end]
+            .trim_end_matches(['.', ',', ';', ':'])
+            .to_string();
+        if candidate.len() > MARKER.len() {
+            targets.push(candidate);
+        }
+        index = end.max(start + MARKER.len());
+        if index >= body.len() {
+            break;
+        }
+    }
+    targets
 }
 
 fn mime_for_extension(extension: &str) -> &'static str {

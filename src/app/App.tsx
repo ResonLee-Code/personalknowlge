@@ -9,6 +9,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { AboutPage } from '@/features/about/AboutPage';
 import { CategoriesPage } from '@/features/categories/CategoriesPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
+import { AttachmentsPage } from '@/features/attachments/AttachmentsPage';
 import { GraphPage } from '@/features/graph/GraphPage';
 import { SearchPage } from '@/features/search/SearchPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
@@ -55,6 +56,7 @@ function BootstrappedApp() {
         <Route path="favorites" element={<NotesSection baseScope={{ kind: 'favorites' }} />} />
         <Route path="favorites/:id" element={<NotesSection baseScope={{ kind: 'favorites' }} />} />
         <Route path="graph" element={<GraphPage />} />
+        <Route path="attachments" element={<AttachmentsPage />} />
         <Route path="trash" element={<NotesSection baseScope={{ kind: 'trash' }} />} />
         <Route path="trash/:id" element={<NotesSection baseScope={{ kind: 'trash' }} />} />
         <Route path="missing" element={<NotesSection baseScope={{ kind: 'missing' }} />} />
