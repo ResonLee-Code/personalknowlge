@@ -14,6 +14,10 @@ interface ForceGraphProps {
   onOpen?: (id: string) => void;
   /** 布局就绪回调（用于「适应窗口」等外部操作） */
   onSettled?: () => void;
+  /** 节点配色（按 id 覆盖默认的分类配色；社区着色模式使用） */
+  colors?: Map<string, string>;
+  /** 导出当前画面为 PNG（由页面负责落盘） */
+  onExportImage?: (dataUrl: string) => void;
 }
 
 /**
@@ -23,7 +27,16 @@ interface ForceGraphProps {
  * - 收敛后停止渲染帧，交互时再加热，保证 3000 节点以下也能保持流畅；
  * - 标签按缩放级别显示：放大后显示全部标题，否则只显示度数较高的节点。
  */
-export function ForceGraph({ nodes, edges, selectedId, onSelect, onOpen, onSettled }: ForceGraphProps) {
+export function ForceGraph({
+  nodes,
+  edges,
+  selectedId,
+  onSelect,
+  onOpen,
+  onSettled,
+  colors,
+  onExportImage,
+}: ForceGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const stateRef = useRef<LayoutState | null>(null);
@@ -118,7 +131,7 @@ export function ForceGraph({ nodes, edges, selectedId, onSelect, onOpen, onSettl
       const selected = node.id === selectedId;
       context.beginPath();
       context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-      context.fillStyle = categoryColor(node.categoryId);
+      context.fillStyle = colors?.get(node.id) ?? categoryColor(node.categoryId);
       context.globalAlpha = node.orphan ? 0.55 : 1;
       context.fill();
       context.globalAlpha = 1;
@@ -145,7 +158,7 @@ export function ForceGraph({ nodes, edges, selectedId, onSelect, onOpen, onSettl
     }
 
     context.restore();
-  }, [nodes, selectedId]);
+  }, [nodes, selectedId, colors]);
 
   /** 重建布局（数据变化时） */
   useEffect(() => {
@@ -370,6 +383,23 @@ export function ForceGraph({ nodes, edges, selectedId, onSelect, onOpen, onSettl
         >
           {hovered.title}
         </div>
+      ) : null}
+      {onExportImage ? (
+        <button
+          type="button"
+          className="absolute right-2 top-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1 text-[11px] text-[var(--ink-muted)] transition-colors hover:text-[var(--ink)]"
+          onClick={() => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            try {
+              onExportImage(canvas.toDataURL('image/png'));
+            } catch {
+              // 部分无头环境不支持 toDataURL，忽略即可
+            }
+          }}
+        >
+          导出 PNG
+        </button>
       ) : null}
       <div className="pointer-events-none absolute bottom-2 left-2 text-[11px] text-[var(--ink-subtle)]">
         {ready ? '拖拽节点可固定位置 · 滚轮缩放 · 双击打开笔记 · F 适应窗口' : '正在计算布局…'}

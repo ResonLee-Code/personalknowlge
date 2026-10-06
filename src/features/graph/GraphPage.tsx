@@ -8,8 +8,10 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/badge';
 import { ROUTES } from '@/lib/constants';
 import { errorMessage, formatCount } from '@/lib/format';
+import { communityColor, communitySizes, detectCommunities } from '@/lib/graphCommunity';
 import { categoryColor } from '@/lib/graphColors';
 import { cn } from '@/lib/utils';
+import { attachmentService } from '@/services/attachmentService';
 import { graphService } from '@/services/graphService';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
@@ -36,6 +38,8 @@ export function GraphPage() {
   const [focusId, setFocusId] = useState<string | null>(null);
   const [hops, setHops] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** 着色模式：按分类，或按社区（连通分量） */
+  const [colorMode, setColorMode] = useState<'category' | 'community'>('category');
   const requestRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -67,7 +71,35 @@ export function GraphPage() {
     void load();
   }, [load]);
 
+  const communities = useMemo(
+    () => detectCommunities((data?.nodes ?? []).map((node) => node.id), data?.edges ?? []),
+    [data],
+  );
+  const nodeColors = useMemo(() => {
+    const colors = new Map<string, string>();
+    (data?.nodes ?? []).forEach((node) => {
+      colors.set(
+        node.id,
+        colorMode === 'community'
+          ? communityColor(communities.get(node.id))
+          : categoryColor(node.categoryId),
+      );
+    });
+    return colors;
+  }, [data, colorMode, communities]);
+
   const legend = useMemo(() => {
+    if (colorMode === 'community' && data) {
+      return communitySizes(communities)
+        .slice(0, 6)
+        .map((item) => ({
+          id: `community-${item.id}`,
+          count: item.count,
+          color: communityColor(item.id),
+          label: `社区 ${item.id + 1}`,
+        }));
+    }
+
     if (!data) return [];
     const counts = new Map<string, number>();
     data.nodes.forEach((node) => {
@@ -83,7 +115,22 @@ export function GraphPage() {
         color: categoryColor(id || null),
         label: id ? (pathOf(id) || '未命名分类') : '未分类',
       }));
-  }, [data, pathOf]);
+  }, [data, pathOf, colorMode, communities]);
+
+  /** 导出当前画面为 PNG：落到知识库 attachments/，随工作区一起备份 */
+  const exportImage = async (dataUrl: string) => {
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    try {
+      const saved = await attachmentService.save({
+        fileName: `知识图谱-${stamp}.png`,
+        mimeType: 'image/png',
+        dataBase64: dataUrl,
+      });
+      toast.success(`已导出到 ${saved.relativePath}`);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
 
   const selectedNode = data?.nodes.find((node) => node.id === selectedId) ?? null;
   const orphanCount = data?.nodes.filter((node) => node.orphan).length ?? 0;
@@ -144,6 +191,15 @@ export function GraphPage() {
             <option value="7">最近 7 天</option>
             <option value="30">最近 30 天</option>
             <option value="90">最近 90 天</option>
+          </select>
+          <select
+            aria-label="图谱着色方式"
+            value={colorMode}
+            onChange={(event) => setColorMode(event.target.value as 'category' | 'community')}
+            className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs text-[var(--ink)]"
+          >
+            <option value="category">按分类着色</option>
+            <option value="community">按社区着色</option>
           </select>
           <Button
             size="sm"
@@ -216,8 +272,10 @@ export function GraphPage() {
               nodes={data.nodes}
               edges={data.edges}
               selectedId={selectedId}
+              colors={nodeColors}
               onSelect={setSelectedId}
               onOpen={(id) => navigate(ROUTES.note(id))}
+              onExportImage={(dataUrl) => void exportImage(dataUrl)}
             />
           )}
         </div>

@@ -309,10 +309,15 @@ impl IndexService {
 
         // 剩余记录对应的文件已消失
         for note in by_path.values() {
-            if !disk.contains(&note.file_path) {
-                self.mark_missing(&note.id)?;
-                report.missing += 1;
+            if disk.contains(&note.file_path) {
+                continue;
             }
+            // 快照可能已过期（并发写入/移动），落库前再做一次新鲜检查
+            if self.ctx.storage.exists(&note.file_path) {
+                continue;
+            }
+            self.mark_missing(&note.id)?;
+            report.missing += 1;
         }
 
         report.duration_ms = started.elapsed().as_millis() as u64;
@@ -486,9 +491,21 @@ impl IndexService {
             updated_at,
             last_indexed_at: None,
         };
-        self.ctx
-            .db
-            .with_conn(|conn| SqliteNoteRepository.insert(conn, &note))?;
+        // 幂等采纳：文件监听回调与显式扫描可能并发（两者都是「先读磁盘快照、再写库」），
+        // 因此插入前在同一事务内再确认一次路径是否已被别的扫描采纳；已存在则直接跳过，
+        // 而不是抛出 UNIQUE(workspace_id, file_path) 让整轮扫描中止。
+        let adopted = self.ctx.db.with_transaction(|tx| {
+            if SqliteNoteRepository.get_by_path(tx, self.workspace_id(), relative)?.is_some() {
+                return Ok(false);
+            }
+            SqliteNoteRepository.insert(tx, &note)?;
+            Ok(true)
+        })?;
+        if !adopted {
+            tracing::debug!(target: "index", "路径已被其它扫描采纳，跳过：{relative}");
+            report.unchanged += 1;
+            return Ok(());
+        }
 
         for tag in &stored.frontmatter.tags {
             let _ = super::tag_service::TagService::new(Arc::clone(&self.ctx))

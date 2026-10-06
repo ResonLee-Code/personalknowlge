@@ -101,6 +101,15 @@ describe('GraphPage', () => {
     );
   });
 
+  it('可切换为按社区着色并更新图例', async () => {
+    renderPage();
+    await screen.findByTestId('graph-canvas');
+
+    await userEvent.selectOptions(screen.getByLabelText('图谱着色方式'), 'community');
+    expect(await screen.findByText('社区 1')).toBeInTheDocument();
+    expect(screen.queryByText('未分类')).not.toBeInTheDocument();
+  });
+
   it('截断时给出提示', async () => {
     getGraph.mockResolvedValue(payload({ truncated: true, totalNodes: 50 }));
     renderPage();

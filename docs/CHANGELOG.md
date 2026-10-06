@@ -94,10 +94,36 @@
 结论：图谱查询满足 M3 验收口径（全量 96 ms < 1.5 s）；`links_rebuild` 已不再随笔记数平方增长。
 首次采纳 3000 个外部文件约 28 s（逐篇写库 + 建索引），是「导入已有目录」的一次性成本。
 
-### 图谱增强（进行中）
+### V1.1.1 — 2026-10-07（发布中）
 
-- ✅ 时间过滤：`/graph` 新增「全部时间 / 最近 7 / 30 / 90 天」（复用后端 `updatedAfter` 参数）；
-- ⏳ 社区聚类着色（标签传播 + 分类/社区配色切换）与 PNG 导出：下一步实现（尚未开始）。
+主题：修掉 3000 篇规模下暴露的两个性能/正确性缺陷，并补齐图谱增强。
+
+- **扫描与文件监听并发（已修复）**：文件监听回调 `apply_file_changes` 与显式 `scan_workspace()`
+  都会「先读磁盘快照、再写库」，并发时同一路径被重复采纳，触发
+  `UNIQUE constraint failed: notes.workspace_id, notes.file_path`，整轮扫描中止
+  （复现：3000 篇时 active 卡在 375）。改为**幂等采纳**：插入前在同一事务内再确认路径，
+  已存在则跳过；同时「标记缺失」前用一次新鲜 `stat` 复核，避免误判。
+  不再引入跨线程互斥锁（上一版方案会让文件监听集成测试锁序倒置挂起，已放弃）；
+- **文档计数修正**：`links_rebuild` 与图谱相关数字见下方基准表；
+- **图谱增强**：
+  - 时间过滤：`/graph` 支持「全部 / 最近 7 / 30 / 90 天」（后端 `updatedAfter`）；
+  - 社区着色：按**连通分量**划分社区（并查集，确定性、O(N+E)），可在「按分类 / 按社区」
+    之间切换，图例随之更新；更细的社区划分（模块度优化）留待后续；
+  - PNG 导出：画布右上「导出 PNG」，写入知识库 `attachments/YYYY-MM/知识图谱-<时间>.png`
+    （随工作区备份一起带走，不依赖系统文件对话框）；
+- 测试：社区划分 5 个单测 + 图谱页面新增着色切换用例；Rust 侧新增并发场景基准。
+
+基准（3000 篇 / 8 分类 / 6000 链接，`cargo test --offline --test graph_bench -- --ignored --nocapture`）：
+
+| 项目 | 修复前 | V1.1.1 |
+| --- | --- | --- |
+| 写入 3000 个 Markdown | 159 ms | 162 ms |
+| 扫描采纳 | 28.9 s（并会因 UNIQUE 冲突失败） | **18.7 s，幂等跳过重复采纳，无报错** |
+| `links_rebuild` | **51.7 s**（O(N²)） | **513 ms**（≈100×） |
+| FTS 索引重建 | 1.55 s | 1.63 s |
+| `graph_get` 全量 | 23.5 ms（**静默截断到 500 节点**） | **90.6 ms（2000 节点 / 2546 边，truncated=true）** |
+| `graph_get` 分类过滤 / 2 跳聚焦 | 22.0 / 22.9 ms | 22.8 / 83.6 ms |
+| `database.sqlite` / `.knowledge` | 6.7 / 10.8 MB | 6.7 / 11.6 MB |
 
 ### M1-1 双向链接地基（已完成）
 
@@ -196,18 +222,20 @@ M1（双向链接地基）到此完成。
 
 M2（编辑体验）到此完成。下一步：M3 知识图谱视图（评估后决定）与 Windows 打包（等待指令）。
 
-### 当前构建（V1.1.0，含迁移 003）
+### 当前构建（V1.1.1，含迁移 003）
 
 ```text
-Personal Knowledge OS_1.1.0_aarch64.dmg
-  path   src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.1.0_aarch64.dmg
-  size   4052316 bytes（3.9 MB）
-  sha256 86bd9abf8500157f2d85122307ac927ca3bdb35362d0be53a43d56000c32030d
-  built  2026-10-07 02:29（macOS aarch64 本地构建，未签名）
+Personal Knowledge OS_1.1.1_aarch64.dmg
+  path   src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.1.1_aarch64.dmg
+  size   4054862 bytes（3.9 MB）
+  sha256 3b7d4cca18d2a358282831e7ca51741ea222057e8d183d9e32d512263ff6bfb7
+  built  2026-10-07 03:51（macOS aarch64 本地构建，未签名）
 
-Personal Knowledge OS.app（同目录 bundle/macos/）
-  binary 7604976 bytes，release profile（lto + opt-level="s" + strip）
+Personal Knowledge OS.app（bundle/macos/）
+  CFBundleShortVersionString = 1.1.1
 ```
+
+上一版（V1.1.0）构建信息保留在 git 历史中，便于对照回滚。
 
 > Windows 安装包仍为 V1.0.0 构建（`dist-windows/`），**等待指令后**再交叉编译同步到 V1.1.0。
 
@@ -256,7 +284,7 @@ Personal Knowledge OS.app（同目录 bundle/macos/）
 
 | 平台 | 状态 |
 | --- | --- |
-| macOS | ✅ 已构建：`src-tauri/target/release/bundle/{macos,dmg}/`（当前校验值见「未发布（V1.1 开发中）」的「当前构建」小节） |
+| macOS | ✅ 已构建：`src-tauri/target/release/bundle/{macos,dmg}/`（当前校验值见上方「当前构建」小节） |
 | Windows | ⏸ **待确认**。`dist-windows/` 中现有安装包与便携版仍是 V1.0.0（2026-09-24）构建，未包含本版本改动；确认后再重新打包（命令见 [WINDOWS_INSTALL_GUIDE.md](./WINDOWS_INSTALL_GUIDE.md)） |
 
 ### 文档与决策记录
