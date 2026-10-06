@@ -490,6 +490,10 @@ impl IndexService {
             created_at,
             updated_at,
             last_indexed_at: None,
+            source_type: stored.frontmatter.source_type.clone(),
+            source_ref: stored.frontmatter.source_ref.clone(),
+            source_reliability: stored.frontmatter.source_reliability,
+            valid_until: stored.frontmatter.valid_until.clone(),
         };
         // 幂等采纳：文件监听回调与显式扫描可能并发（两者都是「先读磁盘快照、再写库」），
         // 因此插入前在同一事务内再确认一次路径是否已被别的扫描采纳；已存在则直接跳过，
@@ -603,6 +607,15 @@ impl IndexService {
             if note.status == NoteStatus::Missing {
                 SqliteNoteRepository.set_status(conn, &note.id, NoteStatus::Active, None)?;
             }
+            // 来源与时效也以文件为准：外部编辑器改了 frontmatter 后同步到库里
+            SqliteNoteRepository.set_source(
+                conn,
+                &note.id,
+                stored.frontmatter.source_type.as_deref(),
+                stored.frontmatter.source_ref.as_deref(),
+                stored.frontmatter.source_reliability,
+                stored.frontmatter.valid_until.as_deref(),
+            )?;
             Ok(())
         })?;
 

@@ -137,6 +137,20 @@
 | `graph_get` 分类过滤 / 2 跳聚焦 | 22.0 / 22.9 ms | 22.8 / 83.6 ms |
 | `database.sqlite` / `.knowledge` | 6.7 / 10.8 MB | 6.7 / 11.6 MB |
 
+### N1 来源与时效（V1.1.2 开发中）
+
+- 迁移 `004_note_assets.sql`（`SCHEMA_VERSION = 4`）：`notes` 新增 `source_type` / `source_ref` /
+  `source_reliability` / `valid_until` 四列；新建 `note_relations` 表（类型化关系，数据模型预留）；
+- 新增命令 `note_set_source`：来源与时效写入 frontmatter（`source_type` 等），
+  保证文件仍是唯一事实来源；外部编辑器改 frontmatter 后扫描会同步回库；
+- 编辑器元信息栏显示来源类型 + 可靠性星标，逾期提示「可能已过期」、30 天内提示「即将到期」；
+  新增「来源与时效」编辑对话框（更多操作菜单 / 点击标签均可打开）；
+- 导入外部文件时保留被导入文件的来源与关系字段，不再丢弃；
+- 前端新增 `freshness` 工具（时效判定、星标、来源类型中文化）+ 6 个单测；
+  Rust 新增 `note_assets_flow` 2 个集成测试（frontmatter 往返 / 外部编辑同步）；
+- **下一步（N2）**：`note_relations` 的服务与界面——关系面板、图谱按关系类型着色/过滤、
+  「已被 X 取代」角标；表结构已就位，避免二次迁移。
+
 ### 图谱细节与下一代技术分析（V1.1.2 开发中）
 
 - 图谱：新增**社区粒度**选择（模块度分辨率 0.5 / 1 / 1.5 / 2，仅在按社区着色时出现）；

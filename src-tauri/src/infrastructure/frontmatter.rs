@@ -19,8 +19,28 @@ pub struct Frontmatter {
     pub tags: Vec<String>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
+    /// 来源类型（官方文档 / 书籍 / 实测 / 个人推测 …）
+    pub source_type: Option<String>,
+    /// 来源引用（URL、书名、出处）
+    pub source_ref: Option<String>,
+    /// 来源可靠性 1–5
+    pub source_reliability: Option<i64>,
+    /// 时效：超过该日期视为可能过期（ISO 8601 日期或时间）
+    pub valid_until: Option<String>,
+    /// 用户显式声明的类型化关系（N2）
+    pub relations: Vec<RelationEntry>,
     /// 未识别的字段，按原顺序保留
     pub extra: Vec<(String, Value)>,
+}
+
+/// frontmatter 中声明的一条类型化关系。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationEntry {
+    /// RELATED_TO / DERIVED_FROM / SUPERSEDES / CONTRADICTS / CONFIRMS / DEPENDS_ON / PART_OF / EXAMPLE_OF / REFERENCES
+    pub relation_type: String,
+    /// 目标笔记标题（与 [[双向链接]] 同一套解析：标题优先，其次路径/文件名）
+    pub target: String,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -120,10 +140,25 @@ fn from_mapping(mapping: &Mapping) -> Frontmatter {
             "tags" => frontmatter.tags = as_string_list(value),
             "created_at" | "createdAt" => frontmatter.created_at = as_string(value),
             "updated_at" | "updatedAt" => frontmatter.updated_at = as_string(value),
+            "source_type" | "sourceType" => frontmatter.source_type = as_string(value),
+            "source_ref" | "sourceRef" => frontmatter.source_ref = as_string(value),
+            "source_reliability" | "sourceReliability" => {
+                frontmatter.source_reliability = as_i64(value).filter(|level| (1..=5).contains(level))
+            }
+            "valid_until" | "validUntil" => frontmatter.valid_until = as_string(value),
+            "relations" => frontmatter.relations = as_relations(value),
             _ => frontmatter.extra.push((key_name.to_string(), value.clone())),
         }
     }
     frontmatter
+}
+
+/// 数字解析：YAML 里 `5` 与 `'5'` 都要能读（序列化时可能被加引号）。
+fn as_i64(value: &Value) -> Option<i64> {
+    if let Some(number) = value.as_i64() {
+        return Some(number);
+    }
+    value.as_str().and_then(|text| text.trim().parse::<i64>().ok())
 }
 
 fn as_string(value: &Value) -> Option<String> {
@@ -140,6 +175,41 @@ fn as_string(value: &Value) -> Option<String> {
         Value::Bool(flag) => Some(flag.to_string()),
         _ => None,
     }
+}
+
+/// 解析 `relations:` 序列：`- type: SUPERSEDES` / `  target: 旧笔记` / `  note: 可选说明`
+fn as_relations(value: &Value) -> Vec<RelationEntry> {
+    let Value::Sequence(items) = value else {
+        return Vec::new();
+    };
+    let mut relations = Vec::new();
+    for item in items {
+        let Value::Mapping(mapping) = item else {
+            continue;
+        };
+        let mut relation_type: Option<String> = None;
+        let mut target: Option<String> = None;
+        let mut note: Option<String> = None;
+        for (key, value) in mapping {
+            match key.as_str().unwrap_or_default() {
+                "type" | "relation" | "relation_type" | "relationType" => {
+                    relation_type = as_string(value)
+                }
+                "target" | "to" => target = as_string(value),
+                "note" | "reason" | "description" => note = as_string(value),
+                _ => {}
+            }
+        }
+        let (Some(relation_type), Some(target)) = (relation_type, target) else {
+            continue;
+        };
+        relations.push(RelationEntry {
+            relation_type: relation_type.to_ascii_uppercase(),
+            target,
+            note,
+        });
+    }
+    relations
 }
 
 fn as_string_list(value: &Value) -> Vec<String> {
@@ -176,6 +246,17 @@ pub fn serialize(frontmatter: &Frontmatter, body: &str) -> String {
     }
     push_scalar(&mut yaml, "created_at", frontmatter.created_at.as_ref());
     push_scalar(&mut yaml, "updated_at", frontmatter.updated_at.as_ref());
+    push_scalar(&mut yaml, "source_type", frontmatter.source_type.as_ref());
+    push_scalar(&mut yaml, "source_ref", frontmatter.source_ref.as_ref());
+    if let Some(level) = frontmatter.source_reliability {
+        if (1..=5).contains(&level) {
+            yaml.push_str(&scalar_entry("source_reliability", &level.to_string()));
+        }
+    }
+    push_scalar(&mut yaml, "valid_until", frontmatter.valid_until.as_ref());
+    if !frontmatter.relations.is_empty() {
+        yaml.push_str(&relation_block(&frontmatter.relations));
+    }
 
     // 未知字段原样保留（由 serde_yaml 负责转义）
     let known = [
@@ -187,6 +268,11 @@ pub fn serialize(frontmatter: &Frontmatter, body: &str) -> String {
         "tags",
         "created_at",
         "updated_at",
+        "source_type",
+        "source_ref",
+        "source_reliability",
+        "valid_until",
+        "relations",
     ];
     if !frontmatter.extra.is_empty() {
         let mut extra = Mapping::new();
@@ -219,6 +305,33 @@ fn scalar_entry(key: &str, value: &str) -> String {
         Value::String(value.to_string()),
     );
     serde_yaml::to_string(&Value::Mapping(mapping)).unwrap_or_else(|_| format!("{key}: {value}\n"))
+}
+
+/// 关系块序列：`relations:` 后接缩进的 `- type/target/note` 行。
+fn relation_block(relations: &[RelationEntry]) -> String {
+    let mut block = String::from("relations:\n");
+    for relation in relations {
+        let mut mapping = Mapping::new();
+        mapping.insert(
+            Value::String("type".to_string()),
+            Value::String(relation.relation_type.clone()),
+        );
+        mapping.insert(
+            Value::String("target".to_string()),
+            Value::String(relation.target.clone()),
+        );
+        if let Some(note) = relation.note.as_ref().filter(|value| !value.trim().is_empty()) {
+            mapping.insert(Value::String("note".to_string()), Value::String(note.clone()));
+        }
+        let item = serde_yaml::to_string(&Value::Sequence(vec![Value::Mapping(mapping)]))
+            .unwrap_or_else(|_| format!("- type: {}\n", relation.relation_type));
+        for line in item.lines() {
+            block.push_str("  ");
+            block.push_str(line);
+            block.push('\n');
+        }
+    }
+    block
 }
 
 /// 标签块序列：`tags:` 后接两空格缩进的 `- 标签` 行。

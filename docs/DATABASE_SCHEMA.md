@@ -124,6 +124,37 @@ CREATE INDEX idx_note_links_type   ON note_links(link_type);
 外链以 `link_type='url'` 记录但不进入图谱；`target_note_id` 允许为空以支持
 「未解析链接」。解析规则见 [PLAN_V1.1.md](./PLAN_V1.1.md) 的 F1。
 
+### note_relations（迁移 004，类型化关系 · 预留）
+
+```sql
+CREATE TABLE IF NOT EXISTS note_relations (
+    id             TEXT PRIMARY KEY,
+    workspace_id   TEXT NOT NULL,
+    source_note_id TEXT NOT NULL,
+    target_note_id TEXT NOT NULL,
+    relation_type  TEXT NOT NULL,   -- SUPERSEDES / CONTRADICTS / DERIVED_FROM / ...
+    note           TEXT,            -- 用户写的说明
+    position       INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL,
+    UNIQUE (source_note_id, target_note_id, relation_type)
+);
+```
+
+要点：与 `note_links` 同样属于**派生数据**，事实来源是来源笔记 frontmatter 里的 `relations:`；
+重命名 / 删除 / 重建都会按正文重新生成。**当前版本已建表并完成数据模型预留，
+服务与界面（关系面板、图谱边样式）在下一轮实现。**
+
+### notes 的来源与时效列（迁移 004）
+
+| 列 | 含义 | 对应 frontmatter |
+| --- | --- | --- |
+| `source_type` | 来源类型（official / book / experiment / personal …） | `source_type` |
+| `source_ref` | 来源引用（URL、书名、出处） | `source_ref` |
+| `source_reliability` | 可靠性 1–5 | `source_reliability` |
+| `valid_until` | 时效（超过该日期提示「可能已过期」） | `valid_until` |
+
+这些列以文件为准：应用内修改会写回 frontmatter，外部编辑器改动会在扫描时同步回库。
+
 ### 索引
 
 ```sql

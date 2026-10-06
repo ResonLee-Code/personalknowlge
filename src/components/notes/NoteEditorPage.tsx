@@ -2,6 +2,8 @@ import {
   Check,
   Columns2,
   Download,
+  AlertTriangle,
+  BookMarked,
   Eye,
   FileText,
   FolderInput,
@@ -28,6 +30,7 @@ import { MarkdownPreview } from '@/components/editor/MarkdownPreview';
 import { OutlinePanel } from '@/components/editor/OutlinePanel';
 import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
+import { SourceDialog } from '@/components/editor/SourceDialog';
 import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
 import { TagEditor } from '@/components/editor/TagEditor';
 import { ResizeHandle } from '@/components/layout/ResizeHandle';
@@ -52,6 +55,7 @@ import {
 } from '@/lib/attachment';
 import { ROUTES } from '@/lib/constants';
 import { errorMessage, formatDateTime, formatRelative } from '@/lib/format';
+import { freshnessState, reliabilityStars, sourceTypeLabel } from '@/lib/freshness';
 import { parseOutline } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { attachmentService } from '@/services/attachmentService';
@@ -96,6 +100,7 @@ export function NoteEditorPage() {
   const [moveOpen, setMoveOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [sourceOpen, setSourceOpen] = useState(false);
   const [forceOverwrite, setForceOverwrite] = useState(false);
   const loadedId = useRef<string | null>(null);
   const baseHash = useRef<string | null>(null);
@@ -463,6 +468,9 @@ export function NoteEditorPage() {
               >
                 创建副本
               </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setSourceOpen(true)}>
+                <BookMarked className="h-3.5 w-3.5" /> 来源与时效
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void showPath()}>复制相对路径</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void reveal()}>在文件夹中显示</DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -548,6 +556,30 @@ export function NoteEditorPage() {
           ) : null}
           {note.status === 'deleted' ? (
             <span className="text-red-500">位于回收站（只读）</span>
+          ) : null}
+          {note.sourceType || note.sourceRef || note.sourceReliability ? (
+            <button
+              type="button"
+              className="flex items-center gap-1 hover:text-[var(--brand)]"
+              title="点击编辑来源与时效"
+              onClick={() => setSourceOpen(true)}
+            >
+              <BookMarked className="h-3 w-3" />
+              {sourceTypeLabel(note.sourceType) || '来源'}
+              {note.sourceReliability ? (
+                <span className="text-amber-500">{reliabilityStars(note.sourceReliability)}</span>
+              ) : null}
+            </button>
+          ) : null}
+          {freshnessState(note.validUntil) === 'expired' ? (
+            <span className="flex items-center gap-1 text-amber-600" title={`有效期至 ${note.validUntil}`}>
+              <AlertTriangle className="h-3 w-3" />
+              可能已过期
+            </span>
+          ) : freshnessState(note.validUntil) === 'expiring' ? (
+            <span className="text-amber-600" title={`有效期至 ${note.validUntil}`}>
+              即将到期
+            </span>
           ) : null}
           {note.lastIndexedAt ? (
             <span className="flex items-center gap-1 text-emerald-600">
@@ -642,6 +674,16 @@ export function NoteEditorPage() {
           onClose={() => {
             setRenameOpen(false);
             bumpLinkRevision();
+          }}
+        />
+      ) : null}
+      {sourceOpen ? (
+        <SourceDialog
+          note={note}
+          onClose={() => setSourceOpen(false)}
+          onSaved={() => {
+            setSourceOpen(false);
+            void useNotesStore.getState().openDetail(note.id);
           }}
         />
       ) : null}

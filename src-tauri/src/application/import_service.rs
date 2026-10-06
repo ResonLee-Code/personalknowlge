@@ -270,6 +270,11 @@ impl ImportService {
             tags: tags.clone(),
             created_at: Some(created_at.clone()),
             updated_at: Some(updated_at.clone()),
+            source_type: source.source_type.clone(),
+            source_ref: source.source_ref.clone(),
+            source_reliability: source.source_reliability,
+            valid_until: source.valid_until.clone(),
+            relations: source.relations.clone(),
             extra: source.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &body);
@@ -289,6 +294,10 @@ impl ImportService {
             created_at,
             updated_at,
             last_indexed_at: None,
+            source_type: source.source_type.clone(),
+            source_ref: source.source_ref.clone(),
+            source_reliability: source.source_reliability,
+            valid_until: source.valid_until.clone(),
         };
         self.ctx
             .db

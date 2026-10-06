@@ -1025,7 +1025,28 @@ fn applies_note_links_migration() {
     harness.create_workspace();
     let context = harness.context();
 
-    assert_eq!(context.db.schema_version().expect("schema 版本"), 3);
+    // 004 之后为 4（含 note_links 与 note_assets）
+    assert_eq!(context.db.schema_version().expect("schema 版本"), 4);
+
+    // 004：来源/时效列与类型化关系表
+    let (has_relations, source_column) = context
+        .db
+        .with_conn(|conn| {
+            let table: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='note_relations'",
+                [],
+                |row| row.get(0),
+            )?;
+            let column: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='source_reliability'",
+                [],
+                |row| row.get(0),
+            )?;
+            Ok((table, column))
+        })
+        .expect("检查 004 迁移结果");
+    assert_eq!(has_relations, 1, "note_relations 表应存在");
+    assert_eq!(source_column, 1, "notes.source_reliability 列应存在");
 
     let (table, indexes) = context
         .db

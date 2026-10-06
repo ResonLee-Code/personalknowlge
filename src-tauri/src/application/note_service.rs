@@ -11,6 +11,7 @@ use crate::core::paths::{WorkspacePaths, INBOX_DIR};
 use crate::core::text::{count_words, markdown_to_plain_text};
 use crate::core::time::{now_file_timestamp, now_iso};
 use crate::domain::note::{
+    SetSourceInput,
     CreateNoteInput, Note, NoteDetail, NoteListQuery, NoteListResult, NoteStatus, NoteSummary,
     SaveNoteInput, SaveNoteResult,
 };
@@ -123,6 +124,11 @@ impl NoteService {
             tags: tags.clone(),
             created_at: Some(now.clone()),
             updated_at: Some(now.clone()),
+            source_type: None,
+            source_ref: None,
+            source_reliability: None,
+            valid_until: None,
+            relations: Vec::new(),
             extra: Vec::new(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &body);
@@ -146,6 +152,10 @@ impl NoteService {
             created_at: now.clone(),
             updated_at: now,
             last_indexed_at: None,
+            source_type: None,
+            source_ref: None,
+            source_reliability: None,
+            valid_until: None,
         };
         self.ctx
             .db
@@ -236,6 +246,11 @@ impl NoteService {
             tags: tags.clone(),
             created_at: Some(created_at),
             updated_at: Some(now.clone()),
+            source_type: None,
+            source_ref: None,
+            source_reliability: None,
+            valid_until: None,
+            relations: Vec::new(),
             extra: existing.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &input.content);
@@ -338,6 +353,11 @@ impl NoteService {
                 .clone()
                 .or_else(|| Some(note.created_at.clone())),
             updated_at: Some(now.clone()),
+            source_type: None,
+            source_ref: None,
+            source_reliability: None,
+            valid_until: None,
+            relations: Vec::new(),
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -409,6 +429,11 @@ impl NoteService {
                 .clone()
                 .or_else(|| Some(note.created_at.clone())),
             updated_at: Some(now.clone()),
+            source_type: None,
+            source_ref: None,
+            source_reliability: None,
+            valid_until: None,
+            relations: Vec::new(),
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -540,6 +565,60 @@ impl NoteService {
     }
 
     /// 设置标签。
+    /// 更新来源与时效（N1）。来源属于知识资产，写进 frontmatter，因此必须落盘。
+    pub fn set_source(&self, input: SetSourceInput) -> Result<NoteDetail> {
+        let note = self.note_or_err(&input.id)?;
+        let stored = self.ctx.storage.read_note(&note.file_path)?;
+        let now = now_iso();
+        let reliability = input
+            .source_reliability
+            .filter(|level| (1..=5).contains(level));
+        let trim = |value: Option<String>| {
+            value
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+        };
+        let lookup = self.ctx.category_lookup()?;
+        let category_path = note
+            .category_id
+            .as_ref()
+            .map(|id| lookup.path_string(id))
+            .unwrap_or_default();
+        let frontmatter = Frontmatter {
+            id: Some(note.id.clone()),
+            title: Some(note.title.clone()),
+            note_type: stored.frontmatter.note_type.clone(),
+            status: stored.frontmatter.status.clone().or(Some("active".to_string())),
+            category: Some(category_path).filter(|value| !value.is_empty()),
+            tags: stored.frontmatter.tags.clone(),
+            created_at: stored
+                .frontmatter
+                .created_at
+                .clone()
+                .or_else(|| Some(note.created_at.clone())),
+            updated_at: Some(now.clone()),
+            source_type: trim(input.source_type),
+            source_ref: trim(input.source_ref),
+            source_reliability: reliability,
+            valid_until: trim(input.valid_until),
+            relations: stored.frontmatter.relations.clone(),
+            extra: stored.frontmatter.extra.clone(),
+        };
+        let markdown = frontmatter::serialize(&frontmatter, &stored.body);
+        self.ctx.storage.write_atomic(&note.file_path, &markdown)?;
+        self.ctx.db.with_conn(|conn| {
+            SqliteNoteRepository.set_source(
+                conn,
+                &note.id,
+                frontmatter.source_type.as_deref(),
+                frontmatter.source_ref.as_deref(),
+                frontmatter.source_reliability,
+                frontmatter.valid_until.as_deref(),
+            )
+        })?;
+        self.get(&note.id)
+    }
+
     pub fn set_tags(&self, id: &str, tags: &[String]) -> Result<NoteDetail> {
         let note = self.note_or_err(id)?;
         let names = self.tags().normalize_names(tags.to_vec());
@@ -564,6 +643,11 @@ impl NoteService {
                 .clone()
                 .or_else(|| Some(note.created_at.clone())),
             updated_at: Some(now_iso()),
+            source_type: stored.frontmatter.source_type.clone(),
+            source_ref: stored.frontmatter.source_ref.clone(),
+            source_reliability: None,
+            valid_until: None,
+            relations: Vec::new(),
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);

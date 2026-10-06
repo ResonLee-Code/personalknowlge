@@ -52,6 +52,14 @@ pub struct Note {
     pub created_at: String,
     pub updated_at: String,
     pub last_indexed_at: Option<String>,
+    /// 来源类型（官方文档 / 书籍 / 实测 / 个人推测 …）
+    pub source_type: Option<String>,
+    /// 来源引用（URL、书名、出处）
+    pub source_ref: Option<String>,
+    /// 来源可靠性 1–5
+    pub source_reliability: Option<i64>,
+    /// 时效：超过该日期视为可能过期
+    pub valid_until: Option<String>,
 }
 
 /// 列表展示用的笔记摘要。
@@ -186,6 +194,25 @@ pub struct CreateNoteInput {
     pub initial_content: Option<String>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+}
+
+/// 更新来源与时效输入（N1）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSourceInput {
+    pub id: String,
+    /// 来源类型：official / book / experiment / personal / unknown …
+    #[serde(default)]
+    pub source_type: Option<String>,
+    /// 来源引用（URL、书名、出处）
+    #[serde(default)]
+    pub source_ref: Option<String>,
+    /// 可靠性 1–5，越界会被忽略
+    #[serde(default)]
+    pub source_reliability: Option<i64>,
+    /// 时效（ISO 8601）；超过该日期在界面提示「可能已过期」
+    #[serde(default)]
+    pub valid_until: Option<String>,
 }
 
 /// 保存笔记输入。

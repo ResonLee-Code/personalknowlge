@@ -203,7 +203,8 @@ fn notes_by_ids(conn: &rusqlite::Connection, ids: &[String]) -> Result<Vec<Note>
     let placeholders = vec!["?"; ids.len()].join(", ");
     let sql = format!(
         "SELECT id, workspace_id, title, file_path, category_id, status, content_hash,
-                word_count, favorite, created_at, updated_at, last_indexed_at
+                word_count, favorite, created_at, updated_at, last_indexed_at,
+                source_type, source_ref, source_reliability, valid_until
          FROM notes WHERE id IN ({placeholders})"
     );
     let values: Vec<rusqlite::types::Value> =
@@ -224,6 +225,10 @@ fn notes_by_ids(conn: &rusqlite::Connection, ids: &[String]) -> Result<Vec<Note>
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
             last_indexed_at: row.get("last_indexed_at")?,
+            source_type: row.get("source_type")?,
+            source_ref: row.get("source_ref")?,
+            source_reliability: row.get("source_reliability")?,
+            valid_until: row.get("valid_until")?,
         })
     })?;
     let mut notes = Vec::new();

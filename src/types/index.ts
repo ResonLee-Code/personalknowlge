@@ -70,6 +70,11 @@ export interface Note {
   createdAt: string;
   updatedAt: string;
   lastIndexedAt?: string | null;
+  /** 来源与时效（V1.1.2 N1） */
+  sourceType?: string | null;
+  sourceRef?: string | null;
+  sourceReliability?: number | null;
+  validUntil?: string | null;
 }
 
 export interface TextSegment {
@@ -417,6 +422,15 @@ export interface LinkRebuildReport {
   resolved: number;
   unresolved: number;
   durationMs: number;
+}
+
+/** 更新来源与时效（V1.1.2 N1） */
+export interface SetSourceInput {
+  id: string;
+  sourceType?: string | null;
+  sourceRef?: string | null;
+  sourceReliability?: number | null;
+  validUntil?: string | null;
 }
 
 /** 附件落盘（V1.1 M2） */

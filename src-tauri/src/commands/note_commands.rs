@@ -8,7 +8,7 @@ use crate::application::export_service::{ExportNoteInput, ExportNoteResult, Expo
 use crate::core::error::Result;
 use crate::domain::note::{
     CreateNoteInput, NoteDetail, NoteListQuery, NoteListResult, NoteStatus, NoteSummary,
-    SaveNoteInput, SaveNoteResult,
+    SaveNoteInput, SaveNoteResult, SetSourceInput,
 };
 use crate::state::AppState;
 use crate::repositories::{NoteRepository, SqliteNoteRepository};
@@ -47,6 +47,16 @@ pub async fn note_update(
 ) -> Result<SaveNoteResult> {
     let context = state.inner.context()?;
     run(move || NoteService::new(context).save(input)).await
+}
+
+/// 更新来源与时效（N1）。
+#[tauri::command]
+pub async fn note_set_source(
+    state: State<'_, AppState>,
+    input: SetSourceInput,
+) -> Result<NoteDetail> {
+    let context = state.inner.context()?;
+    run(move || NoteService::new(context).set_source(input)).await
 }
 
 #[tauri::command]

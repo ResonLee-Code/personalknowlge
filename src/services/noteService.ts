@@ -5,6 +5,7 @@ import type {
   NoteListResult,
   NoteSummary,
   SaveNoteInput,
+  SetSourceInput,
   SaveNoteResult,
   ImportNotesInput,
   ImportReport,
@@ -47,6 +48,9 @@ export const noteService = {
     call<NoteDetail>('note_set_favorite', { id, favorite }),
 
   setTags: (id: string, tags: string[]) => call<NoteDetail>('note_set_tags', { id, tags }),
+
+  /** 更新来源与时效（N1）；会写回 Markdown frontmatter */
+  setSource: (input: SetSourceInput) => call<NoteDetail>('note_set_source', { input }),
 
   count: (status?: string) => call<number>('note_count', { status }),
 

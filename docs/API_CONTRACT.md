@@ -190,7 +190,19 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
   （另接受 `{{标题}}`、`{{日期}}`、`{{时间}}`），未知占位符原样保留；
 - `template_render` 只返回内容，写入仍走 `note_create`，保证索引 / 链接 / 统计路径唯一。
 
-## 12. 知识图谱（V1.1 M3）
+## 12. 来源与时效（V1.1.2 N1）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `note_set_source` | `{ input: { id, sourceType?, sourceRef?, sourceReliability?, validUntil? } }` | `NoteDetail` |
+
+- 字段写入笔记 frontmatter（`source_type` / `source_ref` / `source_reliability` / `valid_until`），
+  保证「文件是唯一事实来源」；外部编辑器改 frontmatter 后，扫描会同步回数据库列；
+- `source_reliability` 只接受 1–5，越界忽略；空字符串视为清空该字段；
+- 来源类型建议取值：`official` / `book` / `paper` / `experiment` / `personal` / `conversation` / `ai` / `unknown`；
+- 界面：编辑器元信息栏显示来源与星标，逾期显示「可能已过期」，30 天内显示「即将到期」。
+
+## 13. 知识图谱（V1.1 M3）
 
 | 命令 | 参数 | 返回 |
 | --- | --- | --- |
@@ -203,7 +215,7 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - `degree` 是**本次结果内**的邻居数（同一对笔记多条链接算一个邻居），截断后重新计算；
 - 图谱是派生数据：不落库，`links_rebuild` 可从 Markdown 整体修复。
 
-## 13. 前端服务层
+## 14. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 
