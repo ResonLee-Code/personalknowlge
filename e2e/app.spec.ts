@@ -175,6 +175,14 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.locator('.cm-content')).toBeVisible();
   await page.getByRole('button', { name: /欢迎使用 Personal Knowledge OS/ }).first().click();
   await expect(page.locator('.cm-content')).toBeVisible();
+
+  // 分屏模式下切换笔记同样保持：编辑区与预览区都应存在
+  await page.getByRole('button', { name: '分屏', exact: true }).click();
+  await expect(page.getByTestId('editor-pane')).toBeVisible();
+  await expect(page.getByTestId('preview-pane')).toBeVisible();
+  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await expect(page.getByTestId('editor-pane')).toBeVisible();
+  await expect(page.getByTestId('preview-pane')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '15-edit-mode-kept.png') });
 
   await page.goto('/#/trash');
