@@ -15,6 +15,7 @@ pub mod note_service;
 pub mod registry;
 pub mod search_service;
 pub mod tag_service;
+pub mod template_service;
 pub mod workspace_service;
 
 pub use backup_service::BackupService;
@@ -29,5 +30,8 @@ pub use note_service::NoteService;
 pub use registry::WorkspaceRegistryStore;
 pub use search_service::SearchService;
 pub use tag_service::TagService;
+pub use template_service::{
+    RenderTemplateInput, RenderedTemplate, TemplateService, TemplateSummary,
+};
 pub use workspace_service::WorkspaceService;
 pub use attachment_service::{AttachmentService, SaveAttachmentInput, SavedAttachment};

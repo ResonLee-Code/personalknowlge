@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 表现层 | 界面与交互，不直接访问 SQLite 与文件系统 | `src/` |
 | 命令层 | Tauri 命令，参数校验与线程调度 | `src-tauri/src/commands/` |
-| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件） | `src-tauri/src/application/` |
+| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件、模板） | `src-tauri/src/application/` |
 | 领域层 | 数据结构与不变量，不依赖框架 | `src-tauri/src/domain/` |
 | 仓储层 | 隔离 SQL 细节（trait + SQLite 实现） | `src-tauri/src/repositories/` |
 | 基础设施层 | SQLite、Markdown 存储、FTS5、文件监听、备份、frontmatter、docx 生成 | `src-tauri/src/infrastructure/` |
@@ -20,7 +20,7 @@ React UI (src/)
    ▼
 commands/            ← 只做转发；阻塞任务交给 async_runtime::spawn_blocking
    ▼
-application/         ← NoteService / CategoryService / TagService / SearchService / BackupService / LinkService / AttachmentService / IndexService / WorkspaceService
+application/         ← NoteService / CategoryService / TagService / SearchService / BackupService / LinkService / AttachmentService / TemplateService / IndexService / WorkspaceService
    ▼
 domain/  +  repositories/  +  infrastructure/
    ▼
@@ -176,3 +176,16 @@ Markdown 预览
 约束：单文件 20 MB、单张预览内联 8 MB；`attachment_read` 只接受工作区内的相对路径，
 越界路径（`../` 越出根目录）与外部 URL 一律拒绝。附件是普通文件，不进入 `notes` 表。
 Base64 编解码由 `core::base64` 自带实现（避免为单点需求引入新依赖）。
+
+### 5.3 本地模板（V1.1 M2-2）
+
+```text
+.knowledge/templates/*.md
+  → templates_list   列出模板（名称 / 首标题 / 大小，跳过 {{…}} 形式的标题）
+  → template_render  替换 {{title}} {{date}} {{time}} {{datetime}} {{weekday}}
+  → 前端把渲染结果填入「新建笔记 → 初始内容」
+  → 仍走 note_create 写入（索引 / 链接 / 统计路径保持唯一）
+```
+
+模板只读取 `.knowledge/templates` 下的 Markdown，模板名禁止包含路径分隔符与 `..`，
+单文件上限 1 MB；新建工作区时会写入一个示例模板，用于让该能力可被发现。

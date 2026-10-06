@@ -1,13 +1,23 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NewNoteDialog } from '@/components/notes/NewNoteDialog';
+import { templateService } from '@/services/templateService';
 import { useUiStore } from '@/stores/uiStore';
+
+vi.mock('@/services/templateService', () => ({
+  templateService: { list: vi.fn(), render: vi.fn() },
+}));
+
+const listTemplates = vi.mocked(templateService.list);
+const renderTemplate = vi.mocked(templateService.render);
 
 describe('NewNoteDialog', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    listTemplates.mockResolvedValue([]);
     useUiStore.setState({ newNoteDialogOpen: false });
   });
 
@@ -41,5 +51,32 @@ describe('NewNoteDialog', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /导入外部文件/ }));
     expect(screen.getByText(/浏览器预览模式无法读取本地文件/)).toBeInTheDocument();
+  });
+
+  it('有模板时可以选择模板并把渲染结果填进初始内容', async () => {
+    listTemplates.mockResolvedValue([
+      { name: '会议记录', fileName: '会议记录.md', title: '会议记录', bytes: 120 },
+    ]);
+    renderTemplate.mockResolvedValue({
+      name: '会议记录',
+      content: '# 周会\n\n- 时间：2026-10-07 09:00\n',
+    });
+    useUiStore.setState({ newNoteDialogOpen: true });
+
+    render(
+      <MemoryRouter>
+        <NewNoteDialog />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(screen.getByLabelText('标题'), '周会');
+    await userEvent.selectOptions(await screen.findByLabelText('模板'), '会议记录');
+
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText('初始内容（可选）')).toHaveValue(
+        '# 周会\n\n- 时间：2026-10-07 09:00\n',
+      ),
+    );
+    expect(renderTemplate).toHaveBeenCalledWith({ name: '会议记录', title: '周会' });
   });
 });

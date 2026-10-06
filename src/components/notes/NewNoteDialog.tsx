@@ -1,5 +1,5 @@
 import { CheckCircle2, FileUp, FolderOpen, Loader2, PencilLine, X, XCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -17,11 +17,12 @@ import { errorMessage } from '@/lib/format';
 import { isTauriRuntime } from '@/services/api';
 import { pickDirectory, pickMarkdownFiles } from '@/services/appService';
 import { noteService } from '@/services/noteService';
+import { templateService } from '@/services/templateService';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import type { ImportReport } from '@/types';
+import type { ImportReport, TemplateSummary } from '@/types';
 
 type Mode = 'create' | 'import';
 
@@ -110,6 +111,40 @@ function CreateForm({ categoryId, onClose }: { categoryId: string; onClose: () =
   const [tags, setTags] = useState('');
   const [content, setContent] = useState('');
   const [busy, setBusy] = useState(false);
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [templateName, setTemplateName] = useState('');
+  /** 用户是否手动改过正文：改过之后切换标题不再重新套用模板 */
+  const [contentEdited, setContentEdited] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    // 模板是可选能力：读取失败（例如浏览器预览模式）时静默忽略，不影响手动创建
+    void templateService
+      .list()
+      .then((list) => {
+        if (!cancelled) setTemplates(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const applyTemplate = async (name: string, overrideTitle?: string) => {
+    setTemplateName(name);
+    if (!name) return;
+    try {
+      const rendered = await templateService.render({
+        name,
+        title: (overrideTitle ?? title).trim() || '未命名笔记',
+      });
+      setContent(rendered.content);
+      setContentEdited(false);
+    } catch (error) {
+      toast.error(errorMessage(error));
+      setTemplateName('');
+    }
+  };
 
   const submit = async () => {
     const trimmed = title.trim();
@@ -146,7 +181,13 @@ function CreateForm({ categoryId, onClose }: { categoryId: string; onClose: () =
           autoFocus
           value={title}
           placeholder="例如：SQLite 全文搜索学习笔记"
-          onChange={(event) => setTitle(event.target.value)}
+          onChange={(event) => {
+            setTitle(event.target.value);
+            // 已选模板且正文未被手改时，跟随标题重新渲染（{{title}} 占位符）
+            if (templateName && !contentEdited) {
+              void applyTemplate(templateName, event.target.value);
+            }
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void submit();
           }}
@@ -162,13 +203,38 @@ function CreateForm({ categoryId, onClose }: { categoryId: string; onClose: () =
         />
       </div>
       <div className="space-y-1.5">
+        {templates.length > 0 ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="new-note-template">模板</Label>
+            <select
+              id="new-note-template"
+              value={templateName}
+              onChange={(event) => void applyTemplate(event.target.value)}
+              className="h-9 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-sm text-[var(--ink)]"
+            >
+              <option value="">不使用模板</option>
+              {templates.map((template) => (
+                <option key={template.name} value={template.name}>
+                  {template.title}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-[var(--ink-subtle)]">
+              模板来自 .knowledge/templates，支持 {'{{title}}'} {'{{date}}'} {'{{time}}'}{' '}
+              {'{{datetime}}'} {'{{weekday}}'} 占位符。
+            </p>
+          </div>
+        ) : null}
         <Label htmlFor="new-note-content">初始内容（可选）</Label>
         <Textarea
           id="new-note-content"
           value={content}
           rows={5}
           placeholder="支持 Markdown 语法"
-          onChange={(event) => setContent(event.target.value)}
+          onChange={(event) => {
+            setContent(event.target.value);
+            setContentEdited(true);
+          }}
         />
       </div>
       <DialogFooter>
@@ -308,11 +374,21 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
     <>
       <div className="space-y-2 rounded-md border border-[var(--border-subtle)] p-3">
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={() => void chooseFiles()} disabled={!desktop || busy}>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void chooseFiles()}
+            disabled={!desktop || busy}
+          >
             <FileUp className="h-3.5 w-3.5" />
             选择文件
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => void chooseFolder()} disabled={!desktop || busy}>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void chooseFolder()}
+            disabled={!desktop || busy}
+          >
             <FolderOpen className="h-3.5 w-3.5" />
             选择文件夹
           </Button>
@@ -361,7 +437,11 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
           取消
         </Button>
         <Button onClick={() => void submit()} disabled={busy || paths.length === 0}>
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
+          {busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <FileUp className="h-3.5 w-3.5" />
+          )}
           导入到知识库
         </Button>
       </DialogFooter>

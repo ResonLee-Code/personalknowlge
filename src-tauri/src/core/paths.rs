@@ -17,6 +17,7 @@ pub const DEFAULT_CATEGORY_DIRS: [&str; 4] = ["01_技术", "02_工作", "03_项�
 pub const BACKUP_DIR: &str = "backups";
 pub const LOG_DIR: &str = "logs";
 pub const INDEX_DIR: &str = "index";
+pub const TEMPLATES_DIR: &str = "templates";
 pub const DATABASE_FILE: &str = "database.sqlite";
 pub const CONFIG_FILE: &str = "config.json";
 pub const TEMP_PREFIX: &str = ".pkos-tmp-";
@@ -60,6 +61,11 @@ impl WorkspacePaths {
         self.knowledge_dir().join(BACKUP_DIR)
     }
 
+    /// 本地模板目录：`.knowledge/templates`（V1.1 M2-2）。
+    pub fn templates_dir(&self) -> PathBuf {
+        self.knowledge_dir().join(TEMPLATES_DIR)
+    }
+
     pub fn trash_dir(&self) -> PathBuf {
         self.root.join(TRASH_DIR)
     }
@@ -79,6 +85,7 @@ impl WorkspacePaths {
             self.index_dir(),
             self.log_dir(),
             self.backups_dir(),
+            self.templates_dir(),
             self.trash_dir(),
             self.attachments_dir(),
             self.inbox_dir(),

@@ -96,6 +96,8 @@ pub fn run() {
             commands::backup_commands::backup_directory,
             commands::attachment_commands::attachment_save,
             commands::attachment_commands::attachment_read,
+            commands::template_commands::templates_list,
+            commands::template_commands::template_render,
         ])
         .run(tauri::generate_context!())
         .expect("Personal Knowledge OS 启动失败");

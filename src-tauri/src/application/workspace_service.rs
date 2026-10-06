@@ -112,6 +112,8 @@ impl WorkspaceService {
             initial_content: Some(welcome_note_body(&context.workspace.name)),
             tags: Some(vec!["入门".to_string()]),
         });
+        // 首次创建时放一个示例模板，让「新建笔记 → 模板」这一能力可被发现
+        let _ = self.write_starter_template(&context);
 
         let index_status = IndexService::new(Arc::clone(&context)).rebuild()?;
         self.start_watcher(&context);
@@ -451,6 +453,20 @@ impl WorkspaceService {
         let store = self.app.registry_store();
         let registry = store.upsert(workspace)?;
         self.app.set_registry(registry)
+    }
+
+    /// 首次创建时放一个示例模板，让「新建笔记 → 模板」这一能力可被发现。
+    /// 文件已存在时不覆盖，用户可以自由修改或删除。
+    fn write_starter_template(&self, context: &Arc<WorkspaceContext>) -> Result<()> {
+        let template_path = context.paths.templates_dir().join("会议记录.md");
+        if template_path.exists() {
+            return Ok(());
+        }
+        let body = "# {{title}}\n\n- 日期：{{date}}（{{weekday}}）\n- 参与人：\n\n\
+                    ## 议题\n\n## 结论\n\n## 待办\n\n- [ ] \n";
+        context
+            .storage
+            .write_atomic_absolute(&template_path, body.as_bytes())
     }
 
     fn write_config(&self, context: &Arc<WorkspaceContext>) -> Result<()> {

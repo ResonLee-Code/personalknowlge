@@ -177,7 +177,20 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - `attachment_read` 只接受**工作区内的相对路径**（`http/https/data/asset` 与越界路径一律拒绝），
   单张预览上限 8 MB，返回 data URL 供 Markdown 预览内联显示。
 
-## 11. 前端服务层
+## 11. 本地模板（V1.1 M2）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `templates_list` | — | `TemplateSummary[]`（`name`、`fileName`、`title`、`bytes`） |
+| `template_render` | `{ input: { name, title? } }` | `RenderedTemplate`（`name`、渲染后的 `content`） |
+
+- 模板目录固定为 `.knowledge/templates`，只识别 `.md` / `.markdown`；单文件上限 1 MB；
+- 模板名不允许包含 `/`、`\` 或 `..`（路径穿越防护）；
+- 占位符：`{{title}}`、`{{date}}`、`{{time}}`、`{{datetime}}`、`{{weekday}}`
+  （另接受 `{{标题}}`、`{{日期}}`、`{{时间}}`），未知占位符原样保留；
+- `template_render` 只返回内容，写入仍走 `note_create`，保证索引 / 链接 / 统计路径唯一。
+
+## 12. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 
@@ -186,6 +199,7 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
   便于在没有桌面外壳时开发与验证界面。
 
 按领域拆分的服务模块：`workspaceService`、`noteService`、`categoryService`、`tagService`、
-`searchService`、`backupService`、`linkService`（第 9 节）、`attachmentService`（第 10 节）。
+`searchService`、`backupService`、`linkService`（第 9 节）、`attachmentService`（第 10 节）、
+`templateService`（第 11 节）。
 浏览器预览后端对 `links_*` 提供与 Rust 端一致的解析实现，
 因此反链面板、引用计数与未解析链接在纯前端预览下同样可用。

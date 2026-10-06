@@ -823,6 +823,14 @@ export async function handleMockInvoke(
     case 'attachment_read':
       fail('INVALID_INPUT', '浏览器预览模式无法读取工作区内的图片。');
       break;
+    case 'templates_list':
+      return [];
+    case 'template_render':
+      fail(
+        'INVALID_INPUT',
+        '浏览器预览模式无法读取 .knowledge/templates，请在桌面应用中使用模板。',
+      );
+      break;
     case 'category_list':
       requireWorkspace();
       return state.categories;

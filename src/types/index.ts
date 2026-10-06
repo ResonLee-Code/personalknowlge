@@ -448,3 +448,21 @@ export interface AttachmentData {
   mimeType: string;
   bytes: number;
 }
+
+/** 本地模板（V1.1 M2-2） */
+export interface TemplateSummary {
+  name: string;
+  fileName: string;
+  title: string;
+  bytes: number;
+}
+
+export interface RenderTemplateInput {
+  name: string;
+  title?: string | null;
+}
+
+export interface RenderedTemplate {
+  name: string;
+  content: string;
+}
