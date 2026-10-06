@@ -1,10 +1,12 @@
 /**
- * 社区发现（V1.1.1 图谱增强）。
+ * 社区发现（V1.1.2 图谱增强）。
  *
- * 定义：**连通分量** —— 互相可达的一组笔记算一个社区，孤立笔记各自成社区。
- * 用并查集实现，确定性（与输入顺序无关）、O(N+E)，对用户可直接解释
- * （「这一簇是互相引用的笔记，那几个是孤岛」）。
- * 更细的社区划分（模块度优化等）留待后续版本，函数签名不变。
+ * 使用**模块度局部移动**（Louvain 第一阶段）：每个节点依次尝试移动到「让模块度增益最大」的
+ * 邻居社区，直到不再有节点移动。比连通分量更贴近「哪几篇笔记抱团」的直觉
+ * （两簇之间只有一条桥接链接时会正确分成两个社区）。
+ *
+ * 确定性：节点按 id 排序处理、增益并列时保留当前社区、最后按规模重新编号；
+ * 因此同一张图每次得到同样的社区与配色。复杂度约 O(E) × 轮数。
  */
 
 import type { GraphEdge } from '@/types';
@@ -34,59 +36,109 @@ export function communityColor(community: number | undefined): string {
  * 返回 `节点 id → 社区序号`（0 起，按社区规模从大到小编号）。
  * 孤立节点各自成为一个社区。
  */
+export interface CommunityOptions {
+  /** 分辨率：>1 倾向更多更小的社区，<1 倾向合并（默认 1） */
+  resolution?: number;
+  /** 最大轮数（默认 10） */
+  maxPasses?: number;
+}
+
 export function detectCommunities(
   nodeIds: readonly string[],
   edges: readonly GraphEdge[],
+  options: CommunityOptions = {},
 ): Map<string, number> {
-  // 连通分量 + 并查集：确定性、O(N+E)，而且「互相可达的一组笔记」对用户是可直接解释的社区。
-  // 更细的划分（模块度优化 / 标签传播）留待后续版本，接口保持不变。
-  const parent = new Map<string, string>();
+  const resolution = options.resolution ?? 1;
+  const maxPasses = options.maxPasses ?? 10;
   const order = [...nodeIds].sort((left, right) => left.localeCompare(right));
-  order.forEach((id) => parent.set(id, id));
 
-  const find = (id: string): string => {
-    let root = id;
-    while (parent.get(root) !== root) {
-      const next = parent.get(root);
-      if (next === undefined) break;
-      root = next;
-    }
-    // 路径压缩
-    let cursor = id;
-    while (parent.get(cursor) !== root) {
-      const next = parent.get(cursor);
-      if (next === undefined) break;
-      parent.set(cursor, root);
-      cursor = next;
-    }
-    return root;
-  };
-
+  // 邻接表（无向、带权；同一对节点的多条链接权重相加）
+  const weights = new Map<string, Map<string, number>>();
+  const degree = new Map<string, number>();
+  order.forEach((id) => {
+    weights.set(id, new Map());
+    degree.set(id, 0);
+  });
+  let totalWeight = 0;
   for (const edge of edges) {
-    if (!parent.has(edge.source) || !parent.has(edge.target)) continue;
-    const left = find(edge.source);
-    const right = find(edge.target);
-    if (left !== right) {
-      // 固定把较大 id 的根挂到较小 id 上，保证结果与输入顺序无关
-      const [keep, merge] = left < right ? [left, right] : [right, left];
-      parent.set(merge, keep);
-    }
+    if (!weights.has(edge.source) || !weights.has(edge.target)) continue;
+    if (edge.source === edge.target) continue;
+    const weight = Math.max(0, edge.weight);
+    if (weight === 0) continue;
+    const forward = weights.get(edge.source)!;
+    const backward = weights.get(edge.target)!;
+    forward.set(edge.target, (forward.get(edge.target) ?? 0) + weight);
+    backward.set(edge.source, (backward.get(edge.source) ?? 0) + weight);
+    degree.set(edge.source, (degree.get(edge.source) ?? 0) + weight);
+    degree.set(edge.target, (degree.get(edge.target) ?? 0) + weight);
+    totalWeight += weight;
   }
 
-  // 按分量规模（大 → 小）重新编号，规模相同时按最小成员 id 排序
-  const groups = new Map<string, string[]>();
-  for (const id of order) {
-    const root = find(id);
-    if (!groups.has(root)) groups.set(root, []);
-    groups.get(root)!.push(id);
+  const labels = new Map<string, number>();
+  order.forEach((id, index) => labels.set(id, index));
+  const totals = new Map<number, number>();
+  order.forEach((id) => {
+    const label = labels.get(id)!;
+    totals.set(label, (totals.get(label) ?? 0) + (degree.get(id) ?? 0));
+  });
+
+  // 没有边时每个节点自成一社区，直接返回（避免除零）
+  if (totalWeight === 0) {
+    const result = new Map<string, number>();
+    order.forEach((id, index) => result.set(id, index));
+    return result;
   }
-  const ordered = [...groups.entries()].sort((left, right) => {
-    if (right[1].length !== left[1].length) return right[1].length - left[1].length;
-    return left[0].localeCompare(right[0]);
+
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    let moved = false;
+    for (const id of order) {
+      const current = labels.get(id)!;
+      const nodeDegree = degree.get(id) ?? 0;
+      if (nodeDegree === 0) continue;
+
+      // 先把自己从当前社区移除，再评估各候选社区
+      totals.set(current, (totals.get(current) ?? 0) - nodeDegree);
+      const weightToCommunity = new Map<number, number>();
+      for (const [neighbour, weight] of weights.get(id)!) {
+        const label = labels.get(neighbour);
+        if (label === undefined) continue;
+        weightToCommunity.set(label, (weightToCommunity.get(label) ?? 0) + weight);
+      }
+
+      let best = current;
+      let bestGain = (weightToCommunity.get(current) ?? 0) - (resolution * (totals.get(current) ?? 0) * nodeDegree) / (2 * totalWeight);
+      for (const [label, weight] of [...weightToCommunity.entries()].sort((a, b) => a[0] - b[0])) {
+        const gain = weight - (resolution * (totals.get(label) ?? 0) * nodeDegree) / (2 * totalWeight);
+        // 严格大于才迁移：并列时保留当前社区，保证结果稳定
+        if (gain > bestGain + 1e-12) {
+          best = label;
+          bestGain = gain;
+        }
+      }
+
+      labels.set(id, best);
+      totals.set(best, (totals.get(best) ?? 0) + nodeDegree);
+      if (best !== current) moved = true;
+      // 清空空社区，避免 totals 里留下 0 影响后续比较
+      if ((totals.get(current) ?? 0) <= 0) totals.delete(current);
+    }
+    if (!moved) break;
+  }
+
+  // 按社区规模（大 → 小）重新编号，规模相同时按最小成员 id 排序
+  const groups = new Map<number, string[]>();
+  for (const id of order) {
+    const label = labels.get(id)!;
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label)!.push(id);
+  }
+  const ordered = [...groups.values()].sort((left, right) => {
+    if (right.length !== left.length) return right.length - left.length;
+    return (left[0] ?? '').localeCompare(right[0] ?? '');
   });
 
   const result = new Map<string, number>();
-  ordered.forEach(([, members], index) => {
+  ordered.forEach((members, index) => {
     members.forEach((id) => result.set(id, index));
   });
   return result;

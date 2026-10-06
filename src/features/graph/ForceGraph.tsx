@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { buildGraphSvg, drawLegendOnCanvas, type ExportLegendItem } from '@/lib/graphExport';
 import { categoryColor } from '@/lib/graphColors';
 import { createLayout, layoutBounds, reheat, stepLayout, type LayoutState } from '@/lib/graphLayout';
 import type { GraphEdge, GraphNode } from '@/types';
@@ -16,8 +17,12 @@ interface ForceGraphProps {
   onSettled?: () => void;
   /** 节点配色（按 id 覆盖默认的分类配色；社区着色模式使用） */
   colors?: Map<string, string>;
-  /** 导出当前画面为 PNG（由页面负责落盘） */
-  onExportImage?: (dataUrl: string) => void;
+  /** 导出「带图例的 PNG」（base64 data URL，由页面落盘） */
+  onExportPng?: (dataUrl: string) => void;
+  /** 导出 SVG（文本，由页面落盘） */
+  onExportSvg?: (svg: string) => void;
+  /** 导出时写入的图例 */
+  legend?: ExportLegendItem[];
 }
 
 /**
@@ -35,7 +40,9 @@ export function ForceGraph({
   onOpen,
   onSettled,
   colors,
-  onExportImage,
+  onExportPng,
+  onExportSvg,
+  legend = [],
 }: ForceGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -384,22 +391,97 @@ export function ForceGraph({
           {hovered.title}
         </div>
       ) : null}
-      {onExportImage ? (
-        <button
-          type="button"
-          className="absolute right-2 top-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1 text-[11px] text-[var(--ink-muted)] transition-colors hover:text-[var(--ink)]"
-          onClick={() => {
-            const canvas = canvasRef.current;
-            if (!canvas) return;
-            try {
-              onExportImage(canvas.toDataURL('image/png'));
-            } catch {
-              // 部分无头环境不支持 toDataURL，忽略即可
-            }
-          }}
-        >
-          导出 PNG
-        </button>
+      {onExportPng || onExportSvg ? (
+        <div className="absolute right-2 top-2 flex gap-1">
+          {onExportPng ? (
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1 text-[11px] text-[var(--ink-muted)] transition-colors hover:text-[var(--ink)]"
+              onClick={() => {
+                const canvas = canvasRef.current;
+                const state = stateRef.current;
+                if (!canvas || !state) return;
+                try {
+                  // 复制当前画面，再补上图例与标题，保证分享出去能自解释
+                  const output = document.createElement('canvas');
+                  output.width = canvas.width;
+                  output.height = canvas.height;
+                  const context = output.getContext('2d');
+                  if (!context) return;
+                  context.fillStyle = '#ffffff';
+                  context.fillRect(0, 0, output.width, output.height);
+                  context.drawImage(canvas, 0, 0);
+                  const ratio = output.width / (canvas.clientWidth || output.width);
+                  context.save();
+                  context.scale(ratio, ratio);
+                  drawLegendOnCanvas(
+                    context,
+                    legend,
+                    { width: canvas.clientWidth, height: canvas.clientHeight },
+                    '知识图谱',
+                  );
+                  context.restore();
+                  onExportPng(output.toDataURL('image/png'));
+                } catch {
+                  // 无头环境没有 Canvas 实现，忽略
+                }
+              }}
+            >
+              导出 PNG
+            </button>
+          ) : null}
+          {onExportSvg ? (
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1 text-[11px] text-[var(--ink-muted)] transition-colors hover:text-[var(--ink)]"
+              onClick={() => {
+                const canvas = canvasRef.current;
+                const state = stateRef.current;
+                if (!canvas || !state) return;
+                onExportSvg(
+                  buildGraphSvg({
+                    width: canvas.clientWidth || 800,
+                    height: canvas.clientHeight || 600,
+                    nodes: state.nodes.map((node) => ({
+                      id: node.id,
+                      x: node.x,
+                      y: node.y,
+                      radius: node.radius,
+                      color: colors?.get(node.id) ?? categoryColor(node.categoryId),
+                      label: node.degree >= 3 || state.nodes.length <= 30
+                        ? nodes.find((item) => item.id === node.id)?.title
+                        : undefined,
+                    })),
+                    edges: state.edges.flatMap((edge) => {
+                      const sourceIndex = state.index.get(edge.source);
+                      const targetIndex = state.index.get(edge.target);
+                      if (sourceIndex === undefined || targetIndex === undefined) return [];
+                      const source = state.nodes[sourceIndex]!;
+                      const target = state.nodes[targetIndex]!;
+                      return [
+                        {
+                          x1: source.x,
+                          y1: source.y,
+                          x2: target.x,
+                          y2: target.y,
+                          weight: edge.weight,
+                          highlighted: selectedId
+                            ? edge.source === selectedId || edge.target === selectedId
+                            : false,
+                        },
+                      ];
+                    }),
+                    legend,
+                    title: '知识图谱',
+                    subtitle: `导出时间 ${new Date().toLocaleString('zh-CN')}`,
+                  }),
+                );
+              }}
+            >
+              导出 SVG
+            </button>
+          ) : null}
+        </div>
       ) : null}
       <div className="pointer-events-none absolute bottom-2 left-2 text-[11px] text-[var(--ink-subtle)]">
         {ready ? '拖拽节点可固定位置 · 滚轮缩放 · 双击打开笔记 · F 适应窗口' : '正在计算布局…'}

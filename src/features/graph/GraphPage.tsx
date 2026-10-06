@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/badge';
 import { ROUTES } from '@/lib/constants';
 import { errorMessage, formatCount } from '@/lib/format';
 import { communityColor, communitySizes, detectCommunities } from '@/lib/graphCommunity';
+import { toBase64Utf8 } from '@/lib/graphExport';
 import { categoryColor } from '@/lib/graphColors';
 import { cn } from '@/lib/utils';
 import { attachmentService } from '@/services/attachmentService';
@@ -117,14 +118,29 @@ export function GraphPage() {
       }));
   }, [data, pathOf, colorMode, communities]);
 
-  /** 导出当前画面为 PNG：落到知识库 attachments/，随工作区一起备份 */
-  const exportImage = async (dataUrl: string) => {
-    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+
+  /** 导出「带图例的 PNG」：落到知识库 attachments/，随工作区一起备份 */
+  const exportPng = async (dataUrl: string) => {
     try {
       const saved = await attachmentService.save({
-        fileName: `知识图谱-${stamp}.png`,
+        fileName: `知识图谱-${stamp()}.png`,
         mimeType: 'image/png',
         dataBase64: dataUrl,
+      });
+      toast.success(`已导出到 ${saved.relativePath}`);
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
+
+  /** 导出 SVG：矢量、可再编辑，落盘位置同上 */
+  const exportSvg = async (svg: string) => {
+    try {
+      const saved = await attachmentService.save({
+        fileName: `知识图谱-${stamp()}.svg`,
+        mimeType: 'image/svg+xml',
+        dataBase64: toBase64Utf8(svg),
       });
       toast.success(`已导出到 ${saved.relativePath}`);
     } catch (error) {
@@ -275,7 +291,9 @@ export function GraphPage() {
               colors={nodeColors}
               onSelect={setSelectedId}
               onOpen={(id) => navigate(ROUTES.note(id))}
-              onExportImage={(dataUrl) => void exportImage(dataUrl)}
+              legend={legend}
+              onExportPng={(dataUrl) => void exportPng(dataUrl)}
+              onExportSvg={(svg) => void exportSvg(svg)}
             />
           )}
         </div>

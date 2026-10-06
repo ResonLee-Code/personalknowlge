@@ -8,7 +8,7 @@ function edge(source: string, target: string, weight = 1): GraphEdge {
 }
 
 describe('detectCommunities', () => {
-  it('互相可达的节点归为同一社区，断开的两簇各成一个', () => {
+  it('两簇之间只有一条桥接链接时，仍然分成两个社区（模块度）', () => {
     const nodes = ['a1', 'a2', 'a3', 'b1', 'b2', 'b3'];
     const edges = [
       edge('a1', 'a2'),
@@ -21,15 +21,11 @@ describe('detectCommunities', () => {
     ];
     const communities = detectCommunities(nodes, edges);
 
-    // a3—b1 是桥，因此 6 个节点互相可达 → 1 个社区
-    expect(new Set(communities.values()).size).toBe(1);
-
-    // 去掉桥之后分成两簇
-    const split = detectCommunities(nodes, edges.filter((item) => item.source !== 'a3'));
-    expect(split.get('a1')).toBe(split.get('a2'));
-    expect(split.get('b1')).toBe(split.get('b2'));
-    expect(split.get('a1')).not.toBe(split.get('b1'));
-    expect(new Set(split.values()).size).toBe(2);
+    // 连通分量会把 6 个节点并成一簇，模块度不会：a3—b1 只是一条弱桥
+    expect(communities.get('a1')).toBe(communities.get('a2'));
+    expect(communities.get('b1')).toBe(communities.get('b2'));
+    expect(communities.get('a1')).not.toBe(communities.get('b1'));
+    expect(new Set(communities.values()).size).toBe(2);
   });
 
   it('孤立节点各自成社区，且结果稳定可复现', () => {
@@ -39,6 +35,22 @@ describe('detectCommunities', () => {
 
     expect(first.get('z')).not.toBe(first.get('x'));
     expect([...first.entries()].sort()).toEqual([...second.entries()].sort());
+  });
+
+  it('分辨率调高会把社区切得更细', () => {
+    const nodes = ['a1', 'a2', 'a3', 'b1', 'b2', 'b3'];
+    const edges = [
+      edge('a1', 'a2'),
+      edge('a2', 'a3'),
+      edge('a1', 'a3'),
+      edge('b1', 'b2'),
+      edge('b2', 'b3'),
+      edge('b1', 'b3'),
+      edge('a3', 'b1'),
+    ];
+    const coarse = new Set(detectCommunities(nodes, edges, { resolution: 0.5 }).values()).size;
+    const fine = new Set(detectCommunities(nodes, edges, { resolution: 2 }).values()).size;
+    expect(fine).toBeGreaterThanOrEqual(coarse);
   });
 
   it('空图返回空映射，忽略不存在的端点', () => {

@@ -114,11 +114,13 @@ pub enum NoteSort {
 
 impl NoteSort {
     pub fn order_by(self) -> &'static str {
+        // 一律追加 id 作为次级排序键：同一毫秒写入的多篇笔记在 updated_at/created_at 上完全相同，
+        // 没有次级键时 SQLite 的返回顺序不确定，会让分页与快照测试出现偶发失败。
         match self {
-            NoteSort::UpdatedDesc => "n.updated_at DESC",
-            NoteSort::UpdatedAsc => "n.updated_at ASC",
-            NoteSort::CreatedDesc => "n.created_at DESC",
-            NoteSort::TitleAsc => "n.title COLLATE NOCASE ASC",
+            NoteSort::UpdatedDesc => "n.updated_at DESC, n.id DESC",
+            NoteSort::UpdatedAsc => "n.updated_at ASC, n.id ASC",
+            NoteSort::CreatedDesc => "n.created_at DESC, n.id DESC",
+            NoteSort::TitleAsc => "n.title COLLATE NOCASE ASC, n.id ASC",
         }
     }
 }

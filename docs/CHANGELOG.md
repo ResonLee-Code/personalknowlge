@@ -94,9 +94,9 @@
 结论：图谱查询满足 M3 验收口径（全量 96 ms < 1.5 s）；`links_rebuild` 已不再随笔记数平方增长。
 首次采纳 3000 个外部文件约 28 s（逐篇写库 + 建索引），是「导入已有目录」的一次性成本。
 
-### V1.1.1 — 2026-10-07（发布中）
+### V1.1.1 — 2026-10-07
 
-主题：修掉 3000 篇规模下暴露的两个性能/正确性缺陷，并补齐图谱增强。
+主题：修掉 3000 篇规模下暴露的两个性能/正确性缺陷，补齐图谱增强，并产出 Windows 安装包。
 
 - **扫描与文件监听并发（已修复）**：文件监听回调 `apply_file_changes` 与显式 `scan_workspace()`
   都会「先读磁盘快照、再写库」，并发时同一路径被重复采纳，触发
@@ -111,7 +111,19 @@
     之间切换，图例随之更新；更细的社区划分（模块度优化）留待后续；
   - PNG 导出：画布右上「导出 PNG」，写入知识库 `attachments/YYYY-MM/知识图谱-<时间>.png`
     （随工作区备份一起带走，不依赖系统文件对话框）；
-- 测试：社区划分 5 个单测 + 图谱页面新增着色切换用例；Rust 侧新增并发场景基准。
+- **社区划分升级为模块度方法**（Louvain 局部移动）：两簇之间只有一条桥接链接时也能正确分为两个社区
+  （连通分量会把它们并成一簇）；节点按 id 排序、并列时保留当前社区，结果确定可复现，
+  支持 `resolution` 调节社区粒度；
+- **导出 SVG / 带图例的 PNG**：画布右上两个按钮，导出内容含标题、导出时间与图例
+  （PNG 用离屏画布合成，SVG 为纯函数生成的矢量文件，中文经 UTF-8 Base64 落盘）；
+- **排序确定性**：`ORDER BY` 一律追加 `id` 作为次级键（列表与 FTS 搜索），
+  修掉「同一毫秒写入的多篇笔记顺序不定」导致的 `search_sorting_and_paging_work` 偶发失败
+  （连续 3 轮 workspace_flow 全通过）；
+- **Windows 安装包**（V1.1.1，交叉编译 + NSIS，未签名）：
+  `dist-windows/Personal Knowledge OS_1.1.1_x64-setup.exe`（sha256 12254786…）与
+  `Personal Knowledge OS_1.1.1_x64-portable.zip`（sha256 bef3f436…）。
+  ⚠️ 由 macOS 交叉编译产出，Tauri 官方标注为 experimental；**尚未在真实 Windows 上验收**。
+- 测试：社区划分 6 个单测 + SVG/Base64 6 个单测 + 图谱页面着色切换用例；Rust 侧新增并发场景基准。
 
 基准（3000 篇 / 8 分类 / 6000 链接，`cargo test --offline --test graph_bench -- --ignored --nocapture`）：
 
@@ -235,6 +247,14 @@ Personal Knowledge OS.app（bundle/macos/）
   CFBundleShortVersionString = 1.1.1
 ```
 
+Windows（交叉编译，未签名，待真机验收）
+  path   dist-windows/Personal Knowledge OS_1.1.1_x64-setup.exe
+  size   3189550 bytes（3.0 MB）
+  sha256 12254786038d06f84162549c2d6751dc4a8f67de42e29bb969be48e7e0192ff4
+  path   dist-windows/Personal Knowledge OS_1.1.1_x64-portable.zip
+  size   3871877 bytes（3.7 MB）
+  sha256 bef3f436b2dd9f038809dd86452aff96f1cba28579d8a33d934d1955f19bbef6
+
 上一版（V1.1.0）构建信息保留在 git 历史中，便于对照回滚。
 
 > Windows 安装包仍为 V1.0.0 构建（`dist-windows/`），**等待指令后**再交叉编译同步到 V1.1.0。
@@ -285,7 +305,7 @@ Personal Knowledge OS.app（bundle/macos/）
 | 平台 | 状态 |
 | --- | --- |
 | macOS | ✅ 已构建：`src-tauri/target/release/bundle/{macos,dmg}/`（当前校验值见上方「当前构建」小节） |
-| Windows | ⏸ **待确认**。`dist-windows/` 中现有安装包与便携版仍是 V1.0.0（2026-09-24）构建，未包含本版本改动；确认后再重新打包（命令见 [WINDOWS_INSTALL_GUIDE.md](./WINDOWS_INSTALL_GUIDE.md)） |
+| Windows | ✅ 已构建 V1.1.1 NSIS 安装包与便携版（交叉编译、未签名）；⏸ **待真机验收**（安装 → 启动 → 建库 → 读写 → 卸载不删库），清单见 [WINDOWS_INSTALL_GUIDE.md](./WINDOWS_INSTALL_GUIDE.md) |
 
 ### 文档与决策记录
 

@@ -106,8 +106,12 @@ fn focus_keeps_only_n_hop_neighbourhood() {
         .graph()
         .graph(GraphQuery { focus_note_id: Some(alpha.clone()), hops: Some(1), ..Default::default() })
         .expect("1 跳");
-    let ids: Vec<&str> = one_hop.nodes.iter().map(|node| node.id.as_str()).collect();
-    assert_eq!(ids, vec![alpha.as_str(), beta.as_str()]);
+    // 顺序不承诺（取决于列表排序），只比较集合
+    let mut ids: Vec<&str> = one_hop.nodes.iter().map(|node| node.id.as_str()).collect();
+    ids.sort();
+    let mut expected = vec![alpha.as_str(), beta.as_str()];
+    expected.sort();
+    assert_eq!(ids, expected);
 
     let two_hops = fixture
         .graph()

@@ -131,12 +131,13 @@ impl SqliteSearchIndex {
     }
 
     fn order_clause(request: &FtsRequest<'_>) -> &'static str {
+        // 与笔记列表一致：追加 id 作为次级键，保证分页在「同分同时间」时也是确定的
         if request.by_relevance {
-            "score ASC, n.updated_at DESC"
+            "score ASC, n.updated_at DESC, n.id DESC"
         } else if request.sort_by_updated_desc {
-            "n.updated_at DESC"
+            "n.updated_at DESC, n.id DESC"
         } else {
-            "n.updated_at ASC"
+            "n.updated_at ASC, n.id ASC"
         }
     }
 }
