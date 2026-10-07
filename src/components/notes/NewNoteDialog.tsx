@@ -252,6 +252,7 @@ function CreateForm({ categoryId, onClose }: { categoryId: string; onClose: () =
 function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () => void }) {
   const navigate = useNavigate();
   const [preserveStructure, setPreserveStructure] = useState(false);
+  const [importMode, setImportMode] = useState('auto');
   const refreshNotes = useNotesStore((state) => state.refresh);
   const refreshStats = useWorkspaceStore((state) => state.refreshStats);
   const [paths, setPaths] = useState<string[]>([]);
@@ -298,6 +299,7 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
         paths,
         categoryId: categoryId || null,
         preserveStructure,
+        mode: importMode,
       });
       await refreshNotes();
       await refreshStats();
@@ -310,7 +312,13 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
             `已导入 ${result.imported.length} 篇，${result.failed} 个文件被跳过（体积超限或路径不可读）`,
           );
         } else {
-          toast.success(`已导入 ${result.imported.length} 篇笔记`);
+          const extra =
+            result.attachments > 0
+              ? `，附 ${result.attachments} 个附件`
+              : '';
+          const modeLabel =
+            result.mode === 'obsidian' ? '（Obsidian）' : result.mode === 'notion' ? '（Notion）' : '';
+          toast.success(`已导入 ${result.imported.length} 篇笔记${extra}${modeLabel}`);
         }
         if (first) navigate(`/notes/${first.noteId}`);
       } else {
@@ -413,15 +421,31 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
           </p>
         )}
 
-        <label className="flex items-center gap-2 text-xs text-[var(--ink-muted)]">
-          <input
-            type="checkbox"
-            checked={preserveStructure}
-            disabled={!desktop}
-            onChange={(event) => setPreserveStructure(event.target.checked)}
-          />
-          保留目录结构（在目标分类下重建子目录，并保留原文件名）
-        </label>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="space-y-1 text-xs text-[var(--ink-muted)]">
+            <span>导入格式</span>
+            <select
+              value={importMode}
+              disabled={!desktop}
+              onChange={(event) => setImportMode(event.target.value)}
+              className="h-8 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs text-[var(--ink)]"
+            >
+              <option value="auto">自动识别（推荐）</option>
+              <option value="plain">通用 Markdown</option>
+              <option value="obsidian">Obsidian 库</option>
+              <option value="notion">Notion 导出</option>
+            </select>
+          </label>
+          <label className="mt-4 flex items-center gap-2 text-xs text-[var(--ink-muted)]">
+            <input
+              type="checkbox"
+              checked={preserveStructure}
+              disabled={!desktop}
+              onChange={(event) => setPreserveStructure(event.target.checked)}
+            />
+            保留目录结构（重建子目录 + 原文件名）
+          </label>
+        </div>
 
         {paths.length > 0 ? (
           <ul className="max-h-40 space-y-1 overflow-auto text-xs text-[var(--ink-muted)]">

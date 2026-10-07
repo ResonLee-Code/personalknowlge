@@ -53,6 +53,21 @@ describe('NewNoteDialog', () => {
     expect(screen.getByText(/浏览器预览模式无法读取本地文件/)).toBeInTheDocument();
   });
 
+  it('导入页签提供格式选择（自动识别 / Obsidian / Notion）', async () => {
+    useUiStore.setState({ newNoteDialogOpen: true });
+    render(
+      <MemoryRouter>
+        <NewNoteDialog />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /导入外部文件/ }));
+    expect(screen.getByText('导入格式')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '自动识别（推荐）' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Obsidian 库' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Notion 导出' })).toBeInTheDocument();
+  });
+
   it('有模板时可以选择模板并把渲染结果填进初始内容', async () => {
     listTemplates.mockResolvedValue([
       { name: '会议记录', fileName: '会议记录.md', title: '会议记录', bytes: 120 },

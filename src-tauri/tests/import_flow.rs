@@ -78,6 +78,7 @@ fn preserves_directory_structure_and_file_names_when_requested() {
         .import(ImportNotesInput {
             paths: vec![source_root.clone()],
             category_id: None,
+            mode: None,
             preserve_structure: None,
         })
         .expect("平铺导入");
@@ -93,6 +94,7 @@ fn preserves_directory_structure_and_file_names_when_requested() {
         .import(ImportNotesInput {
             paths: vec![source_root],
             category_id: None,
+            mode: None,
             preserve_structure: Some(true),
         })
         .expect("结构化导入");
@@ -126,7 +128,8 @@ fn imports_markdown_with_frontmatter_preserving_metadata() {
 
     let report = fixture
         .imports()
-        .import(ImportNotesInput { paths: vec![source.clone()], category_id: None , preserve_structure: None })
+        .import(ImportNotesInput { paths: vec![source.clone()], category_id: None , mode: None,
+            preserve_structure: None })
         .expect("导入应成功");
 
     assert_eq!(report.imported.len(), 1, "跳过项：{:?}", report.skipped);
@@ -173,6 +176,7 @@ fn imports_plain_text_into_selected_category() {
         .imports()
         .import(ImportNotesInput {
             paths: vec![source],
+            mode: None,
             preserve_structure: None,
             category_id: Some(category.id.clone()),
         })
@@ -202,6 +206,7 @@ fn imports_directory_recursively_and_ignores_unsupported_files() {
         .imports()
         .import(ImportNotesInput {
             paths: vec![fixture.source.to_string_lossy().to_string()],
+            mode: None,
             preserve_structure: None,
             category_id: None,
         })
@@ -224,7 +229,8 @@ fn duplicate_ids_and_repeat_imports_do_not_collide() {
 
     let report = fixture
         .imports()
-        .import(ImportNotesInput { paths: vec![first, second], category_id: None, preserve_structure: None })
+        .import(ImportNotesInput { paths: vec![first, second], category_id: None, mode: None,
+            preserve_structure: None })
         .expect("同批导入");
     assert_eq!(report.imported.len(), 2);
     assert_ne!(
@@ -238,6 +244,7 @@ fn duplicate_ids_and_repeat_imports_do_not_collide() {
         .imports()
         .import(ImportNotesInput {
             paths: vec![fixture.source.join("one.md").to_string_lossy().to_string()],
+            mode: None,
             preserve_structure: None,
             category_id: None,
         })
@@ -258,6 +265,7 @@ fn reports_missing_and_oversized_files_without_failing_the_batch() {
         .imports()
         .import(ImportNotesInput {
             paths: vec![ok, missing, big.to_string_lossy().to_string()],
+            mode: None,
             preserve_structure: None,
             category_id: None,
         })
@@ -275,17 +283,117 @@ fn rejects_empty_selection_and_unknown_category() {
     let fixture = Fixture::new();
     let error = fixture
         .imports()
-        .import(ImportNotesInput { paths: Vec::new(), category_id: None , preserve_structure: None })
+        .import(ImportNotesInput { paths: Vec::new(), category_id: None , mode: None,
+            preserve_structure: None })
         .expect_err("空选择应报错");
     assert_eq!(error.code, personal_knowledge_os_lib::core::error::ErrorCode::InvalidInput);
 
     let source = fixture.write_source("a.md", "---\nid: note_x\n---\n\n正文\n");
     let error = fixture
         .imports()
-        .import(ImportNotesInput { paths: vec![source], category_id: Some("cat_missing".into()) , preserve_structure: None })
+        .import(ImportNotesInput { paths: vec![source], category_id: Some("cat_missing".into()) , mode: None,
+            preserve_structure: None })
         .expect_err("分类不存在应报错");
     assert_eq!(
         error.code,
         personal_knowledge_os_lib::core::error::ErrorCode::CategoryNotFound
     );
+}
+
+#[test]
+fn imports_obsidian_vault_with_attachments_and_embeds() {
+    let fixture = Fixture::new();
+    // 伪 Obsidian 库：.obsidian/ 配置目录 + 一个带嵌入的笔记 + 一张图片
+    fixture.write_source(".obsidian/app.json", "{}");
+    fixture.write_source("笔记/架构图.md", "# 架构\n\n![[架构.png]]\n\n![[架构.png|示意图]]\n\n[[另一篇]]\n");
+    let image = fixture.source.join("笔记").join("架构.png");
+    std::fs::create_dir_all(image.parent().unwrap()).expect("目录");
+    std::fs::write(&image, [0x89u8, 0x50, 0x4E, 0x47]).expect("写入图片");
+    let source_root = fixture.source.to_string_lossy().to_string();
+
+    // mode=auto：目录里有 .obsidian/ → 识别为 Obsidian
+    let report = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![source_root],
+            category_id: None,
+            preserve_structure: Some(true),
+            mode: Some("auto".into()),
+        })
+        .expect("导入 Obsidian 库");
+
+    assert_eq!(report.mode, "obsidian");
+    assert_eq!(report.imported.len(), 1, "只导入 Markdown 笔记");
+    assert_eq!(report.attachments, 1, "图片作为附件导入");
+
+    let note = &report.imported[0];
+    let stored = fixture
+        .app
+        .context()
+        .unwrap()
+        .storage
+        .read_note(&note.file_path)
+        .expect("读取笔记");
+    // 嵌入被改写为标准图片链接，且指向导入后的附件
+    // 笔记在 00_Inbox/笔记/ 下，附件在 attachments/，因此相对层级可以是 ../../
+    assert!(
+        stored.body.contains("![架构.png](..") && stored.body.contains("/attachments/"),
+        "正文应改写为标准图片链接：{}",
+        stored.body
+    );
+    assert!(stored.body.contains("![示意图](.."));
+    assert!(stored.body.contains("[[另一篇]]"), "双链保持不变");
+
+    // 附件文件真的落盘
+    let listed = fixture
+        .app
+        .context()
+        .unwrap()
+        .storage
+        .list_attachments()
+        .expect("附件列表");
+    assert_eq!(listed.len(), 1);
+    assert!(listed[0].ends_with("架构.png"));
+}
+
+#[test]
+fn imports_notion_export_stripping_hash_suffix_and_decoding_links() {
+    let fixture = Fixture::new();
+    const HASH_A: &str = "0123456789abcdef0123456789abcdef";
+    const HASH_B: &str = "fedcba9876543210fedcba9876543210";
+    fixture.write_source(
+        &format!("项目计划 {HASH_A}.md"),
+        &format!("# 项目计划\n\n![](设计稿%20v2.png)\n\n[子页面](子页面%20{HASH_B}.md)\n"),
+    );
+    let source_root = fixture.source.to_string_lossy().to_string();
+
+    let report = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![source_root],
+            category_id: None,
+            preserve_structure: None,
+            mode: Some("notion".into()),
+        })
+        .expect("导入 Notion 导出");
+
+    assert_eq!(report.mode, "notion");
+    assert_eq!(report.imported.len(), 1);
+    // 标题与文件名都去掉哈希后缀
+    assert_eq!(report.imported[0].title, "项目计划");
+    assert!(
+        report.imported[0].file_path.contains("项目计划.md"),
+        "文件名应去掉哈希：{}",
+        report.imported[0].file_path
+    );
+    let stored = fixture
+        .app
+        .context()
+        .unwrap()
+        .storage
+        .read_note(&report.imported[0].file_path)
+        .expect("读取笔记");
+    // 链接目标被 URL 解码
+    assert!(stored.body.contains("(设计稿 v2.png)"), "{}", stored.body);
+    assert!(stored.body.contains(&format!("(子页面 {HASH_B}.md)")), "{}", stored.body);
 }

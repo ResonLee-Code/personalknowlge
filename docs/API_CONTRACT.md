@@ -241,8 +241,11 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 
 ### 导入新增选项（V1.1.2）
 
-`note_import` 的 `input` 新增 `preserveStructure?: boolean`：为 `true` 时，
-目录导入会在目标分类下重建子目录并保留原文件名。
+- `preserveStructure?: boolean`：为 `true` 时，目录导入会在目标分类下重建子目录并保留原文件名；
+- `mode?: 'auto' | 'plain' | 'obsidian' | 'notion'`：导入格式（默认 `auto` 自动识别）；
+  Obsidian 模式会把 `![[文件]]` 嵌入改写为标准图片链接，Notion 模式会去掉名称里的
+  `<32 位十六进制>` 后缀并解码链接目标；两种模式都会把附件复制到 `attachments/YYYY-MM/`；
+- `ImportReport` 新增 `mode`（实际采用的模式）与 `attachments`（附件数量）。
 
 ## 16. 类型化关系（N2）
 

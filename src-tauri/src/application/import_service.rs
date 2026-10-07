@@ -27,6 +27,10 @@ use crate::infrastructure::frontmatter::{self, Frontmatter};
 use crate::repositories::{NoteRepository, SqliteNoteRepository};
 
 use super::context::WorkspaceContext;
+use super::import_transform::{
+    detect_mode, lookup_attachment, rewrite_notion_links, rewrite_obsidian_embeds,
+    strip_notion_suffix, AttachmentMap, ImportMode,
+};
 use super::index_service::{file_stem_title, IndexService};
 use super::tag_service::TagService;
 
@@ -36,6 +40,10 @@ const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const MAX_FILES: usize = 500;
 /// 允许导入的扩展名。
 const SUPPORTED_EXTENSIONS: [&str; 3] = ["md", "markdown", "txt"];
+/// Obsidian / Notion 模式下一并导入的附件扩展名。
+const ATTACHMENT_EXTENSIONS: [&str; 11] = [
+    "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif", "pdf", "mp4", "webm",
+];
 
 /// 导入输入。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +57,9 @@ pub struct ImportNotesInput {
     /// 是否保留源目录结构（目录导入时在目标分类下重建子目录，并保留原文件名）
     #[serde(default)]
     pub preserve_structure: Option<bool>,
+    /// 导入格式：`plain` / `obsidian` / `notion` / `auto`（默认 auto 自动识别）
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 /// 成功导入的一篇笔记。
@@ -79,6 +90,12 @@ pub struct ImportReport {
     pub total: usize,
     /// 其中有问题的文件数量
     pub failed: usize,
+    /// 一并导入的附件数量（Obsidian / Notion 模式）
+    #[serde(default)]
+    pub attachments: usize,
+    /// 实际采用的导入模式（auto 时由识别结果决定）
+    #[serde(default)]
+    pub mode: String,
 }
 
 pub struct ImportService {
@@ -107,7 +124,20 @@ impl ImportService {
         };
 
         let preserve_structure = input.preserve_structure.unwrap_or(false);
-        let mut report = ImportReport { imported: Vec::new(), skipped: Vec::new(), total: 0, failed: 0 };
+        let requested_mode = ImportMode::parse(input.mode.as_deref());
+        let mode = if requested_mode == ImportMode::Plain && input.mode.as_deref().is_none() {
+            ImportMode::Plain
+        } else {
+            requested_mode
+        };
+        let mut report = ImportReport {
+            imported: Vec::new(),
+            skipped: Vec::new(),
+            total: 0,
+            failed: 0,
+            attachments: 0,
+            mode: String::new(),
+        };
         // (文件, 该文件的导入根目录) —— 保留目录结构时用它算子路径
         let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
         for raw in &input.paths {
@@ -130,6 +160,34 @@ impl ImportService {
 
         files.sort();
         files.dedup();
+
+        // 自动识别：目录里有 .obsidian/ → Obsidian；出现 `名称 <32 位十六进制>.md` → Notion
+        let mode = if input.mode.as_deref().unwrap_or("auto").eq_ignore_ascii_case("auto") {
+            let hints: Vec<String> = input
+                .paths
+                .iter()
+                .cloned()
+                .chain(files.iter().map(|(file, _)| file.to_string_lossy().to_string()))
+                .chain(
+                    input
+                        .paths
+                        .iter()
+                        .filter(|raw| Path::new(raw).join(".obsidian").is_dir())
+                        .map(|raw| format!("{raw}/.obsidian")),
+                )
+                .collect();
+            detect_mode(&hints)
+        } else {
+            mode
+        };
+        report.mode = mode.as_str().to_string();
+
+        // Obsidian / Notion：把附件（图片、PDF 等）一并导入到 attachments/YYYY-MM/
+        let attachment_map: AttachmentMap = if mode == ImportMode::Plain {
+            AttachmentMap::new()
+        } else {
+            self.import_attachments(&input.paths, &mut report)?
+        };
         if files.len() > MAX_FILES {
             report.failed += files.len() - MAX_FILES;
             for extra in files.drain(MAX_FILES..) {
@@ -161,6 +219,8 @@ impl ImportService {
                 &mut seen_ids,
                 sub_directory.as_deref(),
                 preserve_structure,
+                mode,
+                &attachment_map,
             ) {
                 Ok(imported) => report.imported.push(imported),
                 Err(error) => {
@@ -180,6 +240,65 @@ impl ImportService {
             );
         }
         Ok(report)
+    }
+
+    /// 把目录/文件里的附件复制到 `attachments/YYYY-MM/`，返回「原文件名/原相对路径 → 新路径」映射。
+    fn import_attachments(
+        &self,
+        paths: &[String],
+        report: &mut ImportReport,
+    ) -> Result<AttachmentMap> {
+        let mut map = AttachmentMap::new();
+        let month = now_iso().get(0..7).unwrap_or("0000-00").to_string();
+        let directory = format!("{}/{}", crate::core::paths::ATTACHMENTS_DIR, month);
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        for raw in paths {
+            let path = PathBuf::from(raw);
+            if path.is_dir() {
+                for entry in WalkDir::new(&path).follow_links(false).into_iter().flatten() {
+                    if entry.file_type().is_file() && is_attachment(entry.path()) {
+                        candidates.push(entry.path().to_path_buf());
+                    }
+                }
+            } else if path.is_file() && is_attachment(&path) {
+                candidates.push(path);
+            }
+        }
+        candidates.sort();
+        for path in candidates {
+            let bytes = match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            if bytes.len() as u64 > MAX_FILE_BYTES {
+                continue;
+            }
+            let original = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| "attachment".to_string());
+            let (stem, extension) = match original.rsplit_once('.') {
+                Some((stem, extension)) => (stem.to_string(), extension.to_lowercase()),
+                None => (original.clone(), "bin".to_string()),
+            };
+            let mut file_name = format!("{stem}.{extension}");
+            let mut counter = 1;
+            let mut relative = format!("{directory}/{file_name}");
+            while self.ctx.storage.exists(&relative) {
+                file_name = format!("{stem}-{counter}.{extension}");
+                relative = format!("{directory}/{file_name}");
+                counter += 1;
+                if counter > 500 {
+                    break;
+                }
+            }
+            let absolute = self.ctx.paths.resolve_relative(&relative)?;
+            self.ctx.storage.write_atomic_absolute(&absolute, &bytes)?;
+            map.insert(original.clone(), relative.clone());
+            map.insert(path.to_string_lossy().replace('\\', "/"), relative.clone());
+            report.attachments += 1;
+        }
+        Ok(map)
     }
 
     /// 递归收集目录下可导入的文件。
@@ -225,6 +344,8 @@ impl ImportService {
         seen_ids: &mut HashSet<String>,
         sub_directory: Option<&str>,
         preserve_file_name: bool,
+        mode: ImportMode,
+        attachments: &AttachmentMap,
     ) -> Result<ImportedNote> {
         if !is_supported(path) {
             return Err(AppError::invalid_input(format!(
@@ -257,11 +378,17 @@ impl ImportService {
         };
 
         let source_path = path.to_string_lossy().to_string();
-        let title = source
+        let raw_title = source
             .title
             .clone()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| file_stem_title(&source_path));
+        // Notion 导出：标题/文件名都带 ` <32 位十六进制>`，导入时去掉
+        let title = if mode == ImportMode::Notion {
+            strip_notion_suffix(&raw_title)
+        } else {
+            raw_title
+        };
         let title = if title.trim().is_empty() {
             "导入笔记".to_string()
         } else {
@@ -302,17 +429,40 @@ impl ImportService {
             relations: source.relations.clone(),
             extra: source.extra.clone(),
         };
+        // 正文转换：Obsidian 嵌入 → 标准图片链接；Notion 相对链接 → URL 解码
+        let body = match mode {
+            ImportMode::Obsidian => {
+                let note_directory = match sub_directory {
+                    Some(sub) => crate::infrastructure::markdown_storage::join_relative(directory, sub),
+                    None => directory.to_string(),
+                };
+                let resolver = |target: &str| {
+                    lookup_attachment(attachments, target).map(|relative| {
+                        crate::core::paths::relative_from(&note_directory, &relative)
+                    })
+                };
+                rewrite_obsidian_embeds(&body, &resolver)
+            }
+            ImportMode::Notion => rewrite_notion_links(&body),
+            ImportMode::Plain => body,
+        };
         let markdown = frontmatter::serialize(&frontmatter, &body);
         // 目标目录：保留目录结构时在目标分类下重建子目录
         let target_directory = match sub_directory {
             Some(sub) => crate::infrastructure::markdown_storage::join_relative(directory, sub),
             None => directory.to_string(),
         };
-        let file_name = if preserve_file_name {
-            // 保留原文件名（去扩展名后交给 create_note_file 去重与清洗）
-            path.file_stem()
+        let file_name = if preserve_file_name || mode == ImportMode::Notion {
+            // 保留原文件名（去扩展名后交给 create_note_file 去重与清洗）；Notion 模式已去掉哈希后缀
+            let stem = path
+                .file_stem()
                 .map(|stem| stem.to_string_lossy().to_string())
-                .unwrap_or_else(|| note_file_name(&title, &now_file_timestamp()))
+                .unwrap_or_else(|| note_file_name(&title, &now_file_timestamp()));
+            if mode == ImportMode::Notion {
+                strip_notion_suffix(&stem)
+            } else {
+                stem
+            }
         } else {
             note_file_name(&title, &now_file_timestamp())
         };
@@ -382,6 +532,14 @@ impl ImportService {
 }
 
 /// 是否属于支持导入的文件类型。
+/// 是否是「附件」类文件（Obsidian / Notion 模式下一并导入）。
+pub fn is_attachment(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ATTACHMENT_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
 pub fn is_supported(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())

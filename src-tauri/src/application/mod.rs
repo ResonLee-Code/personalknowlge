@@ -12,6 +12,7 @@ pub mod export_service;
 pub mod graph_service;
 pub mod index_service;
 pub mod import_service;
+pub mod import_transform;
 pub mod lookup;
 pub mod link_service;
 pub mod note_service;

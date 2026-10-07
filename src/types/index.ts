@@ -343,6 +343,8 @@ export interface ImportNotesInput {
   categoryId?: string | null;
   /** 目录导入时是否保留源目录结构（重建子目录 + 保留原文件名） */
   preserveStructure?: boolean | null;
+  /** 导入格式：auto（默认，自动识别）/ plain / obsidian / notion */
+  mode?: string | null;
 }
 
 export interface ImportedNote {
@@ -362,6 +364,10 @@ export interface ImportReport {
   skipped: SkippedFile[];
   total: number;
   failed: number;
+  /** 一并导入的附件数量（Obsidian / Notion） */
+  attachments: number;
+  /** 实际采用的导入模式（auto 时由识别结果决定） */
+  mode: string;
 }
 
 /** 笔记导出 */
