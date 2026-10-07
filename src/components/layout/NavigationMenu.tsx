@@ -10,10 +10,13 @@ import {
   Tags,
   Trash2,
 } from 'lucide-react';
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 
 import { ROUTES } from '@/lib/constants';
+import { isNoteDrag, readNoteDragIds } from '@/lib/dragNotes';
 import { cn } from '@/lib/utils';
+import { useNotesStore } from '@/stores/notesStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 interface NavItem {
@@ -25,6 +28,8 @@ interface NavItem {
 
 export function NavigationMenu() {
   const stats = useWorkspaceStore((state) => state.stats);
+  /** 拖拽悬停在 Inbox 上时高亮 */
+  const [inboxDropActive, setInboxDropActive] = useState(false);
 
   const items: NavItem[] = [
     { to: ROUTES.dashboard, label: '首页', icon: LayoutDashboard },
@@ -46,12 +51,30 @@ export function NavigationMenu() {
           key={item.to}
           to={item.to}
           end={item.to === ROUTES.dashboard}
+          data-testid={item.to === ROUTES.inbox ? 'inbox-drop' : undefined}
+          onDragOver={(event) => {
+            // Inbox = 未分类：把笔记拖到这里即移出分类
+            if (item.to !== ROUTES.inbox || !isNoteDrag(event.dataTransfer)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            setInboxDropActive(true);
+          }}
+          onDragLeave={() => setInboxDropActive(false)}
+          onDrop={(event) => {
+            if (item.to !== ROUTES.inbox) return;
+            const ids = readNoteDragIds(event.dataTransfer);
+            setInboxDropActive(false);
+            if (ids.length === 0) return;
+            event.preventDefault();
+            void useNotesStore.getState().moveNotes(ids, null);
+          }}
           className={({ isActive }) =>
             cn(
               'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
               isActive
                 ? 'bg-[var(--brand-soft)] font-medium text-[var(--brand)]'
                 : 'text-[var(--ink-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]',
+              item.to === ROUTES.inbox && inboxDropActive && 'ring-2 ring-[var(--brand)]/60',
             )
           }
         >

@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { formatRelative } from '@/lib/format';
 import { splitHighlight } from '@/lib/highlight';
+import { setNoteDragData } from '@/lib/dragNotes';
 import { cn } from '@/lib/utils';
 import { useNotesStore } from '@/stores/notesStore';
 import type { NoteSummary } from '@/types';
@@ -65,6 +66,13 @@ export function NoteListItem({
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') onOpen();
+        }}
+        draggable
+        onDragStart={(event) => {
+          // 多选中拖动任意一行 = 拖动整批；否则只拖这一篇
+          const batch = useNotesStore.getState().selection;
+          const ids = batch.includes(note.id) ? batch : [note.id];
+          setNoteDragData(event.dataTransfer, ids, note.title);
         }}
         className={cn(
           'group cursor-pointer rounded-lg border border-transparent px-2.5 py-2 transition-colors',

@@ -11,8 +11,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { EmptyState } from '@/components/ui/empty-state';
+import { isNoteDrag, readNoteDragIds } from '@/lib/dragNotes';
 import { cn } from '@/lib/utils';
 import { useCategoriesStore } from '@/stores/categoriesStore';
+import { useNotesStore } from '@/stores/notesStore';
 import type { CategoryNode } from '@/types';
 
 import { CategoryDeleteDialog, CategoryFormDialog } from './CategoryDialogs';
@@ -30,6 +32,16 @@ export function CategoryTree() {
   const activeId = params.get('categoryId');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<DialogState>(null);
+  /** 正在拖拽悬停的分类（用于高亮提示可放置） */
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const handleDrop = (categoryId: string, event: React.DragEvent) => {
+    const ids = readNoteDragIds(event.dataTransfer);
+    setDropTarget(null);
+    if (ids.length === 0) return;
+    event.preventDefault();
+    void useNotesStore.getState().moveNotes(ids, categoryId);
+  };
 
   const toggle = (id: string) => {
     setExpanded((previous) => {
@@ -48,13 +60,24 @@ export function CategoryTree() {
     return (
       <li key={node.category.id}>
         <div
+          data-testid={`category-drop-${node.category.id}`}
           className={cn(
             'group flex items-center gap-1 rounded-md pr-1 text-sm transition-colors',
             activeId === node.category.id
               ? 'bg-[var(--brand-soft)] text-[var(--brand)]'
               : 'text-[var(--ink-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]',
+            dropTarget === node.category.id && 'ring-2 ring-[var(--brand)]/60',
           )}
           style={{ paddingLeft: `${node.depth * 10}px` }}
+          onDragOver={(event) => {
+            if (!isNoteDrag(event.dataTransfer)) return;
+            // 必须 preventDefault 才会触发 drop
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            if (dropTarget !== node.category.id) setDropTarget(node.category.id);
+          }}
+          onDragLeave={() => setDropTarget((current) => (current === node.category.id ? null : current))}
+          onDrop={(event) => handleDrop(node.category.id, event)}
         >
           <button
             type="button"

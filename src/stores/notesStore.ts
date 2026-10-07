@@ -3,7 +3,9 @@ import { create } from 'zustand';
 
 import { errorMessage } from '@/lib/format';
 import { noteService } from '@/services/noteService';
+import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useTagsStore } from '@/stores/tagsStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type {
   BatchReport,
   CreateNoteInput,
@@ -67,6 +69,8 @@ interface NotesState {
   setSelection: (ids: string[]) => void;
   clearSelection: () => void;
   moveMany: (categoryId: string | null) => Promise<void>;
+  /** 拖拽等场景：直接给定 ids 移动 */
+  moveNotes: (ids: string[], categoryId: string | null) => Promise<void>;
   tagMany: (tags: string[], mode?: 'add' | 'remove' | 'replace') => Promise<void>;
   deleteMany: () => Promise<void>;
 }
@@ -319,11 +323,18 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   moveMany: async (categoryId) => {
     const ids = get().selection;
     if (ids.length === 0) return;
+    await get().moveNotes(ids, categoryId);
+    set({ selection: [], selectionMode: false });
+  },
+
+  moveNotes: async (ids, categoryId) => {
+    if (ids.length === 0) return;
     try {
       const report = await noteService.moveMany(ids, categoryId);
       toastBatch(report, ids.length, '已移动');
-      set({ selection: [], selectionMode: false });
       await get().refresh();
+      await useCategoriesStore.getState().refresh();
+      await useWorkspaceStore.getState().refreshStats();
     } catch (error) {
       set({ error: errorMessage(error) });
     }
