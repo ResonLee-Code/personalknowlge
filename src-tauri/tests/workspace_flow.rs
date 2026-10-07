@@ -1025,8 +1025,8 @@ fn applies_note_links_migration() {
     harness.create_workspace();
     let context = harness.context();
 
-    // 004 之后为 4（含 note_links 与 note_assets）
-    assert_eq!(context.db.schema_version().expect("schema 版本"), 4);
+    // 005 之后为 5（含 note_links / note_assets / note_file_stamp）
+    assert_eq!(context.db.schema_version().expect("schema 版本"), 5);
 
     // 004：来源/时效列与类型化关系表
     let (has_relations, source_column) = context
@@ -1047,6 +1047,20 @@ fn applies_note_links_migration() {
         .expect("检查 004 迁移结果");
     assert_eq!(has_relations, 1, "note_relations 表应存在");
     assert_eq!(source_column, 1, "notes.source_reliability 列应存在");
+
+    // 005：文件快照列（扫描短路用）
+    let stamp_columns: i64 = context
+        .db
+        .with_conn(|conn| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name IN ('file_size','file_mtime')",
+                [],
+                |row| row.get(0),
+            )?;
+            Ok(count)
+        })
+        .expect("检查 005 迁移结果");
+    assert_eq!(stamp_columns, 2, "notes 应有 file_size / file_mtime 列");
 
     let (table, indexes) = context
         .db

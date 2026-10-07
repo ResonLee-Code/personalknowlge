@@ -35,9 +35,14 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "note_assets",
         sql: include_str!("../../../migrations/004_note_assets.sql"),
     },
+    Migration {
+        version: 5,
+        name: "note_file_stamp",
+        sql: include_str!("../../../migrations/005_note_file_stamp.sql"),
+    },
 ];
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// 创建迁移记录表。
 fn ensure_migration_table(conn: &Connection) -> Result<()> {

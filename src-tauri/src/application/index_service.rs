@@ -529,6 +529,8 @@ impl IndexService {
             source_ref: stored.frontmatter.source_ref.clone(),
             source_reliability: stored.frontmatter.source_reliability,
             valid_until: stored.frontmatter.valid_until.clone(),
+            file_size: None,
+            file_mtime: None,
         };
         // 幂等采纳：文件监听回调与显式扫描可能并发（两者都是「先读磁盘快照、再写库」），
         // 因此插入前在同一事务内再确认一次路径是否已被别的扫描采纳；已存在则直接跳过，
@@ -540,6 +542,18 @@ impl IndexService {
             SqliteNoteRepository.insert(tx, &note)?;
             Ok(true)
         })?;
+        if adopted {
+            if let Ok((size, mtime)) = self.ctx.storage.file_stamp(relative) {
+                self.ctx.db.with_conn(|conn| {
+                    SqliteNoteRepository.set_file_stamp(
+                        conn,
+                        &note.id,
+                        Some(size as i64),
+                        mtime.as_deref(),
+                    )
+                })?;
+            }
+        }
         if !adopted {
             tracing::debug!(target: "index", "路径已被其它扫描采纳，跳过：{relative}");
             report.unchanged += 1;
@@ -584,6 +598,15 @@ impl IndexService {
 
     /// 同步已知笔记的内容变化（工作区打开时使用）。
     fn sync_note_from_disk(&self, note: &Note, report: &mut ScanReport) -> Result<bool> {
+        // 1) mtime + size 短路：完全没动过的文件不必读取全文、更不必计算 sha256。
+        //    1 万篇规模下这一步是扫描的主要成本（轮询式监听每 3 秒会扫一遍全库）。
+        let stamp = self.ctx.storage.file_stamp(&note.file_path)?;
+        let unchanged_stamp = note.file_size == Some(stamp.0 as i64)
+            && note.file_mtime.as_deref() == stamp.1.as_deref();
+        if unchanged_stamp {
+            return Ok(false);
+        }
+
         let stored = match self.ctx.storage.read_note(&note.file_path) {
             Ok(stored) => stored,
             Err(error) => {
@@ -594,6 +617,15 @@ impl IndexService {
             }
         };
         if note.content_hash.as_deref() == Some(stored.content_hash.as_str()) {
+            // 内容没变（可能只是被 touch 过或我们自己写入导致的 mtime 变化）：刷新快照即可
+            self.ctx.db.with_conn(|conn| {
+                SqliteNoteRepository.set_file_stamp(
+                    conn,
+                    &note.id,
+                    Some(stamp.0 as i64),
+                    stamp.1.as_deref(),
+                )
+            })?;
             return Ok(false);
         }
         if self
@@ -602,9 +634,25 @@ impl IndexService {
             .recent_writes()
             .is_self_write(&note.file_path, &stored.content_hash)
         {
+            self.ctx.db.with_conn(|conn| {
+                SqliteNoteRepository.set_file_stamp(
+                    conn,
+                    &note.id,
+                    Some(stamp.0 as i64),
+                    stamp.1.as_deref(),
+                )
+            })?;
             return Ok(false);
         }
         self.apply_external_edit(note, &stored, report)?;
+        self.ctx.db.with_conn(|conn| {
+            SqliteNoteRepository.set_file_stamp(
+                conn,
+                &note.id,
+                Some(stamp.0 as i64),
+                stamp.1.as_deref(),
+            )
+        })?;
         Ok(true)
     }
 

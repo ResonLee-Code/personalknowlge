@@ -155,6 +155,16 @@ CREATE TABLE IF NOT EXISTS note_relations (
 
 这些列以文件为准：应用内修改会写回 frontmatter，外部编辑器改动会在扫描时同步回库。
 
+### notes 的文件快照列（迁移 005）
+
+| 列 | 含义 |
+| --- | --- |
+| `file_size` | 文件字节数快照 |
+| `file_mtime` | 文件修改时间快照（ISO 8601） |
+
+用途：扫描/监听先用「mtime + size」比对，未变化的文件直接短路，
+不再读取全文与计算 sha256（1 万篇规模下稳态扫描的主要成本）。
+
 ### 索引
 
 ```sql

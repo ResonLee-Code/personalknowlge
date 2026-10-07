@@ -93,6 +93,14 @@ fn bench_search_with_10k_notes() {
     }
     let write_elapsed = write_started.elapsed();
 
+    // 可选：停掉文件监听，单独测量「采纳本身」的成本（BENCH_STOP_WATCHER=1）
+    if std::env::var("BENCH_STOP_WATCHER").as_deref() == Ok("1") {
+        if let Ok(mut guard) = context.watcher.lock() {
+            *guard = None;
+            println!("已停用文件监听（BENCH_STOP_WATCHER=1）");
+        }
+    }
+
     // 扫描采纳 + 建索引
     let index_service = IndexService::new(Arc::clone(&context));
     let scan_started = Instant::now();
@@ -101,7 +109,9 @@ fn bench_search_with_10k_notes() {
     let mut first_scan = true;
     loop {
         if first_scan {
+            let one_pass = Instant::now();
             let _ = index_service.scan_workspace();
+            println!("首次显式扫描（单趟）    : {:?}", one_pass.elapsed());
             first_scan = false;
         }
         let counted = context

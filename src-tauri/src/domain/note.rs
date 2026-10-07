@@ -60,6 +60,9 @@ pub struct Note {
     pub source_reliability: Option<i64>,
     /// 时效：超过该日期视为可能过期
     pub valid_until: Option<String>,
+    /// 文件大小（字节）与修改时间快照：扫描时用于短路，避免无谓的读取与哈希
+    pub file_size: Option<i64>,
+    pub file_mtime: Option<String>,
 }
 
 /// 列表展示用的笔记摘要。

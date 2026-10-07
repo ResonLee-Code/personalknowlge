@@ -48,6 +48,15 @@ pub trait NoteRepository {
     ) -> Result<()>;
     fn set_category(&self, conn: &Connection, id: &str, category_id: Option<&str>) -> Result<()>;
     fn set_favorite(&self, conn: &Connection, id: &str, favorite: bool) -> Result<()>;
+    /// 更新文件快照（mtime + size），扫描时用于短路
+    fn set_file_stamp(
+        &self,
+        conn: &Connection,
+        id: &str,
+        file_size: Option<i64>,
+        file_mtime: Option<&str>,
+    ) -> Result<()>;
+
     /// 更新来源与时效（来源为 frontmatter 字段，写入时由 NoteService 同步到文件）
     fn set_source(
         &self,
@@ -79,7 +88,7 @@ pub struct SqliteNoteRepository;
 
 const NOTE_COLUMNS: &str = "id, workspace_id, title, file_path, category_id, status, content_hash,
      word_count, favorite, created_at, updated_at, last_indexed_at,
-     source_type, source_ref, source_reliability, valid_until";
+     source_type, source_ref, source_reliability, valid_until, file_size, file_mtime";
 
 fn map_note(row: &Row<'_>) -> rusqlite::Result<Note> {
     let status: String = row.get("status")?;
@@ -100,6 +109,8 @@ fn map_note(row: &Row<'_>) -> rusqlite::Result<Note> {
         source_ref: row.get("source_ref")?,
         source_reliability: row.get("source_reliability")?,
         valid_until: row.get("valid_until")?,
+        file_size: row.get("file_size")?,
+        file_mtime: row.get("file_mtime")?,
     })
 }
 
@@ -109,8 +120,9 @@ impl NoteRepository for SqliteNoteRepository {
             "INSERT INTO notes (id, workspace_id, title, file_path, category_id, status,
                                 content_hash, word_count, favorite, created_at, updated_at,
                                 last_indexed_at, source_type, source_ref, source_reliability,
-                                valid_until)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                                valid_until, file_size, file_mtime)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                     ?17, ?18)",
             params![
                 note.id,
                 note.workspace_id,
@@ -128,6 +140,8 @@ impl NoteRepository for SqliteNoteRepository {
                 note.source_ref,
                 note.source_reliability,
                 note.valid_until,
+                note.file_size,
+                note.file_mtime,
             ],
         )?;
         Ok(())
@@ -139,6 +153,7 @@ impl NoteRepository for SqliteNoteRepository {
                               content_hash = ?6, word_count = ?7, favorite = ?8,
                               source_type = ?13, source_ref = ?14,
                               source_reliability = ?15, valid_until = ?16,
+                              file_size = ?17, file_mtime = ?18,
                               created_at = ?9, updated_at = ?10, last_indexed_at = ?11
              WHERE id = ?1",
             params![
@@ -157,6 +172,8 @@ impl NoteRepository for SqliteNoteRepository {
                 note.source_ref,
                 note.source_reliability,
                 note.valid_until,
+                note.file_size,
+                note.file_mtime,
             ],
         )?;
         Ok(())
@@ -329,6 +346,20 @@ impl NoteRepository for SqliteNoteRepository {
         conn.execute(
             "UPDATE notes SET category_id = ?2 WHERE id = ?1",
             params![id, category_id],
+        )?;
+        Ok(())
+    }
+
+    fn set_file_stamp(
+        &self,
+        conn: &Connection,
+        id: &str,
+        file_size: Option<i64>,
+        file_mtime: Option<&str>,
+    ) -> Result<()> {
+        conn.execute(
+            "UPDATE notes SET file_size = ?2, file_mtime = ?3 WHERE id = ?1",
+            params![id, file_size, file_mtime],
         )?;
         Ok(())
     }

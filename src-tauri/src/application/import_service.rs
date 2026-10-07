@@ -331,6 +331,8 @@ impl ImportService {
             created_at,
             updated_at,
             last_indexed_at: None,
+            file_size: None,
+            file_mtime: None,
             source_type: source.source_type.clone(),
             source_ref: source.source_ref.clone(),
             source_reliability: source.source_reliability,

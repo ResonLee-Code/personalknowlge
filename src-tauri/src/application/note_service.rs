@@ -153,6 +153,8 @@ impl NoteService {
             created_at: now.clone(),
             updated_at: now,
             last_indexed_at: None,
+            file_size: None,
+            file_mtime: None,
             source_type: None,
             source_ref: None,
             source_reliability: None,
@@ -255,6 +257,7 @@ impl NoteService {
             extra: existing.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &input.content);
+        self.refresh_file_stamp(&note.id, &note.file_path);
         let content_hash = self
             .ctx
             .storage
@@ -706,6 +709,21 @@ impl NoteService {
             ..Default::default()
         };
         Ok(self.list(query)?.items)
+    }
+
+
+    /// 写入文件后刷新「mtime + size」快照，使后续扫描可以直接短路。
+    fn refresh_file_stamp(&self, note_id: &str, file_path: &str) {
+        if let Ok((size, mtime)) = self.ctx.storage.file_stamp(file_path) {
+            let _ = self.ctx.db.with_conn(|conn| {
+                SqliteNoteRepository.set_file_stamp(
+                    conn,
+                    note_id,
+                    Some(size as i64),
+                    mtime.as_deref(),
+                )
+            });
+        }
     }
 
     fn reindex(&self, note_id: &str) -> Result<()> {
