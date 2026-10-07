@@ -5,6 +5,7 @@
 pub mod ai;
 pub mod attachment_service;
 pub mod backup_service;
+pub mod batch_service;
 pub mod category_service;
 pub mod context;
 pub mod export_service;
@@ -22,6 +23,7 @@ pub mod template_service;
 pub mod workspace_service;
 
 pub use backup_service::BackupService;
+pub use batch_service::{BatchDeleteInput, BatchMoveInput, BatchReport, BatchService, BatchTagInput};
 pub use category_service::CategoryService;
 pub use context::WorkspaceContext;
 pub use export_service::{ExportFormat, ExportNoteInput, ExportNoteResult, ExportService};

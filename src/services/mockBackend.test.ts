@@ -111,6 +111,33 @@ describe('浏览器预览后端', () => {
     });
   });
 
+  it('批量移动 / 打标签 / 删除（浏览器预览后端）', async () => {
+    await workspaceService.create('测试库', '/tmp/mock');
+    const first = await noteService.create({ title: '批量一' });
+    const second = await noteService.create({ title: '批量二' });
+    const ids = [first.note.id, second.note.id, first.note.id];
+
+    const category = await categoryService.create('批量目录', null);
+    const moved = await noteService.moveMany(ids, category.id);
+    expect(moved.succeeded).toBe(2);
+    expect(moved.failures).toHaveLength(0);
+    expect((await noteService.get(first.note.id)).note.categoryId).toBe(category.id);
+
+    const tagged = await noteService.tagMany([first.note.id], ['整理'], 'add');
+    expect(tagged.succeeded).toBe(1);
+    expect((await noteService.get(first.note.id)).tags.map((tag) => tag.name)).toContain('整理');
+    await noteService.tagMany([first.note.id], ['整理'], 'remove');
+    expect((await noteService.get(first.note.id)).tags.map((tag) => tag.name)).not.toContain('整理');
+
+    const deleted = await noteService.deleteMany(ids);
+    expect(deleted.succeeded).toBe(2);
+    expect(await noteService.listDeleted()).toHaveLength(2);
+
+    const failure = await noteService.moveMany(['note_missing'], null);
+    expect(failure.succeeded).toBe(0);
+    expect(failure.failures[0]?.noteId).toBe('note_missing');
+  });
+
   it('解析双向链接：反向链接、出链、未解析与计数', async () => {
     await workspaceService.create('测试库', '/tmp/mock');
     const target = await noteService.create({ title: '索引设计' });

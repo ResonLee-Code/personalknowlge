@@ -925,6 +925,71 @@ export async function handleMockInvoke(
       const status = (payload.status as string) ?? 'active';
       return state.notes.filter((note) => note.status === status).length;
     }
+    case 'notes_move_batch': {
+      requireWorkspace();
+      const input = payload.input as { ids: string[]; categoryId?: string | null };
+      const failures: Array<{ noteId: string; message: string }> = [];
+      let succeeded = 0;
+      new Set(input.ids).forEach((id) => {
+        const note = state.notes.find((item) => item.id === id);
+        if (!note) {
+          failures.push({ noteId: id, message: '笔记不存在。' });
+          return;
+        }
+        note.categoryId = input.categoryId ?? null;
+        note.updatedAt = now();
+        succeeded += 1;
+      });
+      persist();
+      return { succeeded, failures };
+    }
+    case 'notes_tag_batch': {
+      requireWorkspace();
+      const input = payload.input as { ids: string[]; tags: string[]; mode?: string };
+      const failures: Array<{ noteId: string; message: string }> = [];
+      let succeeded = 0;
+      new Set(input.ids).forEach((id) => {
+        const note = state.notes.find((item) => item.id === id);
+        if (!note) {
+          failures.push({ noteId: id, message: '笔记不存在。' });
+          return;
+        }
+        const current = state.noteTags[id] ?? [];
+        const next =
+          input.mode === 'remove'
+            ? current.filter((name) => !input.tags.some((tag) => tag.toLowerCase() === name.toLowerCase()))
+            : input.mode === 'replace'
+              ? [...input.tags]
+              : [...current, ...input.tags.filter((tag) => !current.some((name) => name.toLowerCase() === tag.toLowerCase()))];
+        state.noteTags[id] = next;
+        next.forEach((name) => {
+          if (!state.tags.some((tag) => tag.name === name)) {
+            state.tags.push({ id: `tag_${name}`, name, createdAt: now() });
+          }
+        });
+        succeeded += 1;
+      });
+      persist();
+      return { succeeded, failures };
+    }
+    case 'notes_delete_batch': {
+      requireWorkspace();
+      const input = payload.input as { ids: string[] };
+      const failures: Array<{ noteId: string; message: string }> = [];
+      let succeeded = 0;
+      new Set(input.ids).forEach((id) => {
+        const note = state.notes.find((item) => item.id === id);
+        if (!note) {
+          failures.push({ noteId: id, message: '笔记不存在。' });
+          return;
+        }
+        note.status = 'deleted';
+        succeeded += 1;
+      });
+      persist();
+      emit('notes://changed', { kind: 'deleted' });
+      return { succeeded, failures };
+    }
     case 'note_import':
       fail('INVALID_INPUT', '浏览器预览模式无法读取本地文件，请在桌面应用中使用「导入外部文件」。');
       break;

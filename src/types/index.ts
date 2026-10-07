@@ -426,6 +426,17 @@ export interface LinkRebuildReport {
   durationMs: number;
 }
 
+/** 批量操作（V1.1.2） */
+export interface BatchFailure {
+  noteId: string;
+  message: string;
+}
+
+export interface BatchReport {
+  succeeded: number;
+  failures: BatchFailure[];
+}
+
 /** 附件管理（V1.1.2） */
 export interface AttachmentReference {
   noteId: string;

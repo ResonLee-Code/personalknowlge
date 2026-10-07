@@ -1,8 +1,11 @@
+import { toast } from 'sonner';
 import { create } from 'zustand';
 
 import { errorMessage } from '@/lib/format';
 import { noteService } from '@/services/noteService';
+import { useTagsStore } from '@/stores/tagsStore';
 import type {
+  BatchReport,
   CreateNoteInput,
   NoteDetail,
   NoteListQuery,
@@ -56,6 +59,28 @@ interface NotesState {
   setTags: (id: string, tags: string[]) => Promise<void>;
   clearConflict: () => void;
   reset: () => void;
+  /** 多选（批量操作） */
+  selectionMode: boolean;
+  selection: string[];
+  setSelectionMode: (enabled: boolean) => void;
+  toggleSelected: (id: string) => void;
+  setSelection: (ids: string[]) => void;
+  clearSelection: () => void;
+  moveMany: (categoryId: string | null) => Promise<void>;
+  tagMany: (tags: string[], mode?: 'add' | 'remove' | 'replace') => Promise<void>;
+  deleteMany: () => Promise<void>;
+}
+
+/** 批量操作的统一反馈：成功数 + 失败条数（失败原因取第一条）。 */
+function toastBatch(report: BatchReport, requested: number, verb: string) {
+  if (report.failures.length === 0) {
+    toast.success(`${verb} ${report.succeeded} 篇笔记`);
+    return;
+  }
+  const first = report.failures[0];
+  toast.warning(
+    `${verb} ${report.succeeded}/${requested} 篇，${report.failures.length} 篇失败：${first?.message ?? ''}`,
+  );
 }
 
 function queryFromScope(scope: NoteScope, sort: NoteSort, keyword: string): NoteListQuery {
@@ -97,6 +122,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   saveStatus: 'idle',
   saveError: null,
   conflict: null,
+  selectionMode: false,
+  selection: [],
 
   setScope: async (scope) => {
     set({ scope, selectedId: null, detail: null });
@@ -275,6 +302,59 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   clearConflict: () => set({ conflict: null, saveStatus: 'idle', saveError: null }),
+
+  setSelectionMode: (enabled) => set({ selectionMode: enabled, selection: [] }),
+
+  toggleSelected: (id) =>
+    set((state) => ({
+      selection: state.selection.includes(id)
+        ? state.selection.filter((item) => item !== id)
+        : [...state.selection, id],
+    })),
+
+  setSelection: (ids) => set({ selection: ids }),
+
+  clearSelection: () => set({ selection: [] }),
+
+  moveMany: async (categoryId) => {
+    const ids = get().selection;
+    if (ids.length === 0) return;
+    try {
+      const report = await noteService.moveMany(ids, categoryId);
+      toastBatch(report, ids.length, '已移动');
+      set({ selection: [], selectionMode: false });
+      await get().refresh();
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    }
+  },
+
+  tagMany: async (tags, mode = 'add') => {
+    const ids = get().selection;
+    if (ids.length === 0) return;
+    try {
+      const report = await noteService.tagMany(ids, tags, mode);
+      toastBatch(report, ids.length, mode === 'remove' ? '已移除标签' : '已打标签');
+      set({ selection: [], selectionMode: false });
+      await get().refresh();
+      await useTagsStore.getState().refresh();
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    }
+  },
+
+  deleteMany: async () => {
+    const ids = get().selection;
+    if (ids.length === 0) return;
+    try {
+      const report = await noteService.deleteMany(ids);
+      toastBatch(report, ids.length, '已移入回收站');
+      set({ selection: [], selectionMode: false, detail: null, selectedId: null });
+      await get().refresh();
+    } catch (error) {
+      set({ error: errorMessage(error) });
+    }
+  },
 
   reset: () =>
     set({

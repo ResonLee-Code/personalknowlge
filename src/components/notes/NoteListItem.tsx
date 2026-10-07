@@ -33,6 +33,10 @@ export function NoteListItem({
   const restore = useNotesStore((state) => state.restore);
   const purge = useNotesStore((state) => state.purge);
   const duplicate = useNotesStore((state) => state.duplicate);
+  const selectionMode = useNotesStore((state) => state.selectionMode);
+  const selectedForBatch = useNotesStore((state) => state.selection.includes(note.id));
+  const toggleSelected = useNotesStore((state) => state.toggleSelected);
+  const setSelectionMode = useNotesStore((state) => state.setSelectionMode);
 
   const titleSegments = keyword ? splitHighlight(note.title, [keyword]) : [{ text: note.title, matched: false }];
   const snippet = note.snippet ?? [];
@@ -42,18 +46,48 @@ export function NoteListItem({
       <div
         role="button"
         tabIndex={0}
-        onClick={onOpen}
+        onClick={(event) => {
+          // 多选模式下点击即勾选；Cmd/Ctrl+点击随时切换并进入多选
+          if (selectionMode || event.metaKey || event.ctrlKey) {
+            event.preventDefault();
+            if (!selectionMode) setSelectionMode(true);
+            toggleSelected(note.id);
+            return;
+          }
+          onOpen();
+        }}
+        onKeyDownCapture={(event) => {
+          if (selectionMode && (event.key === ' ' || event.key === 'Enter')) {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleSelected(note.id);
+          }
+        }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') onOpen();
         }}
         className={cn(
           'group cursor-pointer rounded-lg border border-transparent px-2.5 py-2 transition-colors',
-          selected
-            ? 'border-[var(--brand)]/40 bg-[var(--brand-soft)]'
-            : 'hover:bg-[var(--surface-muted)]',
+          selectedForBatch
+            ? 'border-[var(--brand)]/60 bg-[var(--brand-soft)]'
+            : selected
+              ? 'border-[var(--brand)]/40 bg-[var(--brand-soft)]'
+              : 'hover:bg-[var(--surface-muted)]',
         )}
       >
-        <div className="flex items-start gap-1.5">
+        <div className="flex items-start gap-2">
+        {selectionMode ? (
+          <input
+            type="checkbox"
+            className="mt-0.5 shrink-0"
+            checked={selectedForBatch}
+            aria-label={`选择 ${note.title}`}
+            onChange={() => toggleSelected(note.id)}
+            onClick={(event) => event.stopPropagation()}
+          />
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-1.5">
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--ink)]">
             {titleSegments.map((segment, index) => (
               <span key={index} className={segment.matched ? 'search-highlight' : undefined}>
@@ -127,7 +161,7 @@ export function NoteListItem({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
+          </div>
 
         {snippet.length > 0 ? (
           <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[var(--ink-muted)]">
@@ -148,7 +182,9 @@ export function NoteListItem({
             </span>
           ))}
           {note.tags.length > 3 ? <span>+{note.tags.length - 3}</span> : null}
+          </div>
         </div>
+      </div>
       </div>
     </li>
   );

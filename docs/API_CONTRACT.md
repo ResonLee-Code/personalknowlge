@@ -215,7 +215,19 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - `degree` 是**本次结果内**的邻居数（同一对笔记多条链接算一个邻居），截断后重新计算；
 - 图谱是派生数据：不落库，`links_rebuild` 可从 Markdown 整体修复。
 
-## 14. 附件管理（V1.1.2）
+## 14. 批量操作（V1.1.2）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `notes_move_batch` | `{ input: { ids, categoryId }}` | `BatchReport` |
+| `notes_tag_batch` | `{ input: { ids, tags, mode? }}` | `BatchReport` |
+| `notes_delete_batch` | `{ input: { ids }}` | `BatchReport` |
+
+- `BatchReport = { succeeded: number, failures: { noteId, message }[] }`；
+- `categoryId = null` 表示移回 Inbox；`mode` 取值 `add`（默认，合并）/ `remove` / `replace`；
+- ids 会去重；单篇失败不中断整批；删除为移入回收站（可恢复）。
+
+## 15. 附件管理（V1.1.2）
 
 | 命令 | 参数 | 返回 |
 | --- | --- | --- |
@@ -232,7 +244,7 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 `note_import` 的 `input` 新增 `preserveStructure?: boolean`：为 `true` 时，
 目录导入会在目标分类下重建子目录并保留原文件名。
 
-## 15. 类型化关系（N2）
+## 16. 类型化关系（N2）
 
 | 命令 | 参数 | 返回 |
 | --- | --- | --- |
@@ -248,7 +260,7 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 重命名目标笔记会改写来源 frontmatter 里的 `target`；目标被删除时派生关系解绑
   （声明保留，目标恢复后重建即可复原）。
 
-## 16. 前端服务层
+## 17. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 

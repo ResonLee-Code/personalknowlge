@@ -6,6 +6,7 @@
 pub mod attachment_commands;
 pub mod app_commands;
 pub mod backup_commands;
+pub mod batch_commands;
 pub mod category_commands;
 pub mod graph_commands;
 pub mod link_commands;

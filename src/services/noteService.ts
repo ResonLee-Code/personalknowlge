@@ -1,4 +1,5 @@
 import type {
+  BatchReport,
   CreateNoteInput,
   NoteDetail,
   NoteListQuery,
@@ -53,6 +54,18 @@ export const noteService = {
   setSource: (input: SetSourceInput) => call<NoteDetail>('note_set_source', { input }),
 
   count: (status?: string) => call<number>('note_count', { status }),
+
+  /** 批量移动到分类（null 表示 Inbox） */
+  moveMany: (ids: string[], categoryId: string | null) =>
+    call<BatchReport>('notes_move_batch', { input: { ids, categoryId } }),
+
+  /** 批量打标签（mode: add / remove / replace） */
+  tagMany: (ids: string[], tags: string[], mode: 'add' | 'remove' | 'replace' = 'add') =>
+    call<BatchReport>('notes_tag_batch', { input: { ids, tags, mode } }),
+
+  /** 批量移入回收站 */
+  deleteMany: (ids: string[]) =>
+    call<BatchReport>('notes_delete_batch', { input: { ids } }),
 
   /** 导入外部 Markdown / 文本文件或目录（复制进知识库） */
   importFiles: (input: ImportNotesInput) => call<ImportReport>('note_import', { input }),

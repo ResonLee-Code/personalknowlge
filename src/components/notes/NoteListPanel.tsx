@@ -1,6 +1,6 @@
-import { FileText, ListFilter, Search, Star, Trash2, TriangleAlert } from 'lucide-react';
+import { CheckSquare, FileText, FolderTree, ListFilter, Search, Star, Tag, Trash2, TriangleAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { useNotesStore } from '@/stores/notesStore';
 import { useTagsStore } from '@/stores/tagsStore';
 import { useUiStore } from '@/stores/uiStore';
 
+import { BatchMoveDialog, BatchTagDialog } from './BatchActionDialogs';
 import { NoteListItem } from './NoteListItem';
 
 const SORT_OPTIONS = [
@@ -40,7 +41,17 @@ export function NoteListPanel() {
   const categories = useCategoriesStore((state) => state.flat);
   const tags = useTagsStore((state) => state.tags);
 
+  const selectionMode = useNotesStore((state) => state.selectionMode);
+  const selection = useNotesStore((state) => state.selection);
+  const setSelectionMode = useNotesStore((state) => state.setSelectionMode);
+  const setSelection = useNotesStore((state) => state.setSelection);
+  const deleteMany = useNotesStore((state) => state.deleteMany);
+  const [batchMoveOpen, setBatchMoveOpen] = useState(false);
+  const [batchTagOpen, setBatchTagOpen] = useState(false);
+
   const basePath = `/${location.pathname.split('/').filter(Boolean)[0] ?? 'notes'}`;
+
+  const selectable = scope.kind !== 'trash' && scope.kind !== 'missing';
 
   useEffect(() => {
     void useNotesStore.getState().refresh();
@@ -120,7 +131,84 @@ export function NoteListPanel() {
             onChange={(event) => void setKeyword(event.target.value)}
           />
         </div>
+        {selectionMode ? (
+          <div
+            data-testid="batch-toolbar"
+            className="flex flex-wrap items-center gap-1.5 rounded-md bg-[var(--brand-soft)] px-2 py-1.5 text-[11px] text-[var(--brand)]"
+          >
+            <CheckSquare className="h-3.5 w-3.5" />
+            已选 {selection.length}
+            <button
+              type="button"
+              className="ml-1 underline decoration-dotted"
+              onClick={() => setSelection(items.map((item) => item.id))}
+            >
+              全选
+            </button>
+            <button
+              type="button"
+              className="underline decoration-dotted"
+              onClick={() => setSelection([])}
+            >
+              清除
+            </button>
+            <span className="mx-0.5 h-3 w-px bg-[var(--brand)]/30" />
+            <button
+              type="button"
+              className="flex items-center gap-0.5 disabled:opacity-40"
+              disabled={selection.length === 0}
+              onClick={() => setBatchMoveOpen(true)}
+            >
+              <FolderTree className="h-3 w-3" />
+              移动
+            </button>
+            <button
+              type="button"
+              className="flex items-center gap-0.5 disabled:opacity-40"
+              disabled={selection.length === 0}
+              onClick={() => setBatchTagOpen(true)}
+            >
+              <Tag className="h-3 w-3" />
+              标签
+            </button>
+            <button
+              type="button"
+              className="flex items-center gap-0.5 text-red-600 disabled:opacity-40"
+              disabled={selection.length === 0}
+              onClick={() => {
+                if (
+                  window.confirm(`将选中的 ${selection.length} 篇笔记移入回收站？（可恢复）`)
+                ) {
+                  void deleteMany();
+                }
+              }}
+            >
+              <Trash2 className="h-3 w-3" />
+              删除
+            </button>
+            <button
+              type="button"
+              className="ml-auto flex items-center gap-0.5"
+              onClick={() => setSelectionMode(false)}
+            >
+              <X className="h-3 w-3" />
+              退出
+            </button>
+          </div>
+        ) : null}
+
         <div className="flex items-center gap-1">
+          {selectable ? (
+            <button
+              type="button"
+              title="多选（批量移动 / 打标签 / 删除）"
+              className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-[var(--ink-subtle)] transition-colors hover:text-[var(--brand)]"
+              onClick={() => setSelectionMode(!selectionMode)}
+            >
+              <CheckSquare className="h-3 w-3" />
+              多选
+            </button>
+          ) : null}
           {SORT_OPTIONS.map((option) => (
             <button
               key={option.value}
@@ -193,6 +281,9 @@ export function NoteListPanel() {
           )}
         </ScrollArea>
       )}
+
+      {batchMoveOpen ? <BatchMoveDialog onClose={() => setBatchMoveOpen(false)} /> : null}
+      {batchTagOpen ? <BatchTagDialog onClose={() => setBatchTagOpen(false)} /> : null}
 
       {/* 回收站：批量清理（永久删除，不可恢复） */}
       {scope.kind === 'trash' && items.length > 0 ? (
