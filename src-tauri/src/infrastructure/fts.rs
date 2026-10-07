@@ -9,6 +9,7 @@
 //! 因此额外写入「单字 + 双字」扩展，查询时把中文关键词转换成双字短语，
 //! 从而既能支持单字查询，也能按连续短语精确匹配。
 
+use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
 use rusqlite::{params_from_iter, Connection};
 
@@ -144,10 +145,25 @@ impl SqliteSearchIndex {
 
 impl SearchIndex for SqliteSearchIndex {
     fn upsert(&self, conn: &Connection, document: &SearchDocument) -> Result<()> {
-        conn.execute(
-            "DELETE FROM search_documents_fts WHERE note_id = ?1",
-            rusqlite::params![document.note_id],
-        )?;
+        // note_id 在 FTS5 里是 UNINDEXED 列：按它 DELETE 会全表扫描（O(N)），
+        // 逐篇保存/采纳于是退化成 O(N²)。这里用映射表拿到 rowid，删除改按主键。
+        // 注意 rowid 的分配也必须 O(1)：早先版本的 `MAX(row_id)+1` 同样是全表扫描。
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT row_id FROM search_documents_map WHERE note_id = ?1",
+                rusqlite::params![document.note_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        if let Some(row_id) = existing {
+            conn.execute(
+                "DELETE FROM search_documents_fts WHERE rowid = ?1",
+                rusqlite::params![row_id],
+            )?;
+        }
+
+        // 不指定 rowid，交给 FTS5 自增分配，再用 last_insert_rowid 回填映射
         conn.execute(
             "INSERT INTO search_documents_fts (note_id, title, content, keywords)
              VALUES (?1, ?2, ?3, ?4)",
@@ -158,19 +174,46 @@ impl SearchIndex for SqliteSearchIndex {
                 document.keywords
             ],
         )?;
+        let row_id = conn.last_insert_rowid();
+
+        if existing.is_some() {
+            conn.execute(
+                "UPDATE search_documents_map SET row_id = ?2 WHERE note_id = ?1",
+                rusqlite::params![document.note_id, row_id],
+            )?;
+        } else {
+            conn.execute(
+                "INSERT INTO search_documents_map (note_id, row_id) VALUES (?1, ?2)",
+                rusqlite::params![document.note_id, row_id],
+            )?;
+        }
         Ok(())
     }
 
     fn remove(&self, conn: &Connection, note_id: &str) -> Result<()> {
-        conn.execute(
-            "DELETE FROM search_documents_fts WHERE note_id = ?1",
-            rusqlite::params![note_id],
-        )?;
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT row_id FROM search_documents_map WHERE note_id = ?1",
+                rusqlite::params![note_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(row_id) = existing {
+            conn.execute(
+                "DELETE FROM search_documents_fts WHERE rowid = ?1",
+                rusqlite::params![row_id],
+            )?;
+            conn.execute(
+                "DELETE FROM search_documents_map WHERE note_id = ?1",
+                rusqlite::params![note_id],
+            )?;
+        }
         Ok(())
     }
 
     fn clear(&self, conn: &Connection) -> Result<()> {
         conn.execute("DELETE FROM search_documents_fts", [])?;
+        conn.execute("DELETE FROM search_documents_map", [])?;
         Ok(())
     }
 

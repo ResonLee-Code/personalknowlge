@@ -155,6 +155,19 @@ CREATE TABLE IF NOT EXISTS note_relations (
 
 这些列以文件为准：应用内修改会写回 frontmatter，外部编辑器改动会在扫描时同步回库。
 
+### search_documents_map（迁移 006）
+
+```sql
+CREATE TABLE IF NOT EXISTS search_documents_map (
+    note_id TEXT PRIMARY KEY,
+    row_id  INTEGER NOT NULL UNIQUE
+);
+```
+
+用途：FTS5 表的 `note_id` 是 `UNINDEXED` 列，按它删除会全表扫描（逐篇保存/采纳退化为 O(N²)）；
+映射表把 `note_id` 关联到 FTS 的 **rowid**，删除改走主键。迁移时会清空既有 FTS 索引，
+应用下次打开工作区自动重建一次。
+
 ### notes 的文件快照列（迁移 005）
 
 | 列 | 含义 |

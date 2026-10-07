@@ -252,10 +252,12 @@ impl RelationService {
         self.ctx
             .db
             .with_conn(|conn| SqliteRelationRepository.clear_workspace(conn, &self.ctx.workspace.id))?;
+        // 标题索引只构建一次：refresh_for_source 每篇都会重建它，逐篇调用即 O(N²)
+        let index = self.title_index()?;
         let mut total = 0usize;
         for note in &notes {
             if let Ok(stored) = self.ctx.storage.read_note(&note.file_path) {
-                total += self.refresh_for_source(note, &stored.frontmatter)?;
+                total += self.refresh_for_source_with_index(note, &stored.frontmatter, &index)?;
             }
         }
         Ok(total)
@@ -271,6 +273,16 @@ impl RelationService {
 
     fn refresh_for_source(&self, note: &Note, frontmatter: &Frontmatter) -> Result<usize> {
         let index = self.title_index()?;
+        self.refresh_for_source_with_index(note, frontmatter, &index)
+    }
+
+    /// 复用已构建的标题索引（批量场景，避免 O(N²)）。
+    fn refresh_for_source_with_index(
+        &self,
+        note: &Note,
+        frontmatter: &Frontmatter,
+        index: &HashMap<String, String>,
+    ) -> Result<usize> {
         let timestamp = now_iso();
         let workspace_id = self.ctx.workspace.id.clone();
         let mut rows: Vec<RelationRow> = Vec::new();

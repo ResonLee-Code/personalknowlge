@@ -1025,8 +1025,8 @@ fn applies_note_links_migration() {
     harness.create_workspace();
     let context = harness.context();
 
-    // 005 之后为 5（含 note_links / note_assets / note_file_stamp）
-    assert_eq!(context.db.schema_version().expect("schema 版本"), 5);
+    // 006 之后为 6（note_links / note_assets / note_file_stamp / search_rowid_map）
+    assert_eq!(context.db.schema_version().expect("schema 版本"), 6);
 
     // 004：来源/时效列与类型化关系表
     let (has_relations, source_column) = context
@@ -1061,6 +1061,20 @@ fn applies_note_links_migration() {
         })
         .expect("检查 005 迁移结果");
     assert_eq!(stamp_columns, 2, "notes 应有 file_size / file_mtime 列");
+
+    // 006：FTS rowid 映射表（避免按 UNINDEXED 的 note_id 做全表删除）
+    let map_table: i64 = context
+        .db
+        .with_conn(|conn| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='search_documents_map'",
+                [],
+                |row| row.get(0),
+            )?;
+            Ok(count)
+        })
+        .expect("检查 006 迁移结果");
+    assert_eq!(map_table, 1, "search_documents_map 表应存在");
 
     let (table, indexes) = context
         .db

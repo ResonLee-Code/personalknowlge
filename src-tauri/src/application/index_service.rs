@@ -11,16 +11,17 @@ use crate::core::error::{AppError, ErrorCode, Result};
 use crate::core::events::events as event_names;
 use crate::core::hash::sha256_hex_str;
 use crate::core::ids::note_id;
-use crate::core::text::{count_words, markdown_to_plain_text};
+use crate::core::text::{count_words, markdown_to_plain_text, tag_key};
 use crate::core::time::now_iso;
 use crate::domain::note::{Note, NoteStatus};
+use crate::domain::tag::Tag;
 use crate::domain::search::{IndexState, IndexStatus};
 use crate::infrastructure::fts::{SearchDocument, SearchIndex, SqliteSearchIndex};
 use crate::infrastructure::watcher::{FileChangeBatch, FileChangeKind};
 use crate::repositories::settings_repository::{
     INDEX_REBUILT_AT_KEY, INDEX_STATE_KEY,
 };
-use crate::repositories::tag_repository::tags_for_note;
+use crate::repositories::tag_repository::{tags_for_note, SqliteTagRepository, TagRepository};
 use crate::repositories::{
     NoteRepository, SettingsRepository, SqliteNoteRepository, SqliteSettingsRepository,
 };
@@ -312,6 +313,7 @@ impl IndexService {
             .count()
             > BULK_ADOPT_THRESHOLD;
 
+        let mut to_adopt: Vec<String> = Vec::new();
         for relative in files {
             match by_path.remove(&relative) {
                 Some(note) => {
@@ -322,9 +324,17 @@ impl IndexService {
                     }
                 }
                 None => {
-                    self.adopt_file(&relative, &lookup, &mut report, defer_derived)?;
+                    if defer_derived {
+                        // 批量导入：先收集，循环结束后按批事务写入
+                        to_adopt.push(relative);
+                    } else {
+                        self.adopt_file(&relative, &lookup, &mut report, false)?;
+                    }
                 }
             }
+        }
+        if !to_adopt.is_empty() {
+            self.adopt_files_batched(&to_adopt, &lookup, &mut report)?;
         }
 
         // 剩余记录对应的文件已消失
@@ -369,6 +379,7 @@ impl IndexService {
         // 此时逐篇刷新派生数据同样会退化为 O(N²)，改为整批结束后重建一次。
         const BULK_ADOPT_THRESHOLD: usize = 50;
         let defer_derived = batch.changes.len() > BULK_ADOPT_THRESHOLD;
+        let mut to_adopt: Vec<String> = Vec::new();
 
         for change in batch.changes {
             let relative = change.path.clone();
@@ -420,7 +431,8 @@ impl IndexService {
                             report.updated += 1;
                         }
                         None => {
-                            self.adopt_file(&relative, &lookup, &mut report, defer_derived)?;
+                            // 新增文件统一收集，循环结束后按批事务写入（单篇也只是一个很小的批次）
+                            to_adopt.push(relative);
                         }
                     }
                 }
@@ -448,6 +460,9 @@ impl IndexService {
             }
         }
 
+        if !to_adopt.is_empty() {
+            self.adopt_files_batched(&to_adopt, &lookup, &mut report)?;
+        }
         if defer_derived && report.added > 0 {
             self.rebuild_derived_after_bulk();
         }
@@ -459,6 +474,167 @@ impl IndexService {
             }
         }
         Ok(report)
+    }
+
+    /// 批量采纳：文件读取在事务外完成，数据库写入按批提交。
+    ///
+    /// 单篇采纳原本要 4–6 次独立事务（记录 / 标签 / FTS / 标记已索引），
+    /// 1 万篇即 5 万+ 次提交，实测首次导入要 6.5 分钟；按批（200 篇/事务）后
+    /// 提交次数降到 1/1000 量级，同时大幅减少 WAL 检查点开销。
+    fn adopt_files_batched(
+        &self,
+        files: &[String],
+        lookup: &super::lookup::CategoryLookup,
+        report: &mut ScanReport,
+    ) -> Result<()> {
+        const ADOPT_BATCH_SIZE: usize = 200;
+
+        // 1) 事务外：读取 + 解析 + 组装 Note（IO 密集，不占用数据库事务）
+        struct Prepared {
+            note: Note,
+            plain_text: String,
+            tags: Vec<String>,
+            category_path: String,
+        }
+        let workspace_id = self.workspace_id().to_string();
+        let mut prepared: Vec<Prepared> = Vec::with_capacity(files.len());
+        for relative in files {
+            let stored = match self.ctx.storage.read_note(relative) {
+                Ok(stored) => stored,
+                Err(error) => {
+                    report
+                        .warnings
+                        .push(format!("跳过无法读取的文件 {relative}：{}", error.message));
+                    continue;
+                }
+            };
+            if let Some(error) = &stored.parse_error {
+                report.warnings.push(format!("{relative}：{error}"));
+            }
+            let title = stored
+                .frontmatter
+                .title
+                .clone()
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| file_stem_title(relative));
+            let category_id = directory_category_id(lookup, relative);
+            let now = now_iso();
+            let created_at = stored
+                .frontmatter
+                .created_at
+                .clone()
+                .or_else(|| stored.modified_at.clone())
+                .unwrap_or_else(|| now.clone());
+            let updated_at = stored
+                .frontmatter
+                .updated_at
+                .clone()
+                .or_else(|| stored.modified_at.clone())
+                .unwrap_or_else(|| now.clone());
+            let plain_text = markdown_to_plain_text(&stored.body);
+            let stamp = self.ctx.storage.file_stamp(relative).ok();
+            let category_path = category_id
+                .as_ref()
+                .map(|id| lookup.path_string(id))
+                .unwrap_or_default();
+            prepared.push(Prepared {
+                note: Note {
+                    // id 在事务内确定（需要检查 frontmatter 里的 id 是否已被占用）
+                    id: stored
+                        .frontmatter
+                        .id
+                        .clone()
+                        .filter(|id| !id.trim().is_empty())
+                        .unwrap_or_else(note_id),
+                    workspace_id: workspace_id.clone(),
+                    title,
+                    file_path: relative.to_string(),
+                    category_id,
+                    status: NoteStatus::Active,
+                    content_hash: Some(stored.content_hash.clone()),
+                    word_count: count_words(&plain_text),
+                    favorite: false,
+                    created_at,
+                    updated_at,
+                    last_indexed_at: None,
+                    source_type: stored.frontmatter.source_type.clone(),
+                    source_ref: stored.frontmatter.source_ref.clone(),
+                    source_reliability: stored.frontmatter.source_reliability,
+                    valid_until: stored.frontmatter.valid_until.clone(),
+                    file_size: stamp.as_ref().map(|(size, _)| *size as i64),
+                    file_mtime: stamp.and_then(|(_, mtime)| mtime),
+                },
+                plain_text,
+                tags: stored.frontmatter.tags.clone(),
+                category_path,
+            });
+        }
+
+        // 2) 分批事务写入
+        let workspace_key = workspace_id.clone();
+        for chunk in prepared.chunks(ADOPT_BATCH_SIZE) {
+            self.ctx.db.with_transaction(|tx| {
+                for item in chunk {
+                    // 路径已被其它扫描采纳 → 跳过（幂等）
+                    if SqliteNoteRepository.get_by_path(tx, &workspace_key, &item.note.file_path)?
+                        .is_some()
+                    {
+                        continue;
+                    }
+                    let mut note = item.note.clone();
+                    // id 冲突（frontmatter 里带的是别篇的 id）时重新生成
+                    if SqliteNoteRepository.get(tx, &note.id)?.is_some() {
+                        note.id = note_id();
+                    }
+                    SqliteNoteRepository.insert(tx, &note)?;
+
+                    // 标签：复用仓储的 conn 接口，避免在事务内再开事务
+                    let mut tag_names: Vec<String> = Vec::with_capacity(item.tags.len());
+                    for name in &item.tags {
+                        let key = tag_key(name);
+                        if key.is_empty() {
+                            continue;
+                        }
+                        let tag = match SqliteTagRepository.find_by_key(tx, &workspace_key, &key)? {
+                            Some(tag) => tag,
+                            None => {
+                                let tag = Tag {
+                                    id: crate::core::ids::tag_id(),
+                                    workspace_id: workspace_key.clone(),
+                                    name: name.trim().to_string(),
+                                    created_at: now_iso(),
+                                    note_count: 0,
+                                };
+                                SqliteTagRepository.insert(tx, &tag)?;
+                                tag
+                            }
+                        };
+                        tx.execute(
+                            "INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?1, ?2)",
+                            rusqlite::params![note.id, tag.id],
+                        )?;
+                        tag_names.push(tag.name);
+                    }
+
+                    // FTS 索引（同一事务）
+                    let document = SearchDocument::build(
+                        &note.id,
+                        &note.title,
+                        &item.plain_text,
+                        &tag_names,
+                        &item.category_path,
+                    );
+                    SqliteSearchIndex.upsert(tx, &document)?;
+                    tx.execute(
+                        "UPDATE notes SET last_indexed_at = ?2 WHERE id = ?1",
+                        rusqlite::params![note.id, now_iso()],
+                    )?;
+                    report.added += 1;
+                }
+                Ok(())
+            })?;
+        }
+        Ok(())
     }
 
     /// 采纳磁盘上的新文件。
