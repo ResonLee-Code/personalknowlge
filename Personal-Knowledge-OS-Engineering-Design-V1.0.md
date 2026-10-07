@@ -2218,9 +2218,9 @@ Personal Knowledge OS V1.0 不以功能数量作为成功标准，而以以下�
 | 项目 | 状态 |
 |---|---|
 | 文档基线 | V1.0（2026-09-23） |
-| 实现版本 | **V1.1.0**（2026-10-07） |
+| 实现版本 | **V1.2.0**（2026-10-07） |
 | 已交付 | 第 4.1 节「V1.0 必须实现」全部条目；另有附录 C.3 的增补 |
-| 开发中 | 无（V1.1 的 M1/M2/M3 已完成）；M4 的 Windows 打包等待指令，见 `docs/PLAN_V1.1.md` |
+| 开发中 | 无（V1.1 的 M1/M2/M3、V1.2.0 的知识资产/导入/性能批次均已完成）；M4 的 Windows 打包等待指令 |
 | 明确未做 | 第 4.2 节「V1.0 不实现」全部条目（AI、云同步、协作、移动端等）保持不做 |
 | 下一阶段 | V1.1：双向链接与编辑体验，见 `docs/PLAN_V1.1.md` |
 
@@ -2276,6 +2276,8 @@ Personal Knowledge OS V1.0 不以功能数量作为成功标准，而以以下�
 | 预览 chip | `[[标题]]` 渲染为 chip：已解析跳转、未解析一键创建 | `docs/ARCHITECTURE.md` 5.1 |
 | 本地模板 | `.knowledge/templates/*.md` + 新建时选择 + `{{title}}`/`{{date}}` 等占位符 | `docs/API_CONTRACT.md` 第 11 节 |
 | 知识图谱视图 | `graph_get` 节点/边/过滤/聚焦 + `/graph` Canvas 力导向布局（提前自 V1.2） | `docs/API_CONTRACT.md` 第 12 节 |
+| 知识资产元数据 | `notes` 新增来源/时效（004）与文件快照（005）列；`note_relations` 类型化关系（004） | `docs/DATABASE_SCHEMA.md` |
+| FTS rowid 映射 | `search_documents_map`（006）：避免按 UNINDEXED 的 note_id 全表删除（1 万篇首次导入 6.3 分钟 → 4 秒） | `docs/DATABASE_SCHEMA.md` |
 | AI 决策层框架 | 只定义分层与接口（决策层 / 模型接入层 / 检索层 / 工具层）与隐私开关，不含模型调用 | `docs/AI_ARCHITECTURE_PLAN.md` |
 
 ## C.4 第 29 章 Sprint 完成情况

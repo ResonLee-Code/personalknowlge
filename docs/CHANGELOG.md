@@ -94,7 +94,7 @@
 结论：图谱查询满足 M3 验收口径（全量 96 ms < 1.5 s）；`links_rebuild` 已不再随笔记数平方增长。
 首次采纳 3000 个外部文件约 28 s（逐篇写库 + 建索引），是「导入已有目录」的一次性成本。
 
-### V1.1.1 — 2026-10-07
+## V1.1.1 — 2026-10-07
 
 主题：修掉 3000 篇规模下暴露的两个性能/正确性缺陷，补齐图谱增强，并产出 Windows 安装包。
 
@@ -136,6 +136,22 @@
 | `graph_get` 全量 | 23.5 ms（**静默截断到 500 节点**） | **90.6 ms（2000 节点 / 2546 边，truncated=true）** |
 | `graph_get` 分类过滤 / 2 跳聚焦 | 22.0 / 22.9 ms | 22.8 / 83.6 ms |
 | `database.sqlite` / `.knowledge` | 6.7 / 10.8 MB | 6.7 / 11.6 MB |
+
+## V1.2.0 — 2026-10-07
+
+主题：**知识资产与迁移能力**（来源与时效、类型化关系），**导入工具**（Obsidian / Notion、保留目录结构），
+**批量与拖拽操作**，以及一轮由基准驱动的**性能修复**：1 万篇首次导入 6.3 分钟 → 4 秒。
+
+- 知识资产：来源与时效（N1，迁移 004）+ 类型化关系（N2，`relations_*` 命令与关系面板）；
+- 迁移与导入：附件管理界面、保留目录结构的导入、Obsidian / Notion 目录导入（嵌入改写、
+  哈希后缀剥离、附件一并导入）；
+- 效率：批量操作（多选移动 / 打标签 / 删除）、拖拽笔记到分类、搜索历史与收藏条件、回收站分组与批量清理；
+- 正确性：修复「混合中英文写法检索召回为 0」、`save/rename/move/set_tags` 清空来源字段、
+  关系面板渲染死循环三个缺陷；
+- 性能：FTS 改 rowid 映射（迁移 006）、关系重建去 O(N²)、采纳改为批事务、
+  扫描按 mtime+size 短路；1 万篇首次导入 **486–493 s → 4.16 s**，FTS 重建 23.5 s → 4.2 s；
+- 图谱：时间过滤、社区（模块度）着色与粒度、SVG / 带图例 PNG 导出、导出含标题；
+- 预留：第二代 AI 接口骨架（`DecisionModel` / `Retriever` / `GenerativeModel` trait，不接模型）。
 
 ### N2 类型化关系（已完成）
 
@@ -481,36 +497,18 @@ M1（双向链接地基）到此完成。
 
 M2（编辑体验）到此完成。下一步：M3 知识图谱视图（评估后决定）与 Windows 打包（等待指令）。
 
-### 当前构建（V1.1.1，含迁移 003）
+### 当前构建（V1.2.0，含迁移 006）
 
 ```text
-Personal Knowledge OS_1.1.1_aarch64.dmg
-  path   src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.1.1_aarch64.dmg
-  size   4054862 bytes（3.9 MB）
-  sha256 3b7d4cca18d2a358282831e7ca51741ea222057e8d183d9e32d512263ff6bfb7
-  built  2026-10-07 03:51（macOS aarch64 本地构建，未签名）
-
-Personal Knowledge OS.app（bundle/macos/）
-  CFBundleShortVersionString = 1.1.1
+Personal Knowledge OS_1.2.0_aarch64.dmg
+  path   src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.2.0_aarch64.dmg
+  size   4142418 bytes（4.0 MB）
+  sha256 79dbc9b0c5aa12d21e5111d9db9c11b8163390423494d4077839bab445183d1d
+  built  2026-10-07（macOS aarch64 本地构建，未签名）
 ```
 
-Windows（交叉编译，未签名，待真机验收）
-  path   dist-windows/Personal Knowledge OS_1.1.1_x64-setup.exe
-  size   3189550 bytes（3.0 MB）
-  sha256 12254786038d06f84162549c2d6751dc4a8f67de42e29bb969be48e7e0192ff4
-  path   dist-windows/Personal Knowledge OS_1.1.1_x64-portable.zip
-  size   3871877 bytes（3.7 MB）
-  sha256 bef3f436b2dd9f038809dd86452aff96f1cba28579d8a33d934d1955f19bbef6
-
-上一版（V1.1.0）构建信息保留在 git 历史中，便于对照回滚。
-
-> Windows 安装包仍为 V1.0.0 构建（`dist-windows/`），**等待指令后**再交叉编译同步到 V1.1.0。
-
-> ⚠️ 兼容性提示：从 V1.0.1 起，打开工作区时数据库会迁移到 **schema 3**（新增 `note_links`）。
-> schema 更高的数据库会被旧版本应用拒绝打开（提示「由更高版本的应用创建」），
-> 本地测试请统一使用本构建或更新版本，不要与更早的小版本混用同一工作区。
-
----
+> Windows 安装包仍为 V1.0.0 构建（`dist-windows/`），按约定等待指令后再同步到 V1.2.0。
+> V1.1.1 的构建信息（dmg sha256 3b7d4cca…）保留在 git 历史中。
 
 ## V1.0.1 — 2026-10-07
 
