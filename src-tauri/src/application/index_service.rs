@@ -254,6 +254,16 @@ impl IndexService {
         }
     }
 
+    /// 批处理结束后统一重建派生数据（仅大批量路径需要）。
+    fn rebuild_derived_after_bulk(&self) {
+        if let Err(error) = LinkService::new(Arc::clone(&self.ctx)).rebuild() {
+            tracing::warn!(target: "links", "批处理后重建链接失败：{}", error.message);
+        }
+        if let Err(error) = RelationService::new(Arc::clone(&self.ctx)).rebuild() {
+            tracing::warn!(target: "relations", "批处理后重建关系失败：{}", error.message);
+        }
+    }
+
     /// 扫描工作区：采纳新增文件、同步外部修改、标记缺失文件
     /// （设计文档 FR-W02 / 13.3）。
     pub fn scan_workspace(&self) -> Result<ScanReport> {
@@ -292,6 +302,15 @@ impl IndexService {
             .into_iter()
             .map(|note| (note.file_path.clone(), note))
             .collect();
+        // 关键：按「本轮真正需要采纳的数量」判断是否批量，而不是磁盘上的文件总数。
+        // 轮询式监听每 3 秒都会看到全部文件；若按总数判断，每轮都会触发一次全量重建，
+        // 反而把首次采纳拖慢到 400s+（实测）。
+        const BULK_ADOPT_THRESHOLD: usize = 50;
+        let defer_derived = files
+            .iter()
+            .filter(|relative| !by_path.contains_key(relative.as_str()))
+            .count()
+            > BULK_ADOPT_THRESHOLD;
 
         for relative in files {
             match by_path.remove(&relative) {
@@ -303,7 +322,7 @@ impl IndexService {
                     }
                 }
                 None => {
-                    self.adopt_file(&relative, &lookup, &mut report)?;
+                    self.adopt_file(&relative, &lookup, &mut report, defer_derived)?;
                 }
             }
         }
@@ -319,6 +338,12 @@ impl IndexService {
             }
             self.mark_missing(&note.id)?;
             report.missing += 1;
+        }
+
+        // 采纳过新文件：统一重建一次派生数据（链接 + 类型化关系）。
+        // 两者都是 O(N) 的全量重建，比逐篇重建标题索引便宜两个数量级。
+        if defer_derived && report.added > 0 {
+            self.rebuild_derived_after_bulk();
         }
 
         report.duration_ms = started.elapsed().as_millis() as u64;
@@ -340,6 +365,10 @@ impl IndexService {
         let started = Instant::now();
         let mut report = ScanReport::default();
         let lookup = self.ctx.category_lookup()?;
+        // 轮询式监听可能一次上报成百上千个新增文件（例如整目录拷入），
+        // 此时逐篇刷新派生数据同样会退化为 O(N²)，改为整批结束后重建一次。
+        const BULK_ADOPT_THRESHOLD: usize = 50;
+        let defer_derived = batch.changes.len() > BULK_ADOPT_THRESHOLD;
 
         for change in batch.changes {
             let relative = change.path.clone();
@@ -391,7 +420,7 @@ impl IndexService {
                             report.updated += 1;
                         }
                         None => {
-                            self.adopt_file(&relative, &lookup, &mut report)?;
+                            self.adopt_file(&relative, &lookup, &mut report, defer_derived)?;
                         }
                     }
                 }
@@ -419,6 +448,10 @@ impl IndexService {
             }
         }
 
+        if defer_derived && report.added > 0 {
+            self.rebuild_derived_after_bulk();
+        }
+
         report.duration_ms = started.elapsed().as_millis() as u64;
         if report.added > 0 || report.updated > 0 || report.missing > 0 {
             if let Ok(payload) = serde_json::to_value(&report) {
@@ -434,6 +467,7 @@ impl IndexService {
         relative: &str,
         lookup: &super::lookup::CategoryLookup,
         report: &mut ScanReport,
+        defer_derived: bool,
     ) -> Result<()> {
         let stored = match self.ctx.storage.read_note(relative) {
             Ok(stored) => stored,
@@ -516,10 +550,6 @@ impl IndexService {
             let _ = super::tag_service::TagService::new(Arc::clone(&self.ctx))
                 .ensure_tag(&id, tag);
         }
-        if let Err(error) = RelationService::new(Arc::clone(&self.ctx)).refresh_note(&note) {
-            tracing::debug!(target: "relations", "采纳文件时刷新关系失败：{}", error.message);
-        }
-
         let category_path = category_id
             .as_ref()
             .map(|id| lookup.path_string(id))
@@ -534,12 +564,20 @@ impl IndexService {
             self.mark_indexed(&id)?;
         }
         report.added += 1;
-        // 采纳外部文件后，指向该标题的未解析链接应自动连接
-        if let Err(error) = LinkService::new(Arc::clone(&self.ctx)).on_note_available(&note, &stored.body)
-        {
-            report
-                .warnings
-                .push(format!("{relative} 建立链接失败：{}", error.message));
+        // 小批量（监听回调、零散新增）：逐篇刷新，改动立即生效；
+        // 大批量（导入整目录）：跳过逐篇刷新（每篇都会重建标题索引 → O(N²)，10k 实测 306s），
+        // 由 scan_scope 在整轮结束后统一重建一次（O(N)）。
+        if !defer_derived {
+            if let Err(error) =
+                LinkService::new(Arc::clone(&self.ctx)).on_note_available(&note, &stored.body)
+            {
+                report
+                    .warnings
+                    .push(format!("{relative} 建立链接失败：{}", error.message));
+            }
+            if let Err(error) = RelationService::new(Arc::clone(&self.ctx)).refresh_note(&note) {
+                tracing::debug!(target: "relations", "采纳文件时刷新关系失败：{}", error.message);
+            }
         }
         Ok(())
     }

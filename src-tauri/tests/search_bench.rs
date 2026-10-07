@@ -96,8 +96,14 @@ fn bench_search_with_10k_notes() {
     // 扫描采纳 + 建索引
     let index_service = IndexService::new(Arc::clone(&context));
     let scan_started = Instant::now();
+    // 触发一次扫描；之后只轮询计数（文件监听会在后台继续采纳），
+    // 避免反复调用 scan_workspace 触发重复的全量重建
+    let mut first_scan = true;
     loop {
-        let _ = index_service.scan_workspace();
+        if first_scan {
+            let _ = index_service.scan_workspace();
+            first_scan = false;
+        }
         let counted = context
             .db
             .with_conn(|conn| {

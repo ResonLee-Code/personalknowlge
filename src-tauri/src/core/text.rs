@@ -276,9 +276,32 @@ pub fn split_query_segments(keyword: &str) -> Vec<QuerySegment> {
 /// 返回 `None` 表示关键词为空（调用方应回退到「最近编辑」列表）。
 pub fn build_fts_match(keyword: &str) -> Option<String> {
     let trimmed: String = keyword.chars().take(MAX_KEYWORD_CHARS).collect();
-    let segments = split_query_segments(&trimmed);
     let mut clauses: Vec<String> = Vec::new();
 
+    // 先按空白切块：**混合写法**（中日韩 + 拉丁紧邻，如 `术语A7F3`、`SQLite索引`）
+    // 在索引侧是「一个整 token」（unicode61 不按文字种类再切），因此必须用整段前缀匹配；
+    // 若照旧拆成「CJK 双字 AND 拉丁前缀」，两个条件都会落空（实测 recall@5 = 0%）。
+    let mut plain_chunks: Vec<String> = Vec::new();
+    for chunk in trimmed.split_whitespace() {
+        let has_cjk = chunk.chars().any(is_cjk);
+        let has_latin = chunk
+            .chars()
+            .any(|ch| ch.is_ascii_alphanumeric() && !ch.is_ascii_digit() || ch.is_ascii_digit());
+        if has_cjk && has_latin {
+            let cleaned: String = chunk
+                .chars()
+                .filter(|ch| !ch.is_whitespace() && *ch != '"')
+                .collect();
+            if !cleaned.is_empty() {
+                // 引号包裹避免把用户输入当成 FTS5 语法，尾部 * 表示前缀匹配
+                clauses.push(format!("\"{}\"*", cleaned.to_lowercase()));
+            }
+            continue;
+        }
+        plain_chunks.push(chunk.to_string());
+    }
+
+    let segments = split_query_segments(&plain_chunks.join(" "));
     for segment in segments {
         match segment {
             QuerySegment::Ascii(word) => {
@@ -972,6 +995,27 @@ mod tests {
         assert_eq!(count_words("中文四个字"), 5);
         assert_eq!(count_words("hello world"), 2);
         assert_eq!(count_words("中文 hello 世界"), 4 + 1);
+    }
+
+    #[test]
+    fn fts_match_handles_mixed_cjk_latin_as_single_prefix() {
+        // 混合写法：整段前缀（索引侧是一个 token）
+        assert_eq!(
+            build_fts_match("术语A7F3").as_deref(),
+            Some("\"术语a7f3\"*")
+        );
+        assert_eq!(
+            build_fts_match("SQLite索引").as_deref(),
+            Some("\"sqlite索引\"*")
+        );
+        // 纯中文仍是双字短语，纯英文仍是前缀
+        assert_eq!(build_fts_match("查询优化").as_deref(), Some("\"查询 询优 优化\""));
+        assert_eq!(build_fts_match("sqlite").as_deref(), Some("sqlite*"));
+        // 带空格的混合查询：两段分别处理（拉丁前缀 + 中文双字）
+        assert_eq!(
+            build_fts_match("索引 A7F3").as_deref(),
+            Some("\"索引\" AND A7F3*")
+        );
     }
 
     #[test]
