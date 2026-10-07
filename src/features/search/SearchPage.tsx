@@ -1,4 +1,4 @@
-import { RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react';
+import { RefreshCw, Search as SearchIcon, SlidersHorizontal, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -9,8 +9,22 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { formatRelative } from '@/lib/format';
+import {
+  describeSearch,
+  isMeaningfulSearch,
+  loadRecent,
+  loadSaved,
+  newSavedId,
+  pushRecent,
+  saveRecent,
+  type RecentSearch,
+  saveSaved,
+  type SavedSearch,
+  type SearchCondition,
+} from '@/lib/searchHistory';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useSearchStore } from '@/stores/searchStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useTagsStore } from '@/stores/tagsStore';
 
 /** 搜索页面（设计文档 16.6）。 */
@@ -38,6 +52,63 @@ export function SearchPage() {
   const pathOf = useCategoriesStore((state) => state.pathOf);
   const tags = useTagsStore((state) => state.tags);
   const [showFilters, setShowFilters] = useState(false);
+  const workspaceId = useWorkspaceStore((state) => state.workspace?.id ?? 'default');
+  const [recent, setRecent] = useState<RecentSearch[]>(() => loadRecent(workspaceId));
+  const [saved, setSaved] = useState<SavedSearch[]>(() => loadSaved(workspaceId));
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+
+  const condition: SearchCondition = { keyword, categoryId, tagId, favoriteOnly };
+
+  // 换库时读取该库的历史与收藏（异步设置，避免同步 setState 引发级联渲染）
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      setRecent(loadRecent(workspaceId));
+      setSaved(loadSaved(workspaceId));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  // 记录历史：有意义的条件变化后写入（去重、最多 8 条）
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const current: SearchCondition = {
+        keyword: useSearchStore.getState().keyword,
+        categoryId: useSearchStore.getState().categoryId,
+        tagId: useSearchStore.getState().tagId,
+        favoriteOnly: useSearchStore.getState().favoriteOnly,
+      };
+      if (!isMeaningfulSearch(current)) return;
+      setRecent((previous) => {
+        const next = pushRecent(previous, current, new Date().toISOString());
+        if (next === previous) return previous;
+        saveRecent(workspaceId, next);
+        return next;
+      });
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [keyword, categoryId, tagId, favoriteOnly, workspaceId]);
+
+  const applyCondition = (next: SearchCondition) => {
+    setKeyword(next.keyword);
+    setFilters({
+      categoryId: next.categoryId,
+      tagId: next.tagId,
+      favoriteOnly: next.favoriteOnly,
+    });
+    setPage(1);
+  };
+
+  const removeSaved = (id: string) => {
+    setSaved((previous) => {
+      const next = previous.filter((item) => item.id !== id);
+      saveSaved(workspaceId, next);
+      return next;
+    });
+  };
 
   const initial = params.get('q') ?? '';
   const debouncedKeyword = useDebouncedValue(keyword, 220);
@@ -87,6 +158,150 @@ export function SearchPage() {
             筛选
           </Button>
         </div>
+
+        {recent.length > 0 || saved.length > 0 || isMeaningfulSearch(condition) ? (
+          <div className="space-y-1.5">
+            {recent.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-[var(--ink-subtle)]">最近搜索</span>
+                {recent.slice(0, 6).map((item) => (
+                  <button
+                    key={`${item.condition.keyword}-${item.condition.categoryId}-${item.condition.tagId}-${item.condition.favoriteOnly}-${item.at}`}
+                    type="button"
+                    data-testid="recent-search"
+                    className="max-w-[240px] truncate rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] text-[var(--ink-muted)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]"
+                    title={describeSearch(item.condition, {
+                      categoryName: categories.find((c) => c.id === item.condition.categoryId)?.name,
+                      tagName: tags.find((t) => t.id === item.condition.tagId)?.name,
+                    })}
+                    onClick={() => applyCondition(item.condition)}
+                  >
+                    {describeSearch(item.condition, {
+                      categoryName: categories.find((c) => c.id === item.condition.categoryId)?.name,
+                      tagName: tags.find((t) => t.id === item.condition.tagId)?.name,
+                    })}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {saved.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-[var(--ink-subtle)]">收藏的搜索</span>
+                {saved.map((item) => (
+                  <span
+                    key={item.id}
+                    className="flex items-center gap-1 rounded-full bg-[var(--brand-soft)] px-2 py-0.5 text-[11px] text-[var(--brand)]"
+                  >
+                    <button
+                      type="button"
+                      data-testid="saved-search"
+                      className="max-w-[220px] truncate"
+                      title={describeSearch(item, {
+                        categoryName: categories.find((c) => c.id === item.categoryId)?.name,
+                        tagName: tags.find((t) => t.id === item.tagId)?.name,
+                      })}
+                      onClick={() => applyCondition(item)}
+                    >
+                      {item.name}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`删除收藏的搜索：${item.name}`}
+                      className="opacity-70 hover:opacity-100"
+                      onClick={() => removeSaved(item.id)}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+
+            {isMeaningfulSearch(condition) ? (
+              <button
+                type="button"
+                data-testid="save-search"
+                className="text-[11px] text-[var(--brand)] underline decoration-dotted"
+                onClick={() => setSaveDialogOpen(true)}
+              >
+                保存当前搜索条件
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {(recent.length > 0 || saved.length > 0 || isMeaningfulSearch(condition)) ? (
+          <div className="space-y-1.5">
+            {recent.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-[var(--ink-subtle)]">最近搜索</span>
+                {recent.slice(0, 6).map((item) => {
+                  const label = describeSearch(item.condition, {
+                    categoryName: categories.find((c) => c.id === item.condition.categoryId)?.name,
+                    tagName: tags.find((t) => t.id === item.condition.tagId)?.name,
+                  });
+                  return (
+                    <button
+                      key={`${item.at}-${item.condition.keyword}-${item.condition.categoryId}-${item.condition.tagId}-${item.condition.favoriteOnly}`}
+                      type="button"
+                      data-testid="recent-search"
+                      className="max-w-[240px] truncate rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] text-[var(--ink-muted)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]"
+                      title={label}
+                      onClick={() => applyCondition(item.condition)}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {saved.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-[var(--ink-subtle)]">收藏的搜索</span>
+                {saved.map((item) => (
+                  <span
+                    key={item.id}
+                    className="flex items-center gap-1 rounded-full bg-[var(--brand-soft)] px-2 py-0.5 text-[11px] text-[var(--brand)]"
+                  >
+                    <button
+                      type="button"
+                      data-testid="saved-search"
+                      className="max-w-[220px] truncate"
+                      title={describeSearch(item, {
+                        categoryName: categories.find((c) => c.id === item.categoryId)?.name,
+                        tagName: tags.find((t) => t.id === item.tagId)?.name,
+                      })}
+                      onClick={() => applyCondition(item)}
+                    >
+                      {item.name}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`删除收藏的搜索：${item.name}`}
+                      className="opacity-70 hover:opacity-100"
+                      onClick={() => removeSaved(item.id)}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+
+            {isMeaningfulSearch(condition) ? (
+              <button
+                type="button"
+                data-testid="save-search"
+                className="text-[11px] text-[var(--brand)] underline decoration-dotted"
+                onClick={() => setSaveDialogOpen(true)}
+              >
+                保存当前搜索条件
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {showFilters ? (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -211,6 +426,68 @@ export function SearchPage() {
           <span>最近更新：{response.hits[0] ? formatRelative(response.hits[0].note.updatedAt) : '—'}</span>
         </div>
       ) : null}
+
+      {saveDialogOpen ? (
+        <SaveSearchDialog
+          condition={condition}
+          onClose={() => setSaveDialogOpen(false)}
+          onSave={(name) => {
+            const item: SavedSearch = {
+              ...condition,
+              id: newSavedId(),
+              name,
+              createdAt: new Date().toISOString(),
+            };
+            setSaved((previous) => {
+              const next = [item, ...previous];
+              saveSaved(workspaceId, next);
+              return next;
+            });
+            setSaveDialogOpen(false);
+            toast.success(`已收藏「${name}」`);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** 收藏搜索条件：一个名字即可。 */
+function SaveSearchDialog({
+  condition,
+  onClose,
+  onSave,
+}: {
+  condition: SearchCondition;
+  onClose: () => void;
+  onSave: (name: string) => void;
+}) {
+  const [name, setName] = useState('');
+  const fallback = condition.keyword.trim() || '未命名搜索';
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-[min(420px,100%)] space-y-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4">
+        <h2 className="text-sm font-semibold text-[var(--ink)]">收藏当前搜索条件</h2>
+        <p className="text-[11px] text-[var(--ink-subtle)]">{describeSearch(condition, {})}</p>
+        <input
+          autoFocus
+          value={name}
+          aria-label="搜索名称"
+          placeholder={fallback}
+          className="h-9 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-sm text-[var(--ink)]"
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') onSave(name.trim() || fallback);
+            if (event.key === 'Escape') onClose();
+          }}
+        />
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            取消
+          </Button>
+          <Button onClick={() => onSave(name.trim() || fallback)}>收藏</Button>
+        </div>
+      </div>
     </div>
   );
 }
