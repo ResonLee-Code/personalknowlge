@@ -44,6 +44,10 @@ const emptyStats: WorkspaceStats = {
   categoryCount: 0,
   tagCount: 0,
   attachmentCount: 0,
+  totalWords: 0,
+  updatedLast7d: 0,
+  updatedLast30d: 0,
+  pinnedCount: 0,
 };
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({

@@ -397,3 +397,78 @@ fn imports_notion_export_stripping_hash_suffix_and_decoding_links() {
     assert!(stored.body.contains("(设计稿 v2.png)"), "{}", stored.body);
     assert!(stored.body.contains(&format!("(子页面 {HASH_B}.md)")), "{}", stored.body);
 }
+
+#[test]
+fn imports_csv_as_markdown_table() {
+    let fixture = Fixture::new();
+    let source = fixture.write_source("客户清单.csv", "名称,负责人,备注\n甲客户,张三,\"注意,含逗号\"\n乙客户,李四,\n");
+
+    let report = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![source],
+            category_id: None,
+            preserve_structure: None,
+            mode: None,
+        })
+        .expect("导入 CSV");
+
+    assert_eq!(report.imported.len(), 1);
+    assert_eq!(report.imported[0].title, "客户清单");
+    let stored = fixture
+        .app
+        .context()
+        .unwrap()
+        .storage
+        .read_note(&report.imported[0].file_path)
+        .expect("读取笔记");
+    assert!(stored.body.contains("| 名称 | 负责人 | 备注 |"), "{}", stored.body);
+    assert!(stored.body.contains("| --- | --- | --- |"), "{}", stored.body);
+    // 引号里的逗号不能把列拆开
+    assert!(stored.body.contains("注意,含逗号"), "{}", stored.body);
+    assert!(stored.body.contains("| 乙客户 | 李四 |  |"), "补空格：{}", stored.body);
+}
+
+#[test]
+fn imports_docx_paragraphs_headings_and_lists() {
+    let fixture = Fixture::new();
+
+    // 现场拼一个最小可用的 .docx（zip + word/document.xml）
+    let docx_path = fixture.source.join("技术方案.docx");
+    let file = std::fs::File::create(&docx_path).expect("创建 docx");
+    let mut zip = zip::ZipWriter::new(file);
+    let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+    zip.start_file("word/document.xml", options).expect("写入 document.xml");
+    let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>方案概述</w:t></w:r></w:p>
+<w:p><w:r><w:t>第一段 &amp; 说明</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr/></w:pPr><w:r><w:t>要点一</w:t></w:r></w:p>
+</w:body></w:document>"#;
+    use std::io::Write;
+    zip.write_all(xml.as_bytes()).expect("写入 XML");
+    zip.finish().expect("收尾 zip");
+
+    let report = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![docx_path.to_string_lossy().to_string()],
+            category_id: None,
+            preserve_structure: None,
+            mode: None,
+        })
+        .expect("导入 docx");
+
+    assert_eq!(report.imported.len(), 1);
+    assert_eq!(report.imported[0].title, "技术方案");
+    let stored = fixture
+        .app
+        .context()
+        .unwrap()
+        .storage
+        .read_note(&report.imported[0].file_path)
+        .expect("读取笔记");
+    assert!(stored.body.contains("# 方案概述"), "{}", stored.body);
+    assert!(stored.body.contains("第一段 & 说明"), "实体要反转义：{}", stored.body);
+    assert!(stored.body.contains("- 要点一"), "{}", stored.body);
+}

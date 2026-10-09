@@ -31,7 +31,9 @@ export async function pickMarkdownFiles(title = '选择要导入的文件'): Pro
     directory: false,
     multiple: true,
     title,
-    filters: [{ name: 'Markdown / 文本', extensions: ['md', 'markdown', 'txt'] }],
+    filters: [
+      { name: 'Markdown / 文本 / Office', extensions: ['md', 'markdown', 'txt', 'docx', 'csv'] },
+    ],
   });
   if (!selected) return [];
   return Array.isArray(selected) ? selected : [selected];

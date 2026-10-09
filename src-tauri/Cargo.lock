@@ -2628,6 +2628,7 @@ dependencies = [
  "dirs 7.0.0",
  "notify",
  "pulldown-cmark",
+ "quick-xml",
  "regex",
  "rusqlite",
  "serde",

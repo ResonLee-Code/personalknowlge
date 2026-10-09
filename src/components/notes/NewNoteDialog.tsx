@@ -415,7 +415,8 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
           </p>
         ) : (
           <p className="text-[11px] text-[var(--ink-subtle)]">
-            支持 <code>.md</code> / <code>.markdown</code> / <code>.txt</code>，可多选；
+            支持 <code>.md</code> / <code>.markdown</code> / <code>.txt</code> /{' '}
+            <code>.docx</code> / <code>.csv</code>，可多选；
             选择文件夹会递归导入其中所有受支持的文本文件（单文件 ≤ 5 MB，单次 ≤ 500 个）。
             源文件不会被修改。
           </p>

@@ -1,4 +1,17 @@
-import { Clock, FolderTree, Inbox, Plus, RefreshCw, Search, Tag } from 'lucide-react';
+import {
+  BarChart3,
+  CalendarClock,
+  CalendarDays,
+  Clock,
+  FileText,
+  FolderTree,
+  Inbox,
+  Pin,
+  Plus,
+  RefreshCw,
+  Search,
+  Tag,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -105,6 +118,49 @@ export function DashboardPage() {
             value={stats.noteCount}
             onClick={() => navigate(ROUTES.notes)}
           />
+        </section>
+
+        {/* 统计明细（对标语雀「统计」页）：字数、近期更新、置顶 —— 全部来自本地数据库 */}
+        <section
+          data-testid="workspace-stats"
+          className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4"
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--ink)]">
+              <BarChart3 className="h-3.5 w-3.5 text-[var(--brand)]" />
+              统计
+            </h2>
+            <span className="text-[11px] text-[var(--ink-subtle)]">数据只来自本地工作区</span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              icon={FileText}
+              label="正文字数"
+              value={stats.totalWords}
+              onClick={() => navigate(ROUTES.notes)}
+            />
+            <StatCard
+              icon={CalendarClock}
+              label="近 7 天更新"
+              value={stats.updatedLast7d}
+              onClick={() => navigate(ROUTES.notes)}
+            />
+            <StatCard
+              icon={CalendarDays}
+              label="近 30 天更新"
+              value={stats.updatedLast30d}
+              onClick={() => navigate(ROUTES.notes)}
+            />
+            <StatCard
+              icon={Pin}
+              label="置顶笔记"
+              value={stats.pinnedCount}
+              onClick={() => navigate(ROUTES.notes)}
+            />
+          </div>
+          <p className="mt-3 text-[11px] text-[var(--ink-subtle)]">
+            「近 7 / 30 天更新」按笔记的最后修改时间统计；置顶笔记在所有排序下都排在最前。
+          </p>
         </section>
 
         <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4">

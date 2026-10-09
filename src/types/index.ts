@@ -46,6 +46,14 @@ export interface WorkspaceStats {
   categoryCount: number;
   tagCount: number;
   attachmentCount: number;
+  /** 全部活跃笔记的正文字数合计 */
+  totalWords: number;
+  /** 最近 7 天有更新的笔记数 */
+  updatedLast7d: number;
+  /** 最近 30 天有更新的笔记数 */
+  updatedLast30d: number;
+  /** 置顶笔记数 */
+  pinnedCount: number;
 }
 
 export interface WorkspaceSummary {

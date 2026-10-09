@@ -999,7 +999,8 @@ pub fn file_stem_title(path: &str) -> String {
     use std::sync::OnceLock;
 
     static TIMESTAMP_PREFIX: OnceLock<regex::Regex> = OnceLock::new();
-    const TEXT_EXTENSIONS: [&str; 5] = ["md", "markdown", "mdown", "txt", "text"];
+    // 除文本外，也去掉 Office 导入的扩展名（.docx / .csv），标题不保留后缀
+    const TEXT_EXTENSIONS: [&str; 7] = ["md", "markdown", "mdown", "txt", "text", "docx", "csv"];
 
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
 

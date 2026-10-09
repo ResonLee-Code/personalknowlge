@@ -33,6 +33,10 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   // 3. 首页
   await expect(page.getByText('最近编辑')).toBeVisible();
   await expect(page.getByText('Inbox 待整理')).toBeVisible();
+  // 统计明细（V1.2.1）：字数 / 近期更新 / 置顶，全部来自本地数据
+  await expect(page.getByTestId('workspace-stats')).toBeVisible();
+  await expect(page.getByTestId('workspace-stats')).toContainText('正文字数');
+  await expect(page.getByTestId('workspace-stats')).toContainText('置顶笔记');
   await page.screenshot({ path: path.join(SHOTS, '02-dashboard.png') });
 
   // 4. 新建笔记并进入编辑器

@@ -329,6 +329,9 @@ function openWorkspace(name: string, root: string): WorkspaceOpenResult {
 
 function computeStats() {
   const active = state.notes.filter((note) => note.status === 'active');
+  const daysAgo = (days: number) => Date.now() - days * 24 * 60 * 60 * 1000;
+  const updatedSince = (days: number) =>
+    active.filter((note) => new Date(note.updatedAt).getTime() >= daysAgo(days)).length;
   return {
     noteCount: active.length,
     inboxCount: active.filter((note) => !note.categoryId).length,
@@ -336,6 +339,11 @@ function computeStats() {
     categoryCount: state.categories.length,
     tagCount: state.tags.length,
     attachmentCount: 0,
+    // 与后端 SQL 的语义保持一致（统计明细，对标语雀「统计」）
+    totalWords: active.reduce((sum, note) => sum + note.wordCount, 0),
+    updatedLast7d: updatedSince(7),
+    updatedLast30d: updatedSince(30),
+    pinnedCount: active.filter((note) => note.pinned).length,
   };
 }
 

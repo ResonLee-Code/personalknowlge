@@ -22,6 +22,18 @@ pub struct WorkspaceStats {
     pub category_count: i64,
     pub tag_count: i64,
     pub attachment_count: i64,
+    /// 全部活跃笔记的正文字数合计（V1.2.1 统计明细）
+    #[serde(default)]
+    pub total_words: i64,
+    /// 最近 7 天有更新的笔记数
+    #[serde(default)]
+    pub updated_last_7d: i64,
+    /// 最近 30 天有更新的笔记数
+    #[serde(default)]
+    pub updated_last_30d: i64,
+    /// 置顶笔记数
+    #[serde(default)]
+    pub pinned_count: i64,
 }
 
 /// 工作区列表项。

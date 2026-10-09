@@ -39,7 +39,7 @@ const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 /// 单次导入文件数量上限。
 const MAX_FILES: usize = 500;
 /// 允许导入的扩展名。
-const SUPPORTED_EXTENSIONS: [&str; 3] = ["md", "markdown", "txt"];
+const SUPPORTED_EXTENSIONS: [&str; 5] = ["md", "markdown", "txt", "docx", "csv"];
 /// Obsidian / Notion 模式下一并导入的附件扩展名。
 const ATTACHMENT_EXTENSIONS: [&str; 11] = [
     "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif", "pdf", "mp4", "webm",
@@ -361,6 +361,9 @@ impl ImportService {
             )));
         }
 
+        // Office 文档（.docx / .csv）先转成 Markdown，再走既有的导入管线
+        let office_format = super::import_office::OfficeFormat::detect(path);
+
         let bytes = std::fs::read(path)?;
         let raw = String::from_utf8_lossy(&bytes).into_owned();
         let is_markdown = path
@@ -369,12 +372,17 @@ impl ImportService {
             .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown"))
             .unwrap_or(false);
 
-        // Markdown 解析 frontmatter；纯文本整体作为正文
-        let (source, body) = if is_markdown {
-            let parsed = frontmatter::parse(&raw);
-            (parsed.frontmatter, parsed.body)
-        } else {
-            (Frontmatter::default(), raw)
+        // Markdown 解析 frontmatter；Office 转成 Markdown；纯文本整体作为正文
+        let (source, body) = match (office_format, is_markdown) {
+            (Some(format), _) => (
+                Frontmatter::default(),
+                super::import_office::to_markdown(path, format)?,
+            ),
+            (None, true) => {
+                let parsed = frontmatter::parse(&raw);
+                (parsed.frontmatter, parsed.body)
+            }
+            (None, false) => (Frontmatter::default(), raw),
         };
 
         let source_path = path.to_string_lossy().to_string();

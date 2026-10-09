@@ -95,6 +95,19 @@
 - 永久删除笔记时一并清理它的历史目录，不在 `.knowledge/history` 留孤儿数据；
 - 新增命令：`note_history_list` / `note_history_read` / `note_history_restore` / `note_history_remove`。
 
+### 导入：Word / CSV（P2 对标语雀的 Word·Excel 导入）
+
+- 新增 `.docx` 与 `.csv` 导入（`application/import_office.rs`）：
+  - `.docx`：解压 `word/document.xml`，按段落抽取文本；段落样式 `Heading1~6` / `标题1~6`
+    映射成 Markdown 标题、列表段落映射成 `- `，实体（`&amp;`、`&#65;`）正确还原，
+    连续 run 会拼接成一段；
+  - `.csv`：按 RFC 4180 解析（引号包裹、字段内逗号与换行、`""` 转义），生成 Markdown 表格，
+    单元格里的 `|` 会被转义；超过 5000 行时截断并在文末标注；
+- 依赖取舍（评估结论）：只用**已有**的 `zip` + 本地缓存的 `quick-xml` 抽文本骨架，
+  不引入 `calamine` / `docx-rs` 这类大包；**docx 里的图片、表格、批注、页眉页脚不导入**，
+  这是有意的取舍（可预期、零新增大依赖），需要完整保真时应改用其它工具转换后再导入；
+- 文件选择器与导入说明同步支持 `.docx` / `.csv`；标题去掉扩展名。
+
 ### 缺陷修复
 
 - **还原 / 外部改动后编辑器仍显示旧内容**（做历史版本时暴露）：编辑器只在「切换笔记」时

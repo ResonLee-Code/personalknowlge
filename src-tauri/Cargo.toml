@@ -28,6 +28,8 @@ chrono = { version = "0.4.45", features = ["serde"] }
 dirs = "7.0.0"
 notify = "8.2.0"
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
+# office 导入（.docx）：只用 zip + quick-xml 抽正文，不引入 docx-rs / calamine 等大包
+quick-xml = "0.42"
 regex = "1.13.1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }

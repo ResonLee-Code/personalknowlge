@@ -1125,3 +1125,49 @@ fn applies_note_links_migration() {
     assert_eq!(table, 1, "note_links 表应随迁移 003 建立");
     assert_eq!(indexes, 4, "note_links 的四个索引都应建立");
 }
+
+#[test]
+fn stats_report_words_recent_updates_and_pins() {
+    let harness = Harness::new();
+    harness.create_workspace();
+    let notes = harness.notes();
+
+    // 工作区预置了欢迎笔记：先记下基线
+    let baseline = WorkspaceService::new(Arc::clone(&harness.app))
+        .stats()
+        .expect("统计");
+    assert!(baseline.note_count >= 1);
+    assert!(baseline.total_words > 0, "欢迎笔记也应计入字数");
+
+    for (title, body) in [("甲", "一二三"), ("乙", "四五六七")] {
+        notes
+            .create(CreateNoteInput {
+                title: title.into(),
+                category_id: None,
+                initial_content: Some(body.into()),
+                tags: None,
+                parent_id: None,
+            })
+            .expect("创建笔记");
+    }
+    let pinned = notes
+        .create(CreateNoteInput {
+            title: "置顶笔记".into(),
+            category_id: None,
+            initial_content: Some("内容".into()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("创建笔记");
+    notes.set_pinned(&pinned.note.id, true).expect("置顶");
+
+    let stats = WorkspaceService::new(Arc::clone(&harness.app))
+        .stats()
+        .expect("统计");
+    assert_eq!(stats.note_count, baseline.note_count + 3);
+    assert!(stats.total_words > baseline.total_words, "字数应累计");
+    // 刚创建的笔记都算「近期更新」
+    assert_eq!(stats.updated_last_7d, stats.note_count);
+    assert_eq!(stats.updated_last_30d, stats.note_count);
+    assert_eq!(stats.pinned_count, 1);
+}
