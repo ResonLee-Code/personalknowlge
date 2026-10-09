@@ -23,6 +23,7 @@ use crate::repositories::tag_repository::tags_for_note;
 use crate::repositories::{NoteRepository, SqliteNoteRepository, trash_path_of};
 
 use super::context::WorkspaceContext;
+use super::history_service::{HistoryContent, HistoryEntry, HistoryService};
 use super::index_service::IndexService;
 use super::link_service::LinkService;
 use super::relation_service::RelationService;
@@ -43,6 +44,49 @@ impl NoteService {
 
     fn tags(&self) -> TagService {
         TagService::new(Arc::clone(&self.ctx))
+    }
+
+    fn history(&self) -> HistoryService {
+        HistoryService::new(Arc::clone(&self.ctx))
+    }
+
+    /// 版本历史：列表 / 读取 / 还原 / 删除（对标语雀「查看历史版本」）。
+    pub fn history_list(&self, note_id: &str) -> Result<Vec<HistoryEntry>> {
+        self.note_or_err(note_id)?;
+        self.history().list(note_id)
+    }
+
+    pub fn history_read(&self, note_id: &str, entry_id: &str) -> Result<HistoryContent> {
+        self.note_or_err(note_id)?;
+        self.history().read(note_id, entry_id)
+    }
+
+    pub fn history_remove(&self, note_id: &str, entry_id: &str) -> Result<usize> {
+        self.note_or_err(note_id)?;
+        self.history().remove(note_id, entry_id)?;
+        Ok(self.history().list(note_id)?.len())
+    }
+
+    /// 还原到某个历史版本：先把当前内容强制留档，再走常规保存路径写入旧正文。
+    ///
+    /// 只还原**正文**，标题 / 标签 / 分类 / 父文档等元数据保持当前值——
+    /// 避免「回滚内容」意外把改过的标题也退回去。
+    pub fn history_restore(&self, note_id: &str, entry_id: &str) -> Result<NoteDetail> {
+        let note = self.note_or_err(note_id)?;
+        let entry = self.history().read(note_id, entry_id)?;
+        if let Ok(current_raw) = self.ctx.storage.read_raw(&note.file_path) {
+            let _ = self.history().capture_forced(&note.id, &current_raw);
+        }
+        let content_hash = self.ctx.storage.read_note(&note.file_path)?.content_hash;
+        self.save(SaveNoteInput {
+            id: note.id.clone(),
+            content: entry.body,
+            base_content_hash: Some(content_hash),
+            title: None,
+            category_id: None,
+            tags: None,
+        })?;
+        self.get(&note.id)
     }
 
     fn workspace_id(&self) -> &str {
@@ -277,6 +321,17 @@ impl NoteService {
             extra: existing.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &input.content);
+        // 覆盖写入之前先给「写入前的内容」留一份历史快照（对标语雀「查看历史版本」）。
+        // 只在正文真的变了时留档：自动保存会被重复触发，否则会把「当前内容」也记成历史，
+        // 用户点还原就等于什么都没发生。
+        if existing.body != input.content {
+            if let Ok(previous_raw) = self.ctx.storage.read_raw(&note.file_path) {
+                if let Err(error) = self.history().capture(&note.id, &previous_raw) {
+                    // 历史是附加价值：留档失败不应阻断保存，只记录警告
+                    tracing::warn!(target: "history", "写入历史快照失败：{}", error.message);
+                }
+            }
+        }
         self.refresh_file_stamp(&note.id, &note.file_path);
         let _ = self.refresh_parent(&note);
         let content_hash = self
@@ -590,6 +645,10 @@ impl NoteService {
         self.ctx
             .db
             .with_conn(|conn| SqliteNoteRepository.delete(conn, &note.id))?;
+        // 永久删除时一并清掉版本历史，避免 .knowledge/history 里留下孤儿目录
+        if let Err(error) = self.history().purge(&note.id) {
+            tracing::warn!(target: "history", "清理历史目录失败：{}", error.message);
+        }
         self.emit_change("purged", &note.id);
         Ok(())
     }

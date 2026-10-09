@@ -326,7 +326,22 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 模板名做校验：去扩展名、禁止路径分隔符与 `..`、过滤 `: * ? " < > |`、限制 60 字符。
 - 读取与套用仍走既有的 `templates_list` / `template_render`（第 11 节）。
 
-## 21. 前端服务层
+## 21. 版本历史（V1.2.1 P2）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `note_history_list` | `{ noteId }` | `HistoryEntry[]`（新的在前：entryId / savedAt / bytes / title / preview） |
+| `note_history_read` | `{ noteId, entryId }` | `HistoryContent`（content = 完整 Markdown，body = 纯正文） |
+| `note_history_restore` | `{ noteId, entryId }` | `NoteDetail` |
+| `note_history_remove` | `{ noteId, entryId }` | `usize`（剩余快照数） |
+
+- 快照存 `.knowledge/history/<noteId>/<stamp>-<hash8>.md`（见 DATABASE_SCHEMA 第 4 节）；
+- 留档时机：`note_save` 覆盖写入前（正文确实变化时）；还原前会强制留档当前内容；
+- `note_history_restore` **只回滚正文**（标题 / 标签 / 分类 / 父文档保持当前值），
+  写入路径仍走 `note_save`，因此索引、双链、关系都会照常刷新；
+- id 校验：`noteId` / `entryId` 不允许包含路径分隔符或 `..`。
+
+## 22. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 

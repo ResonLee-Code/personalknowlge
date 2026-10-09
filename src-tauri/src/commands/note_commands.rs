@@ -2,6 +2,7 @@
 
 use tauri::State;
 
+use crate::application::history_service::{HistoryContent, HistoryEntry};
 use crate::application::note_service::NoteService;
 use crate::application::import_service::{ImportNotesInput, ImportReport, ImportService};
 use crate::application::export_service::{ExportNoteInput, ExportNoteResult, ExportService};
@@ -77,6 +78,49 @@ pub async fn notes_reorder(
 ) -> Result<usize> {
     let context = state.inner.context()?;
     run(move || NoteService::new(context).reorder(input)).await
+}
+
+/// 版本历史：列出某篇笔记的快照（新的在前）。
+#[tauri::command]
+pub async fn note_history_list(
+    state: State<'_, AppState>,
+    note_id: String,
+) -> Result<Vec<HistoryEntry>> {
+    let context = state.inner.context()?;
+    run(move || NoteService::new(context).history_list(&note_id)).await
+}
+
+/// 版本历史：读取某个快照的内容。
+#[tauri::command]
+pub async fn note_history_read(
+    state: State<'_, AppState>,
+    note_id: String,
+    entry_id: String,
+) -> Result<HistoryContent> {
+    let context = state.inner.context()?;
+    run(move || NoteService::new(context).history_read(&note_id, &entry_id)).await
+}
+
+/// 版本历史：还原到某个快照（只还原正文，元数据保持当前值）。
+#[tauri::command]
+pub async fn note_history_restore(
+    state: State<'_, AppState>,
+    note_id: String,
+    entry_id: String,
+) -> Result<NoteDetail> {
+    let context = state.inner.context()?;
+    run(move || NoteService::new(context).history_restore(&note_id, &entry_id)).await
+}
+
+/// 版本历史：删除某个快照（返回剩余数量）。
+#[tauri::command]
+pub async fn note_history_remove(
+    state: State<'_, AppState>,
+    note_id: String,
+    entry_id: String,
+) -> Result<usize> {
+    let context = state.inner.context()?;
+    run(move || NoteService::new(context).history_remove(&note_id, &entry_id)).await
 }
 
 #[tauri::command]

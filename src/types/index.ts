@@ -582,6 +582,26 @@ export interface RenderTemplateInput {
   title?: string | null;
 }
 
+/** 版本历史快照（对标语雀「查看历史版本」） */
+export interface HistoryEntry {
+  entryId: string;
+  /** 快照时间（ISO 8601） */
+  savedAt: string;
+  bytes: number;
+  /** 正文首个 `#` 标题 */
+  title: string;
+  /** 正文前 120 字预览 */
+  preview: string;
+}
+
+export interface HistoryContent {
+  entryId: string;
+  /** 完整 Markdown（含 frontmatter） */
+  content: string;
+  /** 仅正文（还原时使用） */
+  body: string;
+}
+
 /** 把当前笔记正文另存为模板（对标语雀「另存为模板」） */
 export interface SaveTemplateInput {
   /** 模板名（不含扩展名） */

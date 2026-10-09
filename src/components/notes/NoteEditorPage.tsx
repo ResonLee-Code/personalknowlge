@@ -9,6 +9,7 @@ import {
   FolderInput,
   FolderOpen,
   GitBranch,
+  History,
   Link2,
   ListTree,
   MoreHorizontal,
@@ -30,6 +31,7 @@ import { MarkdownEditor } from '@/components/editor/MarkdownEditor';
 import { MarkdownPreview } from '@/components/editor/MarkdownPreview';
 import { OutlinePanel } from '@/components/editor/OutlinePanel';
 import { RelationsPanel } from '@/components/editor/RelationsPanel';
+import { HistoryDialog } from '@/components/editor/HistoryDialog';
 import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
 import { SaveTemplateDialog } from '@/components/editor/SaveTemplateDialog';
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
@@ -108,8 +110,15 @@ export function NoteEditorPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [relations, setRelations] = useState<RelationView | null>(null);
   const [forceOverwrite, setForceOverwrite] = useState(false);
+  /**
+   * 编辑器实例代号：历史版本还原 / 外部编辑同步后自增，
+   * 让 CodeMirror 重新挂载。@uiw/react-codemirror 在「刚输入过」的窗口内
+   * 会把外部 value 变更挂起到输入结束后，导致还原后界面仍停在旧内容。
+   */
+  const [editorEpoch, setEditorEpoch] = useState(0);
   const loadedId = useRef<string | null>(null);
   const baseHash = useRef<string | null>(null);
   const editorWrapper = useRef<HTMLDivElement | null>(null);
@@ -232,6 +241,12 @@ export function NoteEditorPage() {
     signature: detail ? signature : null,
     onSave: async () => {
       if (!detail) return false;
+      // 磁盘内容已被别处改动（历史版本还原 / 外部编辑器）时不要盲目覆盖：
+      // 让下面的同步 effect 把界面拉回磁盘内容，否则会把刚还原的版本又写回旧内容
+      const latest = useNotesStore.getState().detail;
+      if (latest && latest.note.id === detail.note.id) {
+        if (baseHash.current !== (latest.note.contentHash ?? null)) return false;
+      }
       const tagsChanged =
         tags.length !== detail.tags.length ||
         tags.some((tag) => !detail.tags.some((item) => item.name === tag));
@@ -256,23 +271,31 @@ export function NoteEditorPage() {
 
   useEffect(() => {
     if (!detail) return;
-    if (loadedId.current !== detail.note.id) {
-      loadedId.current = detail.note.id;
-      // 切换笔记：把磁盘内容同步到本地可编辑状态，并清除上一次的覆盖标记
-      setForceOverwrite(false);
-      setContent(detail.content);
-      setTitle(detail.note.title);
-      setTags(detail.tags.map((tag) => tag.name));
-      setActiveHeadingOffset(null);
-      baseHash.current = detail.note.contentHash ?? null;
-      resetBaseline(
-        `${detail.content}\u0000${detail.note.title}\u0000${detail.tags
-          .map((tag) => tag.name)
-          .join(',')}`,
-      );
-    }
+    const switchingNote = loadedId.current !== detail.note.id;
+    // 同一篇笔记内容哈希变了 = 磁盘内容被别处改过（历史版本还原、外部编辑器、
+    // 冲突后重新加载）。此时也要同步，否则界面会停在被覆盖掉的旧内容上。
+    const changedOnDisk =
+      !switchingNote && baseHash.current !== (detail.note.contentHash ?? null);
+    const hasLocalEdits = saveStatus === 'dirty' || saveStatus === 'saving';
+    // 用户正在输入时不覆盖他的内容（保存时再走冲突流程）
+    if (!switchingNote && (!changedOnDisk || hasLocalEdits)) return;
+
+    loadedId.current = detail.note.id;
+    setForceOverwrite(false);
+    // 外部变更（非切换笔记）时重建编辑器，确保内容一定刷新到界面
+    if (changedOnDisk) setEditorEpoch((value) => value + 1);
+    setContent(detail.content);
+    setTitle(detail.note.title);
+    setTags(detail.tags.map((tag) => tag.name));
+    if (switchingNote) setActiveHeadingOffset(null);
+    baseHash.current = detail.note.contentHash ?? null;
+    resetBaseline(
+      `${detail.content}\u0000${detail.note.title}\u0000${detail.tags
+        .map((tag) => tag.name)
+        .join(',')}`,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail?.note.id]);
+  }, [detail?.note.id, detail?.note.contentHash]);
 
   /**
    * 从笔记列表的「大纲预览」跳转过来（URL `?h=<偏移量>`）：
@@ -537,6 +560,9 @@ export function NoteEditorPage() {
               >
                 创建副本
               </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setHistoryOpen(true)} data-testid="note-menu-history">
+                <History className="h-3.5 w-3.5" /> 历史版本…
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setSourceOpen(true)}>
                 <BookMarked className="h-3.5 w-3.5" /> 来源与时效
               </DropdownMenuItem>
@@ -717,6 +743,7 @@ export function NoteEditorPage() {
               style={editorMode === 'split' ? { width: `${editorSplitRatio * 100}%` } : undefined}
             >
             <MarkdownEditor
+              key={editorEpoch}
               viewRef={editorViewRef}
               value={content}
               theme={theme}
@@ -833,6 +860,14 @@ export function NoteEditorPage() {
             setSourceOpen(false);
             void useNotesStore.getState().openDetail(note.id);
           }}
+        />
+      ) : null}
+      {historyOpen ? (
+        <HistoryDialog
+          noteId={note.id}
+          currentContent={content}
+          onClose={() => setHistoryOpen(false)}
+          onRestored={() => setHistoryOpen(false)}
         />
       ) : null}
       {saveTemplateOpen ? (

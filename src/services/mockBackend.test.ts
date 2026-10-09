@@ -240,3 +240,46 @@ describe('浏览器预览后端', () => {
     expect(withoutOrphans.nodes.every((node) => !node.orphan)).toBe(true);
   });
 });
+
+describe('浏览器预览后端的版本历史（与 Rust 端行为对齐）', () => {
+  beforeEach(async () => {
+    localStorage.clear();
+    await workspaceService.create('历史库', '/tmp/mock-history');
+  });
+
+  it('保存留档 → 列表 → 还原，且还原会更新内容哈希', async () => {
+    const created = await noteService.create({
+      title: '历史笔记',
+      initialContent: '第一版正文',
+      categoryId: null,
+    });
+    const id = created.note.id;
+    const beforeHash = created.note.contentHash;
+
+    await noteService.save({ id, content: '第二版正文', baseContentHash: beforeHash ?? null });
+    const entries = await noteService.historyList(id);
+    expect(entries).toHaveLength(1);
+
+    const snapshot = await noteService.historyRead(id, entries[0]!.entryId);
+    expect(snapshot.body).toContain('第一版正文');
+
+    const restored = await noteService.historyRestore(id, entries[0]!.entryId);
+    expect(restored.content).toContain('第一版正文');
+    const detail = await noteService.get(id);
+    expect(detail.content).toContain('第一版正文');
+    expect(detail.note.contentHash).not.toBe(beforeHash);
+  });
+
+  it('内容没变时不重复留档（避免自动保存刷出重复快照）', async () => {
+    const created = await noteService.create({
+      title: '重复保存',
+      initialContent: '正文',
+      categoryId: null,
+    });
+    const id = created.note.id;
+    await noteService.save({ id, content: '改过了', baseContentHash: null });
+    await noteService.save({ id, content: '改过了', baseContentHash: null });
+    await noteService.save({ id, content: '改过了', baseContentHash: null });
+    expect(await noteService.historyList(id)).toHaveLength(1);
+  });
+});

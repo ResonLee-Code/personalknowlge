@@ -18,6 +18,7 @@ pub const BACKUP_DIR: &str = "backups";
 pub const LOG_DIR: &str = "logs";
 pub const INDEX_DIR: &str = "index";
 pub const TEMPLATES_DIR: &str = "templates";
+pub const HISTORY_DIR: &str = "history";
 pub const DATABASE_FILE: &str = "database.sqlite";
 pub const CONFIG_FILE: &str = "config.json";
 pub const TEMP_PREFIX: &str = ".pkos-tmp-";
@@ -64,6 +65,15 @@ impl WorkspacePaths {
     /// 本地模板目录：`.knowledge/templates`（V1.1 M2-2）。
     pub fn templates_dir(&self) -> PathBuf {
         self.knowledge_dir().join(TEMPLATES_DIR)
+    }
+
+    /// 版本历史目录：`.knowledge/history/<note_id>/`（V1.2.1 P2）。
+    pub fn history_dir(&self) -> PathBuf {
+        self.knowledge_dir().join(HISTORY_DIR)
+    }
+
+    pub fn note_history_dir(&self, note_id: &str) -> PathBuf {
+        self.history_dir().join(note_id)
     }
 
     pub fn trash_dir(&self) -> PathBuf {

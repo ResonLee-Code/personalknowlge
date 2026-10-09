@@ -281,7 +281,20 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 已验证场景：中文连续词、中文短语、中文单字、英文与数字混合、标题命中优先。
 索引体积约为中文正文的 2~3 倍，属于可接受范围（V1.1 可视数据规模再评估分词器）。
 
-## 4. 迁移
+## 4. 版本历史的存储位置（V1.2.1）
+
+版本历史不落数据库，直接放在工作区里：
+
+```
+<工作区>/.knowledge/history/<笔记 id>/<YYYYMMDDThhmmssSSS>-<内容哈希前 8 位>.md
+```
+
+- 存的是**覆盖写入前的完整 Markdown**（含 frontmatter），因此快照本身可读、可 diff、可手工取回；
+- 删掉数据库不影响历史；删掉 `.knowledge/history` 也不影响笔记（历史是附加价值）；
+- 每篇最多 50 份、同一篇 60 秒内只留一份；永久删除笔记时对应目录一并清理；
+- 与 `notes` 表无外键关系：历史是**旁路数据**，不参与索引与检索。
+
+## 5. 迁移
 
 - 迁移脚本：`src-tauri/migrations/*.sql`，通过 `include_str!` 编入二进制；
 - 记录表：`schema_migrations(version, name, applied_at)`，同时写入 `PRAGMA user_version`；
@@ -293,7 +306,7 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 `006_search_rowid_map`（FTS rowid 映射）、`007_note_parent`（子文档层级）、
 `008_notes_sort_order`（手动排序）、`009_notes_pinned`（置顶），`SCHEMA_VERSION = 9`。
 
-## 5. 数据恢复能力
+## 6. 数据恢复能力
 
 | 故障 | 处理 |
 | --- | --- |

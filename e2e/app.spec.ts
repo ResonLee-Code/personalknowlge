@@ -424,6 +424,42 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.getByRole('button', { name: '取消' }).click();
   await page.getByRole('button', { name: '隐藏大纲' }).click();
 
+  // 28. 历史版本：留档 → 对比 → 还原（V1.2.1 P2）
+  await page.goto('/#/notes');
+  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('\n\n历史版本测试行。');
+  await expect(page.getByText('已保存').first()).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole('button', { name: '更多操作' }).click();
+  await page.getByTestId('note-menu-history').click();
+  await expect(page.getByRole('dialog')).toContainText('历史版本');
+  await expect(page.getByTestId('history-entry').first()).toBeVisible();
+  // 默认对比「最新快照 → 当前版本」，应有新增行（刚写进去的那行）
+  await expect(page.getByTestId('diff-row-add').first()).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '33-history-dialog.png') });
+
+  // 还原到最新快照（= 写入测试行之前的内容），确认编辑器里那行被回滚
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByTestId('history-restore').click();
+  await expect(page.getByText(/已还原到该历史版本/)).toBeVisible({ timeout: 10_000 });
+  if (process.env.PKOS_DEBUG_HISTORY) {
+
+    const state = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('pkos.mock.state.v1') ?? '{}'),
+    );
+    console.log('[DBG] contents:', JSON.stringify(state.contents));
+    console.log('[DBG] history keys:', JSON.stringify(Object.keys(state.history ?? {})));
+    console.log(
+      '[DBG] history newest:',
+      JSON.stringify((Object.values(state.history ?? {})[0] ?? []).slice(0, 3)),
+    );
+  }
+  await page.screenshot({ path: path.join(SHOTS, '34-history-restored.png') });
+  await expect(page.locator('.cm-content')).not.toContainText('历史版本测试行');
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

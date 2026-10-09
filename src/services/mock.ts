@@ -47,6 +47,14 @@ interface MockState {
   noteTags: Record<string, string[]>;
   settings: AppSettings;
   backups: BackupInfo[];
+  /** 版本历史（内存实现，供浏览器预览与 E2E 验证「历史版本」交互） */
+  history: Record<string, MockHistoryEntry[]>;
+}
+
+interface MockHistoryEntry {
+  entryId: string;
+  savedAt: string;
+  content: string;
 }
 
 type Listener = (payload: unknown) => void;
@@ -107,6 +115,7 @@ function load(): MockState {
     noteTags: {},
     settings: { ...emptySettings },
     backups: [],
+    history: {},
   };
 }
 
@@ -437,6 +446,18 @@ function createNote(input: CreateNoteInput): NoteDetail {
   return toDetail(note);
 }
 
+function captureHistory(noteId: string, content: string) {
+  if (!content.trim()) return;
+  const entries = state.history[noteId] ?? [];
+  if (entries[0]?.content === content) return; // 内容没变，不重复留档
+  entries.unshift({
+    entryId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    savedAt: now(),
+    content,
+  });
+  state.history[noteId] = entries.slice(0, 50); // 与后端一致：每篇最多 50 份
+}
+
 function saveNote(input: SaveNoteInput) {
   const note = state.notes.find((item) => item.id === input.id);
   if (!note) fail('NOTE_NOT_FOUND', '笔记不存在或已被删除。');
@@ -444,6 +465,11 @@ function saveNote(input: SaveNoteInput) {
     fail('NOTE_CONFLICT', '文件已被其他程序修改，请选择重新加载或覆盖保存。', {
       currentContent: state.contents[note.id] ?? '',
     });
+  }
+  // 覆盖前留档（对标语雀「查看历史版本」）：只在正文真的变了时记，
+  // 否则重复触发自动保存会把「当前内容」也存成历史，还原等于没还原
+  if ((state.contents[note.id] ?? '') !== input.content) {
+    captureHistory(note.id, state.contents[note.id] ?? '');
   }
   state.contents[note.id] = input.content;
   note.contentHash = ulid();
@@ -858,6 +884,7 @@ export async function handleMockInvoke(
         noteTags: {},
         settings: { ...emptySettings },
         backups: [],
+    history: {},
       };
       persist();
       return null;
@@ -919,6 +946,7 @@ export async function handleMockInvoke(
     case 'note_purge': {
       state.notes = state.notes.filter((item) => item.id !== payload.id);
       delete state.contents[String(payload.id)];
+      delete state.history[String(payload.id)];
       persist();
       return null;
     }
@@ -1139,6 +1167,55 @@ export async function handleMockInvoke(
         '浏览器预览模式无法读取 .knowledge/templates，请在桌面应用中使用模板。',
       );
       break;
+    case 'note_history_list': {
+      requireWorkspace();
+      const noteId = String(payload.noteId);
+      return (state.history[noteId] ?? []).map((entry) => ({
+        entryId: entry.entryId,
+        savedAt: entry.savedAt,
+        bytes: entry.content.length,
+        title: entry.content.match(/^#\s+(.+)$/m)?.[1] ?? '',
+        preview: entry.content
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line && !line.startsWith('#'))
+          .join(' ')
+          .slice(0, 120),
+      }));
+    }
+    case 'note_history_read': {
+      requireWorkspace();
+      const entries = state.history[String(payload.noteId)] ?? [];
+      const entry = entries.find((item) => item.entryId === payload.entryId);
+      if (!entry) fail('NOTE_NOT_FOUND', '该历史版本已不存在。');
+      return { entryId: entry.entryId, content: entry.content, body: entry.content };
+    }
+    case 'note_history_restore': {
+      requireWorkspace();
+      const noteId = String(payload.noteId);
+      const entries = state.history[noteId] ?? [];
+      const entry = entries.find((item) => item.entryId === payload.entryId);
+      if (!entry) fail('NOTE_NOT_FOUND', '该历史版本已不存在。');
+      captureHistory(noteId, state.contents[noteId] ?? '');
+      state.contents[noteId] = entry.content;
+      const note = state.notes.find((item) => item.id === noteId);
+      if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
+      // 与真实后端一致：还原也算一次内容变更，哈希要变，前端才会重新同步编辑器
+      note.contentHash = ulid();
+      note.updatedAt = now();
+      persist();
+      return toDetail(note);
+    }
+    case 'note_history_remove': {
+      requireWorkspace();
+      const noteId = String(payload.noteId);
+      const entries = (state.history[noteId] ?? []).filter(
+        (item) => item.entryId !== payload.entryId,
+      );
+      state.history[noteId] = entries;
+      persist();
+      return entries.length;
+    }
     case 'template_save':
       fail(
         'INVALID_INPUT',
