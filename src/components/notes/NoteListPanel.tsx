@@ -10,6 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ROUTES } from '@/lib/constants';
 import { errorMessage } from '@/lib/format';
 import { buildNoteTree } from '@/lib/noteTree';
+import { planNoteDrop, type NoteDropPosition } from '@/lib/noteDragDrop';
 import { groupByRecency } from '@/lib/timeGroup';
 import { cn } from '@/lib/utils';
 import { useCategoriesStore } from '@/stores/categoriesStore';
@@ -25,6 +26,7 @@ const SORT_OPTIONS = [
   { value: 'updatedDesc', label: '最近修改' },
   { value: 'createdDesc', label: '创建时间' },
   { value: 'titleAsc', label: '标题' },
+  { value: 'manual', label: '自定义顺序' },
 ] as const;
 
 export function NoteListPanel() {
@@ -56,10 +58,58 @@ export function NoteListPanel() {
   const collapsed = useMemo(() => new Set(collapsedIds), [collapsedIds]);
   const rows = useMemo(() => buildNoteTree(items, collapsed), [items, collapsed]);
 
+  /** 拖拽悬停位置：{ 行 id, 落点 }，用于渲染蓝色横线 / 蓝色框 */
+  const [dropHint, setDropHint] = useState<{ id: string; position: NoteDropPosition } | null>(null);
+
   const toggleCollapse = (id: string) =>
     setCollapsedIds((previous) =>
       previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id],
     );
+
+  const planDrop = (targetId: string, position: NoteDropPosition, draggedIds: string[]) =>
+    planNoteDrop({ items, targetId, draggedIds, position });
+
+  const handleNoteDragOver = (targetId: string, position: NoteDropPosition, draggedIds: string[]) => {
+    // 落点非法（拖进自己或自己的子树）时不给出提示，drop 时再兜一层
+    const plan = planDrop(targetId, position, draggedIds);
+    setDropHint(plan ? { id: targetId, position } : null);
+  };
+
+  const handleNoteDrop = async (
+    targetId: string,
+    position: NoteDropPosition,
+    draggedIds: string[],
+  ) => {
+    setDropHint(null);
+    const plan = planDrop(targetId, position, draggedIds);
+    if (!plan) {
+      toast.error('不能把笔记移动到它自己的子文档下');
+      return;
+    }
+    const store = useNotesStore.getState();
+
+    if (plan.changesParent) {
+      for (const noteId of draggedIds) {
+        const ok = await store.setParent(noteId, plan.parentId);
+        if (!ok) return;
+      }
+    }
+
+    if (position === 'inside') {
+      // 拖进去以后自动展开，否则看不到刚归位的子文档
+      setCollapsedIds((previous) => previous.filter((id) => id !== targetId));
+      if (!plan.changesParent) return;
+      toast.success(`已移动到「${items.find((item) => item.id === targetId)?.title ?? ''}」下`);
+      return;
+    }
+
+    // 同层插入需要「自定义顺序」才有意义，否则排序会被其它排序键覆盖
+    if (store.sort !== 'manual') {
+      await store.setSort('manual');
+      toast.info('已切换为「自定义顺序」，可继续拖拽调整');
+    }
+    await store.reorder(plan.siblingIds);
+  };
 
   const basePath = `/${location.pathname.split('/').filter(Boolean)[0] ?? 'notes'}`;
 
@@ -273,6 +323,16 @@ export function NoteListPanel() {
                         note={note}
                         selected={selectedId === note.id}
                         basePath={basePath}
+                        dropHint={dropHint?.id === note.id ? dropHint.position : null}
+                        onNoteDragOver={(position, draggedIds) =>
+                          handleNoteDragOver(note.id, position, draggedIds)
+                        }
+                        onNoteDragLeave={() =>
+                          setDropHint((current) => (current?.id === note.id ? null : current))
+                        }
+                        onNoteDrop={(position, draggedIds) =>
+                          void handleNoteDrop(note.id, position, draggedIds)
+                        }
                         onOpen={() => navigate(`${basePath}/${note.id}`)}
                       />
                     ))}
@@ -292,6 +352,16 @@ export function NoteListPanel() {
                   childCount={childCount}
                   collapsed={collapsed.has(note.id)}
                   onToggleCollapse={() => toggleCollapse(note.id)}
+                  dropHint={dropHint?.id === note.id ? dropHint.position : null}
+                  onNoteDragOver={(position, draggedIds) =>
+                    handleNoteDragOver(note.id, position, draggedIds)
+                  }
+                  onNoteDragLeave={() =>
+                    setDropHint((current) => (current?.id === note.id ? null : current))
+                  }
+                  onNoteDrop={(position, draggedIds) =>
+                    void handleNoteDrop(note.id, position, draggedIds)
+                  }
                   onOpen={() => navigate(`${basePath}/${note.id}`)}
                 />
               ))}

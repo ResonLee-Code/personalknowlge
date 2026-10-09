@@ -65,6 +65,8 @@ pub struct Note {
     pub file_mtime: Option<String>,
     /// 父文档（子文档层级）；由 frontmatter 的 `parent` 投影而来
     pub parent_id: Option<String>,
+    /// 手动排序位次（同层内，1 起）；0 表示未显式排序
+    pub sort_order: i64,
 }
 
 /// 列表展示用的笔记摘要。
@@ -88,6 +90,9 @@ pub struct NoteSummary {
     /// 父文档 id（子文档层级），无则为顶层文档
     #[serde(default)]
     pub parent_id: Option<String>,
+    /// 手动排序位次（配合「自定义顺序」排序使用）
+    #[serde(default)]
+    pub sort_order: i64,
     /// 搜索结果摘要（普通列表为空）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub snippet: Vec<TextSegment>,
@@ -126,6 +131,8 @@ pub enum NoteSort {
     UpdatedAsc,
     CreatedDesc,
     TitleAsc,
+    /// 自定义顺序（`order` 派生列，1 起）；未排序的笔记用更新时间兜底
+    Manual,
 }
 
 impl NoteSort {
@@ -137,6 +144,7 @@ impl NoteSort {
             NoteSort::UpdatedAsc => "n.updated_at ASC, n.id ASC",
             NoteSort::CreatedDesc => "n.created_at DESC, n.id DESC",
             NoteSort::TitleAsc => "n.title COLLATE NOCASE ASC, n.id ASC",
+            NoteSort::Manual => "n.sort_order ASC, n.updated_at DESC, n.id DESC",
         }
     }
 }
@@ -233,6 +241,14 @@ pub struct SetParentInput {
     pub id: String,
     #[serde(default)]
     pub parent_id: Option<String>,
+}
+
+/// 重排输入：`ids` 是**同一层**兄弟笔记的新顺序（靠前者在上），按顺序写入 `order`。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderNotesInput {
+    #[serde(default)]
+    pub ids: Vec<String>,
 }
 
 /// 保存笔记输入。

@@ -24,6 +24,10 @@ target/
 npm-debug.log*
 pnpm-debug.log*
 
+# python（脚本目录里的字节码缓存）
+__pycache__/
+*.pyc
+
 # test / coverage
 coverage/
 test-results/

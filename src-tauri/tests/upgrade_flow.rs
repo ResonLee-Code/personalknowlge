@@ -79,8 +79,8 @@ fn opening_a_v1_1_workspace_migrates_and_rebuilds_search_index() {
     let context = app.context().expect("上下文");
     assert_eq!(
         context.db.schema_version().expect("schema 版本"),
-        7,
-        "应自动迁移到最新 schema（007 = notes.parent_id 子文档层级）"
+        8,
+        "应自动迁移到最新 schema（007 = parent_id 子文档层级，008 = notes.sort_order 手动排序）"
     );
     let (has_map, fts_rows, map_rows): (i64, i64, i64) = context
         .db

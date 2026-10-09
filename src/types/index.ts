@@ -72,6 +72,8 @@ export interface Note {
   lastIndexedAt?: string | null;
   /** 父文档 id（子文档层级），无则为顶层文档 */
   parentId?: string | null;
+  /** 手动排序位次（同层内，1 起；0 表示未显式排序） */
+  sortOrder?: number;
   /** 来源与时效（V1.1.2 N1） */
   sourceType?: string | null;
   sourceRef?: string | null;
@@ -89,6 +91,8 @@ export interface NoteSummary {
   title: string;
   /** 父文档 id（子文档层级），无则为顶层文档 */
   parentId?: string | null;
+  /** 手动排序位次（配合「自定义顺序」排序使用） */
+  sortOrder?: number;
   filePath: string;
   categoryId?: string | null;
   categoryPath: string;
@@ -121,7 +125,13 @@ export interface NoteListQuery {
   sort?: NoteSort;
 }
 
-export type NoteSort = 'updatedDesc' | 'updatedAsc' | 'createdDesc' | 'titleAsc';
+export type NoteSort =
+  | 'updatedDesc'
+  | 'updatedAsc'
+  | 'createdDesc'
+  | 'titleAsc'
+  /** 自定义顺序（拖拽排序写入的 order） */
+  | 'manual';
 
 export interface NoteListResult {
   items: NoteSummary[];
@@ -336,6 +346,11 @@ export interface CreateNoteInput {
 export interface SetParentInput {
   id: string;
   parentId?: string | null;
+}
+
+/** 手动排序：ids 是同一层兄弟笔记的新顺序（靠前者在上） */
+export interface ReorderNotesInput {
+  ids: string[];
 }
 
 export interface SaveNoteInput {

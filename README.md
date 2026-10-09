@@ -150,5 +150,6 @@ MyKnowledge/
 - [开发规范](./docs/DEVELOPMENT_RULES.md)
 - [开发路线](./docs/ROADMAP.md)
 - [功能规划（对标语雀/飞书 + 知识图谱）](./docs/FEATURE_PLANNING.md)
+- [语雀官方公开手册归档（对标查阅用，1222 篇）](./docs/yuque-manuals/README.md)
 - [变更记录](./docs/CHANGELOG.md)
 - [下一阶段计划（V1.1）](./docs/PLAN_V1.1.md)

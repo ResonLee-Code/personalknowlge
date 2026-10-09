@@ -278,7 +278,24 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 父文档被删除 / 重命名后：派生列指向失效时子文档按顶层展示（不会隐藏），
   重命名会同步子文档 frontmatter 里的 `parent:`（写 id 时无影响）。
 
-## 18. 前端服务层
+## 18. 手动排序（V1.2.1）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `notes_reorder` | `{ input: { ids: string[] } }` | `usize`（实际写入 order 的篇数） |
+
+- `ids` 是**同一层**兄弟笔记的新顺序（靠前者在上），位次 1 起写入 frontmatter 的 `order:`
+  并投影到 `notes.sort_order`；空数组返回 `INVALID_INPUT`；不存在的 id 会被跳过（不报错）；
+- **按层归一化**：若 `ids` 只覆盖同层的一部分，其余同层活跃笔记会保持原相对顺序
+  **排在后面**，保证该层在「自定义顺序」下是确定的；
+- 排序**不改写 `updated_at`**（展示顺序不是内容变更），因此「最近修改」排序结果不变；
+- 列表查询新增 `sort: "manual"`，排序键为 `sort_order ASC, updated_at DESC, id DESC`
+  （0 = 未排序的兜底顺序）；
+- 前端契约：把条目拖到另一条的中间 = 先 `note_set_parent`（成为子文档），
+  拖到上下边缘 = `notes_reorder`（同层插入）；拖拽落点判定在
+  `src/lib/noteDragDrop.ts`（纯函数，已覆盖单元测试）。
+
+## 19. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 

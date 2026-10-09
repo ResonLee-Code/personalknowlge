@@ -35,6 +35,12 @@
 
 ### 笔记列表（对标语雀）
 
+- **拖拽建立层级与同层排序**：把条目拖到另一条的**中间**即成为它的子文档（蓝色框提示），
+  拖到**上下边缘**则插到该位置（蓝色横线提示，对标语雀的拖拽语义）；
+  拖进自己或自己的子树会被拒绝；
+- **自定义顺序**：新增「自定义顺序」排序（`order` 落 frontmatter + `notes.sort_order` 派生列，
+  迁移 008）。拖拽排序会自动切到该顺序并提示；顺序按**层**归一化，未拖过的同层笔记保持原相对顺序；
+  排序不修改 `updated_at`（不算内容改动），删库重扫可从 Markdown 重建；
 - **标题悬停显示完整标题**：长标题被 `truncate` 截断时，悬停显示完整标题（Radix Tooltip 走
   传送门，不被滚动容器裁切）——修复「标题遮挡时看不到完整内容」；
 - **条目操作菜单支持 `⋮` 与右键双入口**，内容对齐语雀：打开 / 收藏 / 创建子文档 /
@@ -61,6 +67,11 @@
 ### 文档
 
 - [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) 新增语雀条目操作对标矩阵与优先级；
+- **语雀官方公开手册归档**：新增可复现的抓取脚本
+  [scripts/research/crawl-yuque-manuals.py](../scripts/research/crawl-yuque-manuals.py)
+  与归档目录 [docs/yuque-manuals](./yuque-manuals/README.md)（25 本手册 / 1200+ 篇正文，
+  含每本手册的目录索引与原始链接），用于查阅原件与功能对标；正文为第三方内容，
+  默认不纳入 Git（见该目录 `.gitignore`）；
 - 第二轮语雀调研取到官方原文（页面内 `window.appData` 的 `book.toc` +
   `/api/docs/{slug}?mode=markdown` 的 `data.sourcecode`），
   [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) 第 7 节改为逐条带出处的版本，

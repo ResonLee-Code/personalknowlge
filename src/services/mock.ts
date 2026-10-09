@@ -27,6 +27,7 @@ import type {
   NoteSummary,
   OutgoingLink,
   SaveNoteInput,
+  ReorderNotesInput,
   SearchQuery,
   SetParentInput,
   TextSegment,
@@ -179,6 +180,7 @@ function toSummary(note: Note): NoteSummary {
     id: note.id,
     title: note.title,
     parentId: note.parentId ?? null,
+    sortOrder: note.sortOrder ?? 0,
     filePath: note.filePath,
     categoryId: note.categoryId ?? null,
     categoryPath: categoryPath(note.categoryId),
@@ -371,6 +373,13 @@ function listNotes(query: NoteListQuery = {}) {
     if (sort === 'titleAsc') return a.title.localeCompare(b.title, 'zh-CN');
     if (sort === 'createdDesc') return b.createdAt.localeCompare(a.createdAt);
     if (sort === 'updatedAsc') return a.updatedAt.localeCompare(b.updatedAt);
+    if (sort === 'manual') {
+      // 与后端一致：order 升序，未排序（0）时用更新时间兜底
+      const left = a.sortOrder ?? 0;
+      const right = b.sortOrder ?? 0;
+      if (left !== right) return left - right;
+      return b.updatedAt.localeCompare(a.updatedAt);
+    }
     return b.updatedAt.localeCompare(a.updatedAt);
   });
   const page = Math.max(1, query.page ?? 1);
@@ -407,6 +416,7 @@ function createNote(input: CreateNoteInput): NoteDetail {
     updatedAt: createdAt,
     lastIndexedAt: createdAt,
     parentId: parent?.id ?? null,
+    sortOrder: 0,
   };
   state.notes.push(note);
   state.contents[id] = input.initialContent ?? '';
@@ -937,6 +947,25 @@ export async function handleMockInvoke(
       persist();
       emit('notes://changed', { kind: 'modified', noteId: note.id });
       return toDetail(note);
+    }
+    case 'notes_reorder': {
+      const input = (payload.input ?? {}) as ReorderNotesInput;
+      const ids = (input.ids ?? []).filter((id) => typeof id === 'string' && id.length > 0);
+      if (ids.length === 0) fail('INVALID_INPUT', '排序列表为空。');
+      let updated = 0;
+      ids.forEach((id, index) => {
+        const note = state.notes.find((item) => item.id === id);
+        if (!note) return; // 已删除的笔记跳过
+        const order = index + 1;
+        if ((note.sortOrder ?? 0) === order) return;
+        note.sortOrder = order;
+        updated += 1;
+      });
+      if (updated > 0) {
+        persist();
+        emit('notes://changed', { kind: 'modified', noteId: ids[0] });
+      }
+      return updated;
     }
     case 'note_duplicate': {
       const note = state.notes.find((item) => item.id === payload.id);

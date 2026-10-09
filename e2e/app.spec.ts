@@ -301,6 +301,33 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.getByTestId('note-menu-promote').click();
   await expect(parentRow).not.toContainText('1 篇子文档');
 
+  // 23. 拖拽建立层级 / 同层排序（V1.2.1，对标语雀的拖拽语义）
+  await page.goto('/#/notes');
+  const dragSource = () =>
+    page.getByTestId('note-list-item').filter({ hasText: '索引策略' }).first();
+  const nestTarget = () =>
+    page.getByTestId('note-list-item').filter({ hasText: 'SQLite 全文搜索学习笔记' }).first();
+  const nestBox = await nestTarget().boundingBox();
+  if (!nestBox) throw new Error('未找到拖拽目标行');
+  // 拖到行中间 = 成为子文档（蓝色框）
+  await dragSource().dragTo(nestTarget(), {
+    targetPosition: { x: nestBox.width / 2, y: nestBox.height / 2 },
+  });
+  await expect(nestTarget()).toContainText('1 篇子文档');
+  await page.screenshot({ path: path.join(SHOTS, '25-drag-nest.png') });
+
+  // 拖到行上边缘 = 同层插入（会自动切到「自定义顺序」）
+  await page.getByRole('button', { name: '自定义顺序' }).click();
+  const orderBefore = await page.getByTestId('note-list-item').allInnerTexts();
+  const topRow = page.getByTestId('note-list-item').filter({ hasText: '欢迎使用 Personal Knowledge OS' }).first();
+  const topBox = await topRow.boundingBox();
+  if (!topBox) throw new Error('未找到第二个拖拽目标');
+  await dragSource().dragTo(topRow, { targetPosition: { x: topBox.width / 2, y: 2 } });
+  await expect
+    .poll(async () => (await page.getByTestId('note-list-item').allInnerTexts()).join('|'))
+    .not.toBe(orderBefore.join('|'));
+  await page.screenshot({ path: path.join(SHOTS, '26-drag-reorder.png') });
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

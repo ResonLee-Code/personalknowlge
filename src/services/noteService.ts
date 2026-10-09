@@ -8,6 +8,7 @@ import type {
   SaveNoteInput,
   SetSourceInput,
   SetParentInput,
+  ReorderNotesInput,
   SaveNoteResult,
   ImportNotesInput,
   ImportReport,
@@ -51,6 +52,9 @@ export const noteService = {
 
   /** 设置父文档（子文档层级）；`parentId` 传 null 表示移到顶层 */
   setParent: (input: SetParentInput) => call<NoteDetail>('note_set_parent', { input }),
+
+  /** 手动排序：按传入顺序改写同层笔记的 `order`（返回实际更新的篇数） */
+  reorder: (input: ReorderNotesInput) => call<number>('notes_reorder', { input }),
 
   setTags: (id: string, tags: string[]) => call<NoteDetail>('note_set_tags', { id, tags }),
 

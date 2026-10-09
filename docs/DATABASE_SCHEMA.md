@@ -198,6 +198,26 @@ CREATE INDEX IF NOT EXISTS idx_notes_parent ON notes(parent_id);
 - 防环：`set_parent` / 创建子文档时沿父链上溯，命中自身或超过 64 跳报 `INVALID_INPUT`；
 - 列表展示为「父文档 → 子文档」目录树，父子关系不改变笔记的文件位置（与分类目录相互独立）。
 
+### notes 的手动排序列（迁移 008，自定义顺序）
+
+```sql
+ALTER TABLE notes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_notes_sort_order ON notes(sort_order);
+```
+
+| 列 | 含义 | 对应 frontmatter |
+| --- | --- | --- |
+| `sort_order` | 同层内的显示顺序（1 起，越小越靠前；0 = 未排序） | `order`（也接受 `sort_order` / `sortOrder`） |
+
+- **派生数据**：应用内拖拽排序会写回 frontmatter 的 `order:`（写成数字，如 `order: 3`），
+  外部编辑改 `order:` 后扫描时重新投影；
+- `NoteSort::Manual` 的排序键是 `sort_order ASC, updated_at DESC, id DESC`：
+  0（未排序）与已排序混排时不会抖动，未排序笔记仍按更新时间稳定排列；
+- **按层归一化**：重排会把**同一父文档下的全部活跃笔记**一起写入 order
+  （传入顺序在前、其余保持原相对顺序），因此一旦拖过，该层的顺序就是确定的；
+- 排序不改写 `updated_at`——它属于展示顺序而非内容变更；
+- 索引：`idx_notes_sort_order` 支撑「自定义顺序」列表的低成本排序。
+
 ### 索引
 
 ```sql
@@ -252,8 +272,8 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 
 当前迁移列表：`001_init`（表结构）、`002_search_index`（FTS5）、`003_note_links`（双向链接），
 `004_note_assets`（类型化关系 + 来源时效）、`005_note_file_stamp`（文件快照）、
-`006_search_rowid_map`（FTS rowid 映射）、`007_note_parent`（子文档层级），
-`SCHEMA_VERSION = 7`。
+`006_search_rowid_map`（FTS rowid 映射）、`007_note_parent`（子文档层级）、
+`008_notes_sort_order`（手动排序），`SCHEMA_VERSION = 8`。
 
 ## 5. 数据恢复能力
 

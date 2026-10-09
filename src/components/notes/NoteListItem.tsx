@@ -38,7 +38,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
-import { setNoteDragData } from '@/lib/dragNotes';
+import { isNoteDrag, readNoteDragIds, setNoteDragData } from '@/lib/dragNotes';
+import { noteDropPosition, type NoteDropPosition } from '@/lib/noteDragDrop';
 import { formatRelative } from '@/lib/format';
 import { splitHighlight } from '@/lib/highlight';
 import { cn } from '@/lib/utils';
@@ -154,6 +155,10 @@ export function NoteListItem({
   childCount = 0,
   collapsed = false,
   onToggleCollapse,
+  dropHint = null,
+  onNoteDragOver,
+  onNoteDragLeave,
+  onNoteDrop,
 }: {
   note: NoteSummary;
   selected: boolean;
@@ -165,6 +170,11 @@ export function NoteListItem({
   childCount?: number;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  /** 拖拽悬停落在本行时的提示：inside = 成为子文档，before/after = 同层插入 */
+  dropHint?: NoteDropPosition | null;
+  onNoteDragOver?: (position: NoteDropPosition, draggedIds: string[]) => void;
+  onNoteDragLeave?: () => void;
+  onNoteDrop?: (position: NoteDropPosition, draggedIds: string[]) => void;
 }) {
   const navigate = useNavigate();
   const keyword = useNotesStore((state) => state.keyword);
@@ -255,6 +265,27 @@ export function NoteListItem({
               if (event.key === 'Enter') onOpen();
             }}
             draggable
+            onDragOver={(event) => {
+              if (!isNoteDrag(event.dataTransfer)) return;
+              // 必须 preventDefault，否则不会触发 drop
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+              const rect = event.currentTarget.getBoundingClientRect();
+              onNoteDragOver?.(
+                noteDropPosition(event.clientY - rect.top, rect.height),
+                readNoteDragIds(event.dataTransfer),
+              );
+            }}
+            onDragLeave={() => onNoteDragLeave?.()}
+            onDrop={(event) => {
+              if (!isNoteDrag(event.dataTransfer)) return;
+              event.preventDefault();
+              const rect = event.currentTarget.getBoundingClientRect();
+              onNoteDrop?.(
+                noteDropPosition(event.clientY - rect.top, rect.height),
+                readNoteDragIds(event.dataTransfer),
+              );
+            }}
             onDragStart={(event) => {
               // 多选中拖动任意一行 = 拖动整批；否则只拖这一篇
               const batch = useNotesStore.getState().selection;
@@ -262,14 +293,31 @@ export function NoteListItem({
               setNoteDragData(event.dataTransfer, ids, note.title);
             }}
             className={cn(
-              'group cursor-pointer rounded-lg border border-transparent px-2.5 py-2 transition-colors',
+              'group relative cursor-pointer rounded-lg border border-transparent px-2.5 py-2 transition-colors',
               selectedForBatch
                 ? 'border-[var(--brand)]/60 bg-[var(--brand-soft)]'
                 : selected
                   ? 'border-[var(--brand)]/40 bg-[var(--brand-soft)]'
                   : 'hover:bg-[var(--surface-muted)]',
+              // 对标语雀：蓝色框 = 拖成该节点的子级
+              dropHint === 'inside' && 'ring-2 ring-[var(--brand)] bg-[var(--brand-soft)]',
             )}
           >
+            {/* 对标语雀：蓝色横线 = 拖到该位置（同层排序） */}
+            {dropHint === 'before' ? (
+              <span
+                data-testid="note-drop-line"
+                aria-hidden
+                className="pointer-events-none absolute inset-x-1 -top-px h-0.5 rounded-full bg-[var(--brand)]"
+              />
+            ) : null}
+            {dropHint === 'after' ? (
+              <span
+                data-testid="note-drop-line"
+                aria-hidden
+                className="pointer-events-none absolute inset-x-1 -bottom-px h-0.5 rounded-full bg-[var(--brand)]"
+              />
+            ) : null}
             <div className="flex items-start gap-2">
               {selectionMode ? (
                 <input

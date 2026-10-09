@@ -11,6 +11,7 @@ use crate::core::paths::{WorkspacePaths, INBOX_DIR};
 use crate::core::text::{count_words, markdown_to_plain_text};
 use crate::core::time::{now_file_timestamp, now_iso};
 use crate::domain::note::{
+    ReorderNotesInput,
     SetParentInput,
     SetSourceInput,
     CreateNoteInput, Note, NoteDetail, NoteListQuery, NoteListResult, NoteStatus, NoteSummary,
@@ -141,6 +142,7 @@ impl NoteService {
             valid_until: None,
             relations: Vec::new(),
             parent: parent.as_ref().map(|note| note.id.clone()),
+            order: None,
             extra: Vec::new(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &body);
@@ -167,6 +169,7 @@ impl NoteService {
             file_size: None,
             file_mtime: None,
             parent_id: parent.as_ref().map(|note| note.id.clone()),
+            sort_order: 0,
             source_type: None,
             source_ref: None,
             source_reliability: None,
@@ -266,6 +269,7 @@ impl NoteService {
             source_reliability: existing.frontmatter.source_reliability,
             valid_until: existing.frontmatter.valid_until.clone(),
             parent: existing.frontmatter.parent.clone(),
+            order: existing.frontmatter.order,
             relations: existing.frontmatter.relations.clone(),
             extra: existing.frontmatter.extra.clone(),
         };
@@ -377,6 +381,7 @@ impl NoteService {
             valid_until: stored.frontmatter.valid_until.clone(),
             relations: stored.frontmatter.relations.clone(),
             parent: stored.frontmatter.parent.clone(),
+            order: stored.frontmatter.order,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -459,6 +464,7 @@ impl NoteService {
             valid_until: stored.frontmatter.valid_until.clone(),
             relations: stored.frontmatter.relations.clone(),
             parent: stored.frontmatter.parent.clone(),
+            order: stored.frontmatter.order,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -497,7 +503,8 @@ impl NoteService {
             title: format!("{} 副本", note.title),
             category_id: note.category_id.clone(),
             initial_content: Some(stored.body),
-            parent_id: None,
+            // 副本与原文同层（保持子文档归属），顺序由后续拖拽调整
+            parent_id: note.parent_id.clone(),
             tags: Some(tags),
         })
     }
@@ -639,6 +646,7 @@ impl NoteService {
             valid_until: stored.frontmatter.valid_until.clone(),
             relations: stored.frontmatter.relations.clone(),
             parent: parent.as_ref().map(|item| item.id.clone()),
+            order: stored.frontmatter.order,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -648,6 +656,100 @@ impl NoteService {
         })?;
         self.refresh_file_stamp(&note.id, &note.file_path);
         self.get(&note.id)
+    }
+
+    /// 手动排序：`ids` 是同一层兄弟笔记的新顺序（靠前者在上）。
+    ///
+    /// 位次从 1 开始写入 frontmatter 的 `order`，再投影到 `notes.sort_order`；
+    /// 与父文档一样以文件为准，数据库整列删掉也能从 Markdown 重建。
+    ///
+    /// 为了让「自定义顺序」这一层是确定的，会把**同层全部笔记**一起归一化：
+    /// 传入的 ids 按给定顺序排在前，其余同层笔记保持原相对顺序排在后面。
+    pub fn reorder(&self, input: ReorderNotesInput) -> Result<usize> {
+        let mut ids: Vec<String> = Vec::new();
+        for id in &input.ids {
+            let trimmed = id.trim();
+            if !trimmed.is_empty() && !ids.iter().any(|item| item == trimmed) {
+                ids.push(trimmed.to_string());
+            }
+        }
+        if ids.is_empty() {
+            return Err(AppError::invalid_input("排序列表为空。"));
+        }
+
+        // 以第一个存在的笔记为锚点确定层级（一次拖拽只会涉及同一层）
+        let anchor = ids
+            .iter()
+            .find_map(|id| self.note(id).ok().flatten())
+            .ok_or_else(|| AppError::new(ErrorCode::NoteNotFound, "排序目标不存在或已被删除。"))?;
+        let parent_id = anchor.parent_id.clone();
+
+        // 同层归一化：传入顺序在前，其余同层笔记按原顺序追加
+        let siblings = self.ctx.db.with_conn(|conn| {
+            SqliteNoteRepository.active_ids_under_parent(conn, self.workspace_id(), parent_id.as_deref())
+        })?;
+        let mut ordered: Vec<String> = ids
+            .iter()
+            .filter(|id| siblings.iter().any(|sibling| sibling == *id))
+            .cloned()
+            .collect();
+        for sibling in siblings {
+            if !ordered.contains(&sibling) {
+                ordered.push(sibling);
+            }
+        }
+
+        let mut updated = 0usize;
+        for (index, id) in ordered.iter().enumerate() {
+            let Some(note) = self.note(id)? else {
+                continue; // 已被删除的笔记跳过，不影响其余顺序
+            };
+            let order = (index + 1) as i64;
+            if note.sort_order == order {
+                continue;
+            }
+            let stored = self.ctx.storage.read_note(&note.file_path)?;
+            let lookup = self.ctx.category_lookup()?;
+            let category_path = note
+                .category_id
+                .as_ref()
+                .map(|id| lookup.path_string(id))
+                .unwrap_or_default();
+            let frontmatter = Frontmatter {
+                id: Some(note.id.clone()),
+                title: Some(note.title.clone()),
+                note_type: stored.frontmatter.note_type.clone(),
+                status: stored.frontmatter.status.clone(),
+                category: Some(category_path).filter(|value| !value.is_empty()),
+                tags: stored.frontmatter.tags.clone(),
+                created_at: stored.frontmatter.created_at.clone(),
+                // 排序不是内容改动，保留原 updated_at，避免「拖一下就变成最近修改」
+                updated_at: stored
+                    .frontmatter
+                    .updated_at
+                    .clone()
+                    .or_else(|| Some(note.updated_at.clone())),
+                source_type: stored.frontmatter.source_type.clone(),
+                source_ref: stored.frontmatter.source_ref.clone(),
+                source_reliability: stored.frontmatter.source_reliability,
+                valid_until: stored.frontmatter.valid_until.clone(),
+                relations: stored.frontmatter.relations.clone(),
+                parent: stored.frontmatter.parent.clone(),
+                order: Some(order),
+                extra: stored.frontmatter.extra.clone(),
+            };
+            let markdown = frontmatter::serialize(&frontmatter, &stored.body);
+            self.ctx.storage.write_atomic(&note.file_path, &markdown)?;
+            self.ctx
+                .db
+                .with_conn(|conn| SqliteNoteRepository.set_sort_order(conn, &note.id, order))?;
+            self.refresh_file_stamp(&note.id, &note.file_path);
+            updated += 1;
+        }
+        if updated > 0 {
+            self.emit_change("modified", &ordered[0]);
+        }
+        Ok(updated)
     }
 
     /// 解析父文档引用：优先按 id，其次按标题；`for_child` 用于排除自身。
@@ -727,6 +829,7 @@ impl NoteService {
             valid_until: trim(input.valid_until),
             relations: stored.frontmatter.relations.clone(),
             parent: stored.frontmatter.parent.clone(),
+            order: stored.frontmatter.order,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -774,6 +877,7 @@ impl NoteService {
             valid_until: stored.frontmatter.valid_until.clone(),
             relations: stored.frontmatter.relations.clone(),
             parent: stored.frontmatter.parent.clone(),
+            order: stored.frontmatter.order,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);

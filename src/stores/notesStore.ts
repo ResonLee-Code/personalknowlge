@@ -59,6 +59,8 @@ interface NotesState {
   duplicate: (id: string) => Promise<void>;
   /** 设置父文档（子文档层级）；`parentId = null` 移到顶层 */
   setParent: (id: string, parentId: string | null) => Promise<boolean>;
+  /** 手动排序：按传入顺序改写同层笔记的顺序（配合「自定义顺序」排序） */
+  reorder: (ids: string[]) => Promise<boolean>;
   toggleFavorite: (id: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
   clearConflict: () => void;
@@ -290,6 +292,19 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     try {
       const detail = await noteService.setParent({ id, parentId });
       set({ detail: get().selectedId === id ? detail : get().detail, error: null });
+      await get().refresh();
+      return true;
+    } catch (error) {
+      set({ error: errorMessage(error) });
+      return false;
+    }
+  },
+
+  reorder: async (ids) => {
+    if (ids.length === 0) return true;
+    try {
+      await noteService.reorder({ ids });
+      set({ error: null });
       await get().refresh();
       return true;
     } catch (error) {

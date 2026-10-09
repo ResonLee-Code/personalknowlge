@@ -567,6 +567,8 @@ impl IndexService {
                     file_size: stamp.as_ref().map(|(size, _)| *size as i64),
                     file_mtime: stamp.and_then(|(_, mtime)| mtime),
                     parent_id: None,
+                    // frontmatter 的 order 是文件里的顺序声明，扫描时投影到派生列
+                    sort_order: stored.frontmatter.order.unwrap_or(0).max(0),
                 },
                 plain_text,
                 tags: stored.frontmatter.tags.clone(),
@@ -750,6 +752,7 @@ impl IndexService {
             file_size: None,
             file_mtime: None,
             parent_id: None,
+            sort_order: stored.frontmatter.order.unwrap_or(0).max(0),
         };
         // 幂等采纳：文件监听回调与显式扫描可能并发（两者都是「先读磁盘快照、再写库」），
         // 因此插入前在同一事务内再确认一次路径是否已被别的扫描采纳；已存在则直接跳过，

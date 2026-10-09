@@ -50,6 +50,16 @@ pub trait NoteRepository {
     fn set_favorite(&self, conn: &Connection, id: &str, favorite: bool) -> Result<()>;
     /// 更新父文档（子文档层级）
     fn set_parent(&self, conn: &Connection, id: &str, parent_id: Option<&str>) -> Result<()>;
+    /// 更新手动排序位次（同一层内的顺序，1 起；0 = 未排序）
+    fn set_sort_order(&self, conn: &Connection, id: &str, sort_order: i64) -> Result<()>;
+
+    /// 同一父文档下的活跃笔记 id，按当前顺序（order 升序、更新时间兜底）返回
+    fn active_ids_under_parent(
+        &self,
+        conn: &Connection,
+        workspace_id: &str,
+        parent_id: Option<&str>,
+    ) -> Result<Vec<String>>;
 
     /// 按标题（忽略大小写）查活跃笔记 id，用于把 frontmatter 里的父文档标题解析成 id
     fn find_active_id_by_title(
@@ -99,7 +109,8 @@ pub struct SqliteNoteRepository;
 
 const NOTE_COLUMNS: &str = "id, workspace_id, title, file_path, category_id, status, content_hash,
      word_count, favorite, created_at, updated_at, last_indexed_at,
-     source_type, source_ref, source_reliability, valid_until, file_size, file_mtime, parent_id";
+     source_type, source_ref, source_reliability, valid_until, file_size, file_mtime, parent_id,
+     sort_order";
 
 fn map_note(row: &Row<'_>) -> rusqlite::Result<Note> {
     let status: String = row.get("status")?;
@@ -123,6 +134,7 @@ fn map_note(row: &Row<'_>) -> rusqlite::Result<Note> {
         file_size: row.get("file_size")?,
         file_mtime: row.get("file_mtime")?,
         parent_id: row.get("parent_id")?,
+        sort_order: row.get("sort_order")?,
     })
 }
 
@@ -132,9 +144,9 @@ impl NoteRepository for SqliteNoteRepository {
             "INSERT INTO notes (id, workspace_id, title, file_path, category_id, status,
                                 content_hash, word_count, favorite, created_at, updated_at,
                                 last_indexed_at, source_type, source_ref, source_reliability,
-                                valid_until, file_size, file_mtime, parent_id)
+                                valid_until, file_size, file_mtime, parent_id, sort_order)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19)",
+                     ?17, ?18, ?19, ?20)",
             params![
                 note.id,
                 note.workspace_id,
@@ -155,6 +167,7 @@ impl NoteRepository for SqliteNoteRepository {
                 note.file_size,
                 note.file_mtime,
                 note.parent_id,
+                note.sort_order,
             ],
         )?;
         Ok(())
@@ -166,7 +179,7 @@ impl NoteRepository for SqliteNoteRepository {
                               content_hash = ?6, word_count = ?7, favorite = ?8,
                               source_type = ?13, source_ref = ?14,
                               source_reliability = ?15, valid_until = ?16,
-                              file_size = ?17, file_mtime = ?18, parent_id = ?19,
+                              file_size = ?17, file_mtime = ?18, parent_id = ?19, sort_order = ?20,
                               created_at = ?9, updated_at = ?10, last_indexed_at = ?11
              WHERE id = ?1",
             params![
@@ -188,6 +201,7 @@ impl NoteRepository for SqliteNoteRepository {
                 note.file_size,
                 note.file_mtime,
                 note.parent_id,
+                note.sort_order,
             ],
         )?;
         Ok(())
@@ -388,6 +402,36 @@ impl NoteRepository for SqliteNoteRepository {
             params![id, parent_id],
         )?;
         Ok(())
+    }
+
+    fn set_sort_order(&self, conn: &Connection, id: &str, sort_order: i64) -> Result<()> {
+        conn.execute(
+            "UPDATE notes SET sort_order = ?2 WHERE id = ?1",
+            params![id, sort_order],
+        )?;
+        Ok(())
+    }
+
+    fn active_ids_under_parent(
+        &self,
+        conn: &Connection,
+        workspace_id: &str,
+        parent_id: Option<&str>,
+    ) -> Result<Vec<String>> {
+        let mut statement = conn.prepare(
+            "SELECT id FROM notes
+             WHERE workspace_id = ?1 AND status = 'active'
+               AND IFNULL(parent_id, '') = IFNULL(?2, '')
+             ORDER BY sort_order ASC, updated_at DESC, id DESC",
+        )?;
+        let rows = statement.query_map(params![workspace_id, parent_id], |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row?);
+        }
+        Ok(ids)
     }
 
     fn set_file_stamp(
