@@ -502,8 +502,8 @@ M2（编辑体验）到此完成。下一步：M3 知识图谱视图（评估后
 ```text
 Personal Knowledge OS_1.2.0_aarch64.dmg
   path   src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.2.0_aarch64.dmg
-  size   4142418 bytes（4.0 MB）
-  sha256 79dbc9b0c5aa12d21e5111d9db9c11b8163390423494d4077839bab445183d1d
+  size   4142417 bytes（4.0 MB）
+  sha256 86d8db02e290777db7596e06a208449494ec232b04149bda5e2f049fc47efb1b
   built  2026-10-07（macOS aarch64 本地构建，未签名）
 ```
 
@@ -514,6 +514,11 @@ Windows（交叉编译，未签名，待真机验收）
   path   dist-windows/Personal Knowledge OS_1.2.0_x64-portable.zip
   size   3973990 bytes（3.8 MB）
   sha256 ea25ed29e5e7e33692cd2c16ab5956d9a4e96aad6ceaa3aa1b86c3187ed47392
+
+Linux（需在 Linux 上构建，本机无 Docker/Linux 环境，产物待产出）
+  script scripts/linux/build-linux.sh          # deb + rpm + AppImage 一条命令
+  ci     .github/workflows/linux-release.yml   # ubuntu-22.04 上构建并上传工件
+  doc    docs/LINUX_INSTALL_GUIDE.md
 
 > 验收清单（含已自动验证项与需真机项）：[ACCEPTANCE_V1.2.0.md](./ACCEPTANCE_V1.2.0.md)。
 > V1.1.1 / V1.0.0 的构建信息保留在 git 历史与 `dist-windows/` 中。

@@ -29,7 +29,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "nsis"],
+    "targets": [
+      "app",
+      "dmg",
+      "nsis",
+      "deb",
+      "rpm",
+      "appimage"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,7 +46,18 @@
     ],
     "shortDescription": "本地优先的个人知识管理桌面应用",
     "longDescription": "Personal Knowledge OS 以 Markdown 文件保存笔记正文，使用 SQLite 与全文搜索索引管理元数据，支持分类、标签、全文检索与备份导出。",
-    "copyright": "Personal Knowledge OS"
+    "copyright": "Personal Knowledge OS",
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
   },
   "plugins": {}
 }

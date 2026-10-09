@@ -13,7 +13,7 @@
 | 二进制架构与体积 | ✅ | `Mach-O 64-bit executable arm64`，7,787,328 bytes |
 | 最低系统版本 | ✅ | `LSMinimumSystemVersion = 10.13` |
 | 签名状态 | ✅（未签名） | `codesign --verify` 返回「code has no resources but signature indicates they must be present」→ 首次启动需右键打开/放行 |
-| dmg 校验值 | ✅ | sha256 `79dbc9b0c5aa12d21e5111d9db9c11b8163390423494d4077839bab445183d1d`，4,142,418 bytes |
+| dmg 校验值 | ✅ | sha256 `86d8db02e290777db7596e06a208449494ec232b04149bda5e2f049fc47efb1b`，4,142,417 bytes |
 | Windows 安装包格式 | ✅ | `file` 识别为 `PE32 executable (GUI) Intel 80386, for MS Windows, Nullsoft Installer self-extracting archive` |
 | Windows 产物校验值 | ✅ | setup.exe sha256 `d75b97e535c7ed972122d7dcd981d005d6e39dc3e4823d2a27b09ba5154ad606`；portable.zip sha256 `ea25ed29e5e7e33692cd2c16ab5956d9a4e96aad6ceaa3aa1b86c3187ed47392` |
 
