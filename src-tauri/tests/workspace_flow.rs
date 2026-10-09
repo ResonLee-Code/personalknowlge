@@ -144,6 +144,7 @@ fn creates_saves_and_reads_note_with_frontmatter() {
             category_id: None,
             initial_content: Some("第一行\n\n第二行".to_string()),
             tags: Some(vec!["sqlite".to_string(), "Search".to_string()]),
+            parent_id: None,
         })
         .expect("创建笔记");
 
@@ -197,6 +198,7 @@ fn rejects_save_when_file_changed_externally() {
             category_id: None,
             initial_content: Some("原始内容".to_string()),
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
 
@@ -251,6 +253,7 @@ fn renames_moves_and_duplicates_notes() {
             category_id: None,
             initial_content: Some("内容".to_string()),
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
     let original_path = detail.note.file_path.clone();
@@ -293,6 +296,7 @@ fn deletes_restores_and_purges_notes() {
             category_id: None,
             initial_content: Some("临时内容".to_string()),
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
     let file_path = detail.note.file_path.clone();
@@ -335,6 +339,7 @@ fn searches_chinese_english_and_ranks_titles_first() {
             category_id: None,
             initial_content: Some("讨论索引与排序".to_string()),
             tags: Some(vec!["搜索".to_string()]),
+            parent_id: None,
         })
         .expect("创建笔记");
     notes
@@ -343,6 +348,7 @@ fn searches_chinese_english_and_ranks_titles_first() {
             category_id: None,
             initial_content: Some("这里也提到了全文搜索的实现，但没有出现在标题中。".to_string()),
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
     notes
@@ -351,6 +357,7 @@ fn searches_chinese_english_and_ranks_titles_first() {
             category_id: None,
             initial_content: Some("Borrow checker and lifetimes".to_string()),
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
 
@@ -415,6 +422,7 @@ fn search_supports_filters_tags_and_highlights() {
             category_id: Some(category.id.clone()),
             initial_content: Some("关键词内容：向量检索与倒排索引".to_string()),
             tags: Some(vec!["检索".to_string()]),
+            parent_id: None,
         })
         .expect("创建笔记");
     notes
@@ -423,6 +431,7 @@ fn search_supports_filters_tags_and_highlights() {
             category_id: None,
             initial_content: Some("关键词内容：向量检索与倒排索引".to_string()),
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
 
@@ -561,6 +570,7 @@ fn manages_categories_with_directory_rename_and_delete_strategies() {
             category_id: Some(child.id.clone()),
             initial_content: Some("摘要内容".into()),
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
     assert!(detail.note.file_path.contains("资料"), "{}", detail.note.file_path);
@@ -610,6 +620,7 @@ fn rebuilds_index_and_reports_status() {
                 category_id: None,
                 initial_content: Some(format!("第 {index} 篇内容，用于索引重建测试。")),
                 tags: None,
+                parent_id: None,
             })
             .expect("创建笔记");
     }
@@ -652,6 +663,7 @@ fn creates_validates_and_restores_backup_and_exports_markdown() {
             category_id: None,
             initial_content: Some("需要被备份的正文".to_string()),
             tags: Some(vec!["备份".to_string()]),
+            parent_id: None,
         })
         .expect("创建笔记");
 
@@ -727,6 +739,7 @@ fn closes_and_reopens_workspace_persisting_state() {
             category_id: None,
             initial_content: Some("关闭再打开后应能找回".to_string()),
             tags: Some(vec!["持久化".to_string()]),
+            parent_id: None,
         })
         .expect("创建笔记");
     let workspace_id = context.workspace.id.clone();
@@ -796,6 +809,7 @@ fn settings_and_path_safety_behave_as_documented() {
             category_id: None,
             initial_content: None,
             tags: None,
+            parent_id: None,
         })
         .expect("创建带特殊字符标题的笔记");
     assert!(!detail.note.file_path.contains(':'));
@@ -824,6 +838,7 @@ fn search_sorting_and_paging_work() {
                 category_id: None,
                 initial_content: Some("共同关键词：分页测试".to_string()),
                 tags: None,
+                parent_id: None,
             })
             .expect("创建笔记");
     }
@@ -880,6 +895,7 @@ fn ignores_self_writes_and_applies_external_events() {
             category_id: None,
             initial_content: Some("应用内写入的内容".to_string()),
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
 
@@ -1025,8 +1041,9 @@ fn applies_note_links_migration() {
     harness.create_workspace();
     let context = harness.context();
 
-    // 006 之后为 6（note_links / note_assets / note_file_stamp / search_rowid_map）
-    assert_eq!(context.db.schema_version().expect("schema 版本"), 6);
+    // 007 之后为 7（006 = note_links / note_assets / note_file_stamp / search_rowid_map，
+    // 007 = notes.parent_id 子文档层级）
+    assert_eq!(context.db.schema_version().expect("schema 版本"), 7);
 
     // 004：来源/时效列与类型化关系表
     let (has_relations, source_column) = context

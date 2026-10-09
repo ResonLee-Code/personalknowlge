@@ -57,6 +57,8 @@ interface NotesState {
   rename: (id: string, title: string, renameFile?: boolean) => Promise<void>;
   move: (id: string, categoryId: string | null) => Promise<void>;
   duplicate: (id: string) => Promise<void>;
+  /** 设置父文档（子文档层级）；`parentId = null` 移到顶层 */
+  setParent: (id: string, parentId: string | null) => Promise<boolean>;
   toggleFavorite: (id: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
   clearConflict: () => void;
@@ -281,6 +283,18 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       set({ detail, selectedId: detail.note.id });
     } catch (error) {
       set({ error: errorMessage(error) });
+    }
+  },
+
+  setParent: async (id, parentId) => {
+    try {
+      const detail = await noteService.setParent({ id, parentId });
+      set({ detail: get().selectedId === id ? detail : get().detail, error: null });
+      await get().refresh();
+      return true;
+    } catch (error) {
+      set({ error: errorMessage(error) });
+      return false;
     }
   },
 

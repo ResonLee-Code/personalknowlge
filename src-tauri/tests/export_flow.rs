@@ -46,6 +46,7 @@ impl Fixture {
                 category_id: None,
                 initial_content: Some(MARKDOWN.to_string()),
                 tags: Some(vec!["sqlite".into()]),
+                parent_id: None,
             })
             .expect("创建笔记");
 

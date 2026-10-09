@@ -8,7 +8,7 @@ use crate::application::export_service::{ExportNoteInput, ExportNoteResult, Expo
 use crate::core::error::Result;
 use crate::domain::note::{
     CreateNoteInput, NoteDetail, NoteListQuery, NoteListResult, NoteStatus, NoteSummary,
-    SaveNoteInput, SaveNoteResult, SetSourceInput,
+    SaveNoteInput, SaveNoteResult, SetParentInput, SetSourceInput,
 };
 use crate::state::AppState;
 use crate::repositories::{NoteRepository, SqliteNoteRepository};
@@ -57,6 +57,16 @@ pub async fn note_set_source(
 ) -> Result<NoteDetail> {
     let context = state.inner.context()?;
     run(move || NoteService::new(context).set_source(input)).await
+}
+
+/// 设置父文档（子文档层级）：`parentId = null` 移到顶层。
+#[tauri::command]
+pub async fn note_set_parent(
+    state: State<'_, AppState>,
+    input: SetParentInput,
+) -> Result<NoteDetail> {
+    let context = state.inner.context()?;
+    run(move || NoteService::new(context).set_parent(input)).await
 }
 
 #[tauri::command]

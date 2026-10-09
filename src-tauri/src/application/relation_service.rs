@@ -345,6 +345,7 @@ impl RelationService {
             source_ref: stored.frontmatter.source_ref.clone(),
             source_reliability: stored.frontmatter.source_reliability,
             valid_until: stored.frontmatter.valid_until.clone(),
+            parent: stored.frontmatter.parent.clone(),
             relations: relations.to_vec(),
             extra: stored.frontmatter.extra.clone(),
         };

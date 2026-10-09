@@ -110,6 +110,7 @@ impl WorkspaceService {
             title: "欢迎使用 Personal Knowledge OS".to_string(),
             category_id: None,
             initial_content: Some(welcome_note_body(&context.workspace.name)),
+            parent_id: None,
             tags: Some(vec!["入门".to_string()]),
         });
         // 首次创建时放一个示例模板，让「新建笔记 → 模板」这一能力可被发现

@@ -28,6 +28,7 @@ import type {
   OutgoingLink,
   SaveNoteInput,
   SearchQuery,
+  SetParentInput,
   TextSegment,
   UnresolvedLink,
   Workspace,
@@ -123,6 +124,32 @@ function now(): string {
   return new Date().toISOString();
 }
 
+/**
+ * 解析父文档：优先按 id 匹配，其次按标题（忽略大小写）。
+ * 与 Rust 端 `NoteService::resolve_parent` 的规则保持一致；
+ * 找不到时返回 undefined（父文档被删除后子文档回到顶层展示）。
+ */
+function findParentNote(parentId?: string | null): Note | undefined {
+  const raw = parentId?.trim();
+  if (!raw) return undefined;
+  return (
+    state.notes.find((item) => item.id === raw && item.status !== 'deleted') ??
+    state.notes.find(
+      (item) => item.status !== 'deleted' && item.title.toLowerCase() === raw.toLowerCase(),
+    )
+  );
+}
+
+/** 防环：沿父链上溯，命中 `id` 说明会形成环。 */
+function wouldFormCycle(id: string, parentId: string): boolean {
+  let current: string | null = parentId;
+  for (let guard = 0; current && guard < 64; guard += 1) {
+    if (current === id) return true;
+    current = state.notes.find((item) => item.id === current)?.parentId ?? null;
+  }
+  return false;
+}
+
 function ulid(): string {
   return Math.random().toString(36).slice(2, 12).toUpperCase();
 }
@@ -151,6 +178,7 @@ function toSummary(note: Note): NoteSummary {
   return {
     id: note.id,
     title: note.title,
+    parentId: note.parentId ?? null,
     filePath: note.filePath,
     categoryId: note.categoryId ?? null,
     categoryPath: categoryPath(note.categoryId),
@@ -358,6 +386,8 @@ function listNotes(query: NoteListQuery = {}) {
 
 function createNote(input: CreateNoteInput): NoteDetail {
   const workspace = requireWorkspace();
+  // 子文档：parentId 可以是父笔记 id，也可以是标题（与后端解析规则一致）
+  const parent = findParentNote(input.parentId);
   const createdAt = now();
   const id = `note_${ulid()}`;
   const title = input.title.trim() || '未命名笔记';
@@ -367,7 +397,8 @@ function createNote(input: CreateNoteInput): NoteDetail {
     workspaceId: workspace.id,
     title,
     filePath,
-    categoryId: input.categoryId ?? null,
+    // 未显式指定分类时继承父文档分类
+    categoryId: input.categoryId ?? parent?.categoryId ?? null,
     status: 'active',
     contentHash: ulid(),
     wordCount: plainText(input.initialContent ?? '').length,
@@ -375,6 +406,7 @@ function createNote(input: CreateNoteInput): NoteDetail {
     createdAt,
     updatedAt: createdAt,
     lastIndexedAt: createdAt,
+    parentId: parent?.id ?? null,
   };
   state.notes.push(note);
   state.contents[id] = input.initialContent ?? '';
@@ -890,6 +922,22 @@ export async function handleMockInvoke(
       persist();
       return toDetail(note);
     }
+    case 'note_set_parent': {
+      const input = (payload.input ?? {}) as SetParentInput;
+      const note = state.notes.find((item) => item.id === input.id);
+      if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
+      const parent = findParentNote(input.parentId);
+      if (input.parentId && !parent) fail('INVALID_INPUT', '找不到目标父文档。');
+      if (parent && parent.id === note.id) fail('INVALID_INPUT', '不能把笔记设为自己的子文档。');
+      if (parent && wouldFormCycle(note.id, parent.id)) {
+        fail('INVALID_INPUT', '不能把笔记移动到它自己的子文档下。');
+      }
+      note.parentId = parent?.id ?? null;
+      note.updatedAt = now();
+      persist();
+      emit('notes://changed', { kind: 'modified', noteId: note.id });
+      return toDetail(note);
+    }
     case 'note_duplicate': {
       const note = state.notes.find((item) => item.id === payload.id);
       if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
@@ -898,6 +946,7 @@ export async function handleMockInvoke(
         categoryId: note.categoryId,
         initialContent: state.contents[note.id] ?? '',
         tags: state.noteTags[note.id] ?? [],
+        parentId: note.parentId ?? null,
       });
     }
     case 'note_set_favorite': {

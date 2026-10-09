@@ -64,6 +64,7 @@ impl Fixture {
                 category_id: None,
                 initial_content: Some(content.to_string()),
                 tags: None,
+                parent_id: None,
             })
             .expect("创建笔记")
     }
@@ -208,6 +209,7 @@ fn resolves_relative_markdown_links() {
             category_id: Some(category_id.clone()),
             initial_content: Some("正文".into()),
             tags: None,
+            parent_id: None,
         })
         .expect("创建目标");
 

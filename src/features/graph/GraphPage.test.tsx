@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphPage } from '@/features/graph/GraphPage';
 import { graphService } from '@/services/graphService';
 import { useCategoriesStore } from '@/stores/categoriesStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { GraphData } from '@/types';
 
 vi.mock('@/services/graphService', () => ({
@@ -115,6 +116,19 @@ describe('GraphPage', () => {
     renderPage();
 
     expect(await screen.findByText(/节点或连接过多/)).toBeInTheDocument();
+  });
+
+  it('切换知识库后自动重新查询（不再需要手动刷新）', async () => {
+    useWorkspaceStore.setState({ workspace: { id: 'ws_a' } as never });
+    renderPage();
+    await screen.findByTestId('graph-canvas');
+    const initialCalls = getGraph.mock.calls.length;
+
+    getGraph.mockResolvedValue(payload({ nodes: [], edges: [], totalNodes: 0, totalEdges: 0 }));
+    useWorkspaceStore.setState({ workspace: { id: 'ws_b' } as never });
+
+    await waitFor(() => expect(getGraph.mock.calls.length).toBeGreaterThan(initialCalls));
+    expect(await screen.findByText('当前筛选下没有节点')).toBeInTheDocument();
   });
 
   it('没有节点时给出空状态', async () => {

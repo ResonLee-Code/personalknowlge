@@ -94,6 +94,7 @@ fn rendered_content_can_be_created_as_a_note() {
             category_id: None,
             initial_content: Some(rendered.content.clone()),
             tags: None,
+            parent_id: None,
         })
         .expect("按模板新建笔记");
 

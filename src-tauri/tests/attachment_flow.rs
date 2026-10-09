@@ -80,6 +80,7 @@ fn saves_pasted_image_into_month_directory_and_returns_link_path() {
             category_id: Some(category.id.clone()),
             initial_content: None,
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
 
@@ -184,6 +185,7 @@ fn reads_workspace_relative_image_as_data_url() {
             category_id: Some(category.id.clone()),
             initial_content: None,
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
     let saved = fixture

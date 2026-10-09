@@ -7,6 +7,7 @@ import type {
   NoteSummary,
   SaveNoteInput,
   SetSourceInput,
+  SetParentInput,
   SaveNoteResult,
   ImportNotesInput,
   ImportReport,
@@ -47,6 +48,9 @@ export const noteService = {
 
   setFavorite: (id: string, favorite: boolean) =>
     call<NoteDetail>('note_set_favorite', { id, favorite }),
+
+  /** 设置父文档（子文档层级）；`parentId` 传 null 表示移到顶层 */
+  setParent: (input: SetParentInput) => call<NoteDetail>('note_set_parent', { input }),
 
   setTags: (id: string, tags: string[]) => call<NoteDetail>('note_set_tags', { id, tags }),
 

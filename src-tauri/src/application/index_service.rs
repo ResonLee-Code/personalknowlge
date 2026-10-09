@@ -29,6 +29,7 @@ use crate::repositories::{
 use super::context::WorkspaceContext;
 use super::link_service::LinkService;
 use super::relation_service::RelationService;
+use super::note_service::NoteService;
 
 /// 扫描结果。
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
@@ -495,6 +496,8 @@ impl IndexService {
             plain_text: String,
             tags: Vec<String>,
             category_path: String,
+            /// frontmatter 里声明的父文档（id 或标题），批次结束后统一解析
+            declared_parent: Option<String>,
         }
         let workspace_id = self.workspace_id().to_string();
         let mut prepared: Vec<Prepared> = Vec::with_capacity(files.len());
@@ -563,10 +566,16 @@ impl IndexService {
                     valid_until: stored.frontmatter.valid_until.clone(),
                     file_size: stamp.as_ref().map(|(size, _)| *size as i64),
                     file_mtime: stamp.and_then(|(_, mtime)| mtime),
+                    parent_id: None,
                 },
                 plain_text,
                 tags: stored.frontmatter.tags.clone(),
                 category_path,
+                declared_parent: stored
+                    .frontmatter
+                    .parent
+                    .clone()
+                    .filter(|value| !value.trim().is_empty()),
             });
         }
 
@@ -630,6 +639,39 @@ impl IndexService {
                         rusqlite::params![note.id, now_iso()],
                     )?;
                     report.added += 1;
+                }
+                Ok(())
+            })?;
+        }
+        // 3) 解析子文档层级：frontmatter 的 parent 可能是 id，也可能是标题；
+        //    放在所有批次之后统一处理，保证跨批次的父子引用也能解析。
+        let pending: Vec<(String, String)> = prepared
+            .iter()
+            .filter_map(|item| item.declared_parent.clone().map(|parent| (item.note.id.clone(), parent)))
+            .collect();
+        if !pending.is_empty() {
+            let titles: HashMap<String, String> = self
+                .ctx
+                .db
+                .with_conn(|conn| {
+                    SqliteNoteRepository.list_by_status(conn, &workspace_id, NoteStatus::Active)
+                })?
+                .into_iter()
+                .map(|note| (note.title.to_lowercase(), note.id))
+                .collect();
+            self.ctx.db.with_transaction(|tx| {
+                for (note_id, declared) in &pending {
+                    if SqliteNoteRepository.get(tx, declared)?.is_some() {
+                        if declared != note_id {
+                            SqliteNoteRepository.set_parent(tx, note_id, Some(declared))?;
+                        }
+                        continue;
+                    }
+                    if let Some(parent_id) = titles.get(&declared.to_lowercase()) {
+                        if parent_id != note_id {
+                            SqliteNoteRepository.set_parent(tx, note_id, Some(parent_id))?;
+                        }
+                    }
                 }
                 Ok(())
             })?;
@@ -707,6 +749,7 @@ impl IndexService {
             valid_until: stored.frontmatter.valid_until.clone(),
             file_size: None,
             file_mtime: None,
+            parent_id: None,
         };
         // 幂等采纳：文件监听回调与显式扫描可能并发（两者都是「先读磁盘快照、再写库」），
         // 因此插入前在同一事务内再确认一次路径是否已被别的扫描采纳；已存在则直接跳过，
@@ -897,6 +940,9 @@ impl IndexService {
         let tags = self.tag_names(&note.id).unwrap_or_default();
         if let Err(error) = RelationService::new(Arc::clone(&self.ctx)).refresh_note(note) {
             tracing::warn!(target: "relations", "同步外部修改的关系失败：{}", error.message);
+        }
+        if let Err(error) = NoteService::new(Arc::clone(&self.ctx)).refresh_parent(note) {
+            tracing::debug!(target: "notes", "同步父文档失败：{}", error.message);
         }
         if let Err(error) = self.index_document(&note.id, &title, &stored.body, &tags, &category_path)
         {

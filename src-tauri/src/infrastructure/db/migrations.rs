@@ -45,9 +45,14 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "search_rowid_map",
         sql: include_str!("../../../migrations/006_search_rowid_map.sql"),
     },
+    Migration {
+        version: 7,
+        name: "note_parent",
+        sql: include_str!("../../../migrations/007_note_parent.sql"),
+    },
 ];
 
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// 创建迁移记录表。
 fn ensure_migration_table(conn: &Connection) -> Result<()> {

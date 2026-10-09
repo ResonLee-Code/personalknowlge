@@ -178,6 +178,26 @@ CREATE TABLE IF NOT EXISTS search_documents_map (
 用途：扫描/监听先用「mtime + size」比对，未变化的文件直接短路，
 不再读取全文与计算 sha256（1 万篇规模下稳态扫描的主要成本）。
 
+### notes 的子文档列（迁移 007，子文档层级）
+
+```sql
+ALTER TABLE notes ADD COLUMN parent_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_notes_parent ON notes(parent_id);
+```
+
+| 列 | 含义 | 对应 frontmatter |
+| --- | --- | --- |
+| `parent_id` | 父文档 id（NULL = 顶层文档） | 子文档的 `parent`（可写父文档 id 或标题） |
+
+- **派生数据**：以文件为准。应用内「创建子文档 / 升级为顶层文档」会写回子文档 frontmatter 的
+  `parent:`，再由写入路径投影到该列；外部编辑改 `parent:` 后扫描时会重算；
+- 解析规则：先按 id 精确匹配，再按标题（忽略大小写、只取 active、按更新时间倒序取第一条）；
+  解析不到父文档时 `parent_id` 置空（子文档回到顶层展示，不会从列表中消失）；
+- 应用内写入时 `parent:` 存**父文档 id**（稳定，不随父文档改名失效）；
+  手写 frontmatter 时也可以写父文档标题，扫描 / 保存时按「id 优先、标题兜底」解析；
+- 防环：`set_parent` / 创建子文档时沿父链上溯，命中自身或超过 64 跳报 `INVALID_INPUT`；
+- 列表展示为「父文档 → 子文档」目录树，父子关系不改变笔记的文件位置（与分类目录相互独立）。
+
 ### 索引
 
 ```sql
@@ -231,7 +251,9 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 - 索引可重建：`search_rebuild_index` 清空 FTS5 并按 `notes` 重新写入，不依赖外部文件。
 
 当前迁移列表：`001_init`（表结构）、`002_search_index`（FTS5）、`003_note_links`（双向链接），
-`SCHEMA_VERSION = 3`。
+`004_note_assets`（类型化关系 + 来源时效）、`005_note_file_stamp`（文件快照）、
+`006_search_rowid_map`（FTS rowid 映射）、`007_note_parent`（子文档层级），
+`SCHEMA_VERSION = 7`。
 
 ## 5. 数据恢复能力
 

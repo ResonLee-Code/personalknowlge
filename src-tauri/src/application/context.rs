@@ -138,6 +138,7 @@ impl WorkspaceContext {
                 word_count: note.word_count,
                 created_at: note.created_at,
                 updated_at: note.updated_at,
+                parent_id: note.parent_id,
                 snippet: Vec::new(),
             })
             .collect())

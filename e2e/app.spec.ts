@@ -259,6 +259,48 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByText(/拖拽节点可固定位置/)).toBeVisible({ timeout: 10_000 });
   await page.screenshot({ path: path.join(SHOTS, '21-graph.png') });
 
+  // 22. 子文档层级 / 右键菜单 / 大纲预览（V1.2.1，对标语雀）
+  await page.goto('/#/notes');
+  const parentRow = page
+    .getByTestId('note-list-item')
+    .filter({ hasText: 'SQLite 全文搜索学习笔记' })
+    .first();
+  await parentRow.getByRole('button', { name: '笔记操作' }).click();
+  await page.getByTestId('note-menu-create-child').click();
+  await expect(page.getByRole('dialog')).toContainText('新建子文档');
+  await page.getByLabel('子文档标题').fill('索引策略');
+  await page.getByRole('button', { name: '创建子文档' }).click();
+  // 创建后直接打开子文档
+  await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue('索引策略');
+
+  // 列表显示父子层级：父行带子文档数量与折叠箭头，子行缩进显示
+  await expect(parentRow).toContainText('1 篇子文档');
+  const childRow = page.getByTestId('note-list-item').filter({ hasText: '索引策略' }).first();
+  await expect(childRow).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '22-note-tree.png') });
+
+  await parentRow.getByTestId('note-tree-toggle').click();
+  await expect(childRow).toHaveCount(0);
+  await parentRow.getByTestId('note-tree-toggle').click();
+  await expect(childRow).toBeVisible();
+
+  // 右键菜单 → 大纲预览 → 点击标题打开并跳转
+  await parentRow.click({ button: 'right' });
+  await expect(page.getByTestId('note-menu-outline')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '23-context-menu.png') });
+  await page.getByTestId('note-menu-outline').click();
+  await expect(page.getByTestId('outline-preview-item').first()).toContainText('全文搜索');
+  await page.screenshot({ path: path.join(SHOTS, '24-outline-preview.png') });
+  await page.getByTestId('outline-preview-item').first().click();
+  await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue(
+    'SQLite 全文搜索学习笔记',
+  );
+
+  // 子文档可升级为顶层文档
+  await childRow.click({ button: 'right' });
+  await page.getByTestId('note-menu-promote').click();
+  await expect(parentRow).not.toContainText('1 篇子文档');
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

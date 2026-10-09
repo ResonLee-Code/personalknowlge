@@ -45,6 +45,7 @@ fn source_metadata_round_trips_through_frontmatter_and_database() {
             category_id: None,
             initial_content: None,
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
 
@@ -103,6 +104,7 @@ fn external_frontmatter_edit_syncs_source_metadata() {
             category_id: None,
             initial_content: None,
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
 
@@ -136,6 +138,7 @@ fn save_rename_move_tags_keep_source_and_relations() {
             category_id: None,
             initial_content: Some("正文".into()),
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
 

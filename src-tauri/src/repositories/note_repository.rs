@@ -48,6 +48,17 @@ pub trait NoteRepository {
     ) -> Result<()>;
     fn set_category(&self, conn: &Connection, id: &str, category_id: Option<&str>) -> Result<()>;
     fn set_favorite(&self, conn: &Connection, id: &str, favorite: bool) -> Result<()>;
+    /// 更新父文档（子文档层级）
+    fn set_parent(&self, conn: &Connection, id: &str, parent_id: Option<&str>) -> Result<()>;
+
+    /// 按标题（忽略大小写）查活跃笔记 id，用于把 frontmatter 里的父文档标题解析成 id
+    fn find_active_id_by_title(
+        &self,
+        conn: &Connection,
+        workspace_id: &str,
+        title: &str,
+    ) -> Result<Option<String>>;
+
     /// 更新文件快照（mtime + size），扫描时用于短路
     fn set_file_stamp(
         &self,
@@ -88,7 +99,7 @@ pub struct SqliteNoteRepository;
 
 const NOTE_COLUMNS: &str = "id, workspace_id, title, file_path, category_id, status, content_hash,
      word_count, favorite, created_at, updated_at, last_indexed_at,
-     source_type, source_ref, source_reliability, valid_until, file_size, file_mtime";
+     source_type, source_ref, source_reliability, valid_until, file_size, file_mtime, parent_id";
 
 fn map_note(row: &Row<'_>) -> rusqlite::Result<Note> {
     let status: String = row.get("status")?;
@@ -111,6 +122,7 @@ fn map_note(row: &Row<'_>) -> rusqlite::Result<Note> {
         valid_until: row.get("valid_until")?,
         file_size: row.get("file_size")?,
         file_mtime: row.get("file_mtime")?,
+        parent_id: row.get("parent_id")?,
     })
 }
 
@@ -120,9 +132,9 @@ impl NoteRepository for SqliteNoteRepository {
             "INSERT INTO notes (id, workspace_id, title, file_path, category_id, status,
                                 content_hash, word_count, favorite, created_at, updated_at,
                                 last_indexed_at, source_type, source_ref, source_reliability,
-                                valid_until, file_size, file_mtime)
+                                valid_until, file_size, file_mtime, parent_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18)",
+                     ?17, ?18, ?19)",
             params![
                 note.id,
                 note.workspace_id,
@@ -142,6 +154,7 @@ impl NoteRepository for SqliteNoteRepository {
                 note.valid_until,
                 note.file_size,
                 note.file_mtime,
+                note.parent_id,
             ],
         )?;
         Ok(())
@@ -153,7 +166,7 @@ impl NoteRepository for SqliteNoteRepository {
                               content_hash = ?6, word_count = ?7, favorite = ?8,
                               source_type = ?13, source_ref = ?14,
                               source_reliability = ?15, valid_until = ?16,
-                              file_size = ?17, file_mtime = ?18,
+                              file_size = ?17, file_mtime = ?18, parent_id = ?19,
                               created_at = ?9, updated_at = ?10, last_indexed_at = ?11
              WHERE id = ?1",
             params![
@@ -174,6 +187,7 @@ impl NoteRepository for SqliteNoteRepository {
                 note.valid_until,
                 note.file_size,
                 note.file_mtime,
+                note.parent_id,
             ],
         )?;
         Ok(())
@@ -346,6 +360,32 @@ impl NoteRepository for SqliteNoteRepository {
         conn.execute(
             "UPDATE notes SET category_id = ?2 WHERE id = ?1",
             params![id, category_id],
+        )?;
+        Ok(())
+    }
+
+    fn find_active_id_by_title(
+        &self,
+        conn: &Connection,
+        workspace_id: &str,
+        title: &str,
+    ) -> Result<Option<String>> {
+        let mut statement = conn.prepare(
+            "SELECT id FROM notes
+             WHERE workspace_id = ?1 AND status = 'active' AND lower(title) = lower(?2)
+             ORDER BY updated_at DESC LIMIT 1",
+        )?;
+        let mut rows = statement.query_map(params![workspace_id, title], |row| row.get::<_, String>(0))?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    fn set_parent(&self, conn: &Connection, id: &str, parent_id: Option<&str>) -> Result<()> {
+        conn.execute(
+            "UPDATE notes SET parent_id = ?2 WHERE id = ?1",
+            params![id, parent_id],
         )?;
         Ok(())
     }

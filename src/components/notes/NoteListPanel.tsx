@@ -1,6 +1,6 @@
 import { CheckSquare, FileText, FolderTree, ListFilter, Search, Star, Tag, Trash2, TriangleAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
@@ -9,12 +9,14 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ROUTES } from '@/lib/constants';
 import { errorMessage } from '@/lib/format';
+import { buildNoteTree } from '@/lib/noteTree';
 import { groupByRecency } from '@/lib/timeGroup';
 import { cn } from '@/lib/utils';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
 import { useTagsStore } from '@/stores/tagsStore';
 import { useUiStore } from '@/stores/uiStore';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 import { BatchMoveDialog, BatchTagDialog } from './BatchActionDialogs';
 import { NoteListItem } from './NoteListItem';
@@ -48,6 +50,16 @@ export function NoteListPanel() {
   const deleteMany = useNotesStore((state) => state.deleteMany);
   const [batchMoveOpen, setBatchMoveOpen] = useState(false);
   const [batchTagOpen, setBatchTagOpen] = useState(false);
+  /** 折叠的父文档 id（默认全部展开） */
+  const [collapsedIds, setCollapsedIds] = useState<string[]>([]);
+
+  const collapsed = useMemo(() => new Set(collapsedIds), [collapsedIds]);
+  const rows = useMemo(() => buildNoteTree(items, collapsed), [items, collapsed]);
+
+  const toggleCollapse = (id: string) =>
+    setCollapsedIds((previous) =>
+      previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id],
+    );
 
   const basePath = `/${location.pathname.split('/').filter(Boolean)[0] ?? 'notes'}`;
 
@@ -112,11 +124,13 @@ export function NoteListPanel() {
   })();
 
   return (
-    <div
-      data-testid="note-list-panel"
-      className="flex min-w-0 shrink-0 flex-col border-r border-[var(--border-subtle)]"
-      style={{ width }}
-    >
+    // 列表条目在标题被截断时需要 tooltip 显示完整标题，这里提供一个局部 provider
+    <TooltipProvider delayDuration={250}>
+      <div
+        data-testid="note-list-panel"
+        className="flex min-w-0 shrink-0 flex-col border-r border-[var(--border-subtle)]"
+        style={{ width }}
+      >
       <div className="space-y-2 border-b border-[var(--border-subtle)] p-2.5">
         <div className="flex items-center justify-between">
           <h1 className="text-sm font-semibold text-[var(--ink)]">{title}</h1>
@@ -268,12 +282,16 @@ export function NoteListPanel() {
             </div>
           ) : (
             <ul className="space-y-0.5 p-1.5">
-              {items.map((note) => (
+              {rows.map(({ note, depth, childCount }) => (
                 <NoteListItem
                   key={note.id}
                   note={note}
                   selected={selectedId === note.id}
                   basePath={basePath}
+                  depth={depth}
+                  childCount={childCount}
+                  collapsed={collapsed.has(note.id)}
+                  onToggleCollapse={() => toggleCollapse(note.id)}
                   onOpen={() => navigate(`${basePath}/${note.id}`)}
                 />
               ))}
@@ -336,6 +354,7 @@ export function NoteListPanel() {
           </button>
         </div>
       ) : null}
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }

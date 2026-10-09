@@ -27,6 +27,8 @@ pub struct Frontmatter {
     pub source_reliability: Option<i64>,
     /// 时效：超过该日期视为可能过期（ISO 8601 日期或时间）
     pub valid_until: Option<String>,
+    /// 父文档（子文档层级）：父笔记 id 或标题
+    pub parent: Option<String>,
     /// 用户显式声明的类型化关系（N2）
     pub relations: Vec<RelationEntry>,
     /// 未识别的字段，按原顺序保留
@@ -147,6 +149,7 @@ fn from_mapping(mapping: &Mapping) -> Frontmatter {
             }
             "valid_until" | "validUntil" => frontmatter.valid_until = as_string(value),
             "relations" => frontmatter.relations = as_relations(value),
+            "parent" | "parent_id" | "parentId" => frontmatter.parent = as_string(value),
             _ => frontmatter.extra.push((key_name.to_string(), value.clone())),
         }
     }
@@ -254,6 +257,7 @@ pub fn serialize(frontmatter: &Frontmatter, body: &str) -> String {
         }
     }
     push_scalar(&mut yaml, "valid_until", frontmatter.valid_until.as_ref());
+    push_scalar(&mut yaml, "parent", frontmatter.parent.as_ref());
     if !frontmatter.relations.is_empty() {
         yaml.push_str(&relation_block(&frontmatter.relations));
     }
@@ -273,6 +277,9 @@ pub fn serialize(frontmatter: &Frontmatter, body: &str) -> String {
         "source_reliability",
         "valid_until",
         "relations",
+        "parent",
+        "parent_id",
+        "parentId",
     ];
     if !frontmatter.extra.is_empty() {
         let mut extra = Mapping::new();

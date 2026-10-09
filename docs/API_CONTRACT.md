@@ -263,7 +263,22 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 重命名目标笔记会改写来源 frontmatter 里的 `target`；目标被删除时派生关系解绑
   （声明保留，目标恢复后重建即可复原）。
 
-## 17. 前端服务层
+## 17. 子文档层级（V1.2.1）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `note_set_parent` | `{ input: { id, parentId } }` | `NoteDetail` |
+
+- `parentId` 可以是父文档 **id** 或**标题**；传 `null`（或空串）表示**移到顶层**；
+- 找不到父文档时返回 `INVALID_INPUT`；把笔记设为自己的子孙会返回 `INVALID_INPUT`（防环，含 > 64 跳兜底）；
+- 父子关系以 **子文档 frontmatter 的 `parent:`** 为唯一事实来源，`notes.parent_id` 是可重建的派生列；
+- `CreateNoteInput` 新增可选 `parentId`：创建时即成为该文档的子文档，并且
+  **未显式指定 `categoryId` 时会继承父文档的分类**；
+- `NoteSummary` 与 `Note` 新增 `parentId`（无则为 `null`），列表据此渲染目录树；
+- 父文档被删除 / 重命名后：派生列指向失效时子文档按顶层展示（不会隐藏），
+  重命名会同步子文档 frontmatter 里的 `parent:`（写 id 时无影响）。
+
+## 18. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 

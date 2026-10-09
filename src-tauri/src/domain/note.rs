@@ -63,6 +63,8 @@ pub struct Note {
     /// 文件大小（字节）与修改时间快照：扫描时用于短路，避免无谓的读取与哈希
     pub file_size: Option<i64>,
     pub file_mtime: Option<String>,
+    /// 父文档（子文档层级）；由 frontmatter 的 `parent` 投影而来
+    pub parent_id: Option<String>,
 }
 
 /// 列表展示用的笔记摘要。
@@ -83,6 +85,9 @@ pub struct NoteSummary {
     /// 标签名称列表
     #[serde(default)]
     pub tags: Vec<String>,
+    /// 父文档 id（子文档层级），无则为顶层文档
+    #[serde(default)]
+    pub parent_id: Option<String>,
     /// 搜索结果摘要（普通列表为空）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub snippet: Vec<TextSegment>,
@@ -197,6 +202,9 @@ pub struct CreateNoteInput {
     pub initial_content: Option<String>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    /// 父文档 id（或标题）：填写后创建为它的子文档，并继承其分类
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 
 /// 更新来源与时效输入（N1）。
@@ -216,6 +224,15 @@ pub struct SetSourceInput {
     /// 时效（ISO 8601）；超过该日期在界面提示「可能已过期」
     #[serde(default)]
     pub valid_until: Option<String>,
+}
+
+/// 设置父文档输入：`parentId = null` 表示移到顶层。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetParentInput {
+    pub id: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 
 /// 保存笔记输入。

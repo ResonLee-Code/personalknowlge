@@ -47,6 +47,7 @@ impl Fixture {
                 category_id: None,
                 initial_content: None,
                 tags: None,
+                parent_id: None,
             })
             .expect("创建笔记")
             .note

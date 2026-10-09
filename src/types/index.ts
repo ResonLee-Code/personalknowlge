@@ -70,6 +70,8 @@ export interface Note {
   createdAt: string;
   updatedAt: string;
   lastIndexedAt?: string | null;
+  /** 父文档 id（子文档层级），无则为顶层文档 */
+  parentId?: string | null;
   /** 来源与时效（V1.1.2 N1） */
   sourceType?: string | null;
   sourceRef?: string | null;
@@ -85,6 +87,8 @@ export interface TextSegment {
 export interface NoteSummary {
   id: string;
   title: string;
+  /** 父文档 id（子文档层级），无则为顶层文档 */
+  parentId?: string | null;
   filePath: string;
   categoryId?: string | null;
   categoryPath: string;
@@ -324,6 +328,14 @@ export interface CreateNoteInput {
   categoryId?: string | null;
   initialContent?: string | null;
   tags?: string[] | null;
+  /** 父文档 id：创建为该文档的子文档（继承其分类） */
+  parentId?: string | null;
+}
+
+/** 设置父文档（子文档层级），parentId 为 null 表示移到顶层 */
+export interface SetParentInput {
+  id: string;
+  parentId?: string | null;
 }
 
 export interface SaveNoteInput {

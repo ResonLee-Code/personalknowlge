@@ -17,6 +17,7 @@ import { graphService } from '@/services/graphService';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
 import { useTagsStore } from '@/stores/tagsStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { GraphData } from '@/types';
 
 import { ForceGraph } from './ForceGraph';
@@ -28,6 +29,8 @@ export function GraphPage() {
   const pathOf = useCategoriesStore((state) => state.pathOf);
   const tags = useTagsStore((state) => state.tags);
   const currentNoteId = useNotesStore((state) => state.selectedId ?? state.detail?.note.id ?? null);
+  /** 当前知识库 id：切换知识库后图谱需要重新查询（V1.2.1 修复） */
+  const workspaceId = useWorkspaceStore((state) => state.workspace?.id ?? null);
 
   const [data, setData] = useState<GraphData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +77,8 @@ export function GraphPage() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // 切换 / 打开 / 新建知识库后自动重新查询，避免残留上一个库的图谱
+  }, [load, workspaceId]);
 
   const communities = useMemo(
     () => detectCommunities((data?.nodes ?? []).map((node) => node.id), data?.edges ?? [], { resolution }),

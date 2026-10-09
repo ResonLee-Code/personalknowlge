@@ -21,7 +21,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { BacklinkPanel } from '@/components/editor/BacklinkPanel';
@@ -77,6 +77,7 @@ import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 /** 笔记编辑器（设计文档 16.5）。 */
 export function NoteEditorPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const detail = useNotesStore((state) => state.detail);
   const detailLoading = useNotesStore((state) => state.detailLoading);
   const saveStatus = useNotesStore((state) => state.saveStatus);
@@ -264,6 +265,40 @@ export function NoteEditorPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail?.note.id]);
+
+  /**
+   * 从笔记列表的「大纲预览」跳转过来（URL `?h=<偏移量>`）：
+   * 滚动到对应标题；纯预览模式先切分屏，等编辑器挂载后再跳。
+   */
+  const appliedHeading = useRef<string | null>(null);
+  useEffect(() => {
+    const headingParam = searchParams.get('h');
+    const noteId = detail?.note.id;
+    if (!headingParam || !noteId || !content) return;
+    const key = `${noteId}:${headingParam}`;
+    if (appliedHeading.current === key) return;
+    // 预览模式下编辑器未挂载，先切到分屏；editorMode 变化会重新触发本 effect
+    if (editorMode === 'preview') {
+      setEditorMode('split');
+      return;
+    }
+    const offset = Number(headingParam);
+    appliedHeading.current = key;
+    const frame = requestAnimationFrame(() => jumpToHeading(offset));
+    // 清掉参数：刷新页面或切换笔记后不再重复跳转
+    const next = new URLSearchParams(searchParams);
+    next.delete('h');
+    setSearchParams(next, { replace: true });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    searchParams,
+    setSearchParams,
+    detail?.note.id,
+    content,
+    editorMode,
+    setEditorMode,
+    jumpToHeading,
+  ]);
 
   // 关系（N2）：随笔记切换与保存刷新，用于元信息栏角标
   useEffect(() => {

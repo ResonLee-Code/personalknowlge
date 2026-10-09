@@ -52,6 +52,7 @@ fn lists_attachments_with_reference_notes_and_deletes_them() {
             category_id: None,
             initial_content: None,
             tags: None,
+            parent_id: None,
         })
         .expect("创建笔记");
 

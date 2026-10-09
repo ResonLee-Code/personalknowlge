@@ -427,6 +427,7 @@ impl ImportService {
             source_reliability: source.source_reliability,
             valid_until: source.valid_until.clone(),
             relations: source.relations.clone(),
+            parent: None,
             extra: source.extra.clone(),
         };
         // 正文转换：Obsidian 嵌入 → 标准图片链接；Notion 相对链接 → URL 解码
@@ -483,6 +484,7 @@ impl ImportService {
             last_indexed_at: None,
             file_size: None,
             file_mtime: None,
+            parent_id: None,
             source_type: source.source_type.clone(),
             source_ref: source.source_ref.clone(),
             source_reliability: source.source_reliability,

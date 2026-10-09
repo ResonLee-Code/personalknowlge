@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import { NoteListItem } from '@/components/notes/NoteListItem';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { useNotesStore } from '@/stores/notesStore';
 
 const note = {
@@ -24,9 +25,11 @@ describe('NoteListItem 点击行为', () => {
     useNotesStore.setState({ selectionMode: false, selection: [] });
     const onOpen = vi.fn();
     render(
-      <MemoryRouter>
-        <NoteListItem note={note} selected={false} basePath="/notes" onOpen={onOpen} />
-      </MemoryRouter>,
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter>
+          <NoteListItem note={note} selected={false} basePath="/notes" onOpen={onOpen} />
+        </MemoryRouter>
+      </TooltipProvider>,
     );
     await userEvent.click(screen.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }));
     expect(onOpen).toHaveBeenCalled();
@@ -37,9 +40,11 @@ describe('NoteListItem 点击行为', () => {
     useNotesStore.setState({ selectionMode: true, selection: [] });
     const onOpen = vi.fn();
     render(
-      <MemoryRouter>
-        <NoteListItem note={note} selected={false} basePath="/notes" onOpen={onOpen} />
-      </MemoryRouter>,
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter>
+          <NoteListItem note={note} selected={false} basePath="/notes" onOpen={onOpen} />
+        </MemoryRouter>
+      </TooltipProvider>,
     );
     await userEvent.click(screen.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }));
     expect(onOpen).not.toHaveBeenCalled();

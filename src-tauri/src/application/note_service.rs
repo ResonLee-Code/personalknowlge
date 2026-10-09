@@ -11,6 +11,7 @@ use crate::core::paths::{WorkspacePaths, INBOX_DIR};
 use crate::core::text::{count_words, markdown_to_plain_text};
 use crate::core::time::{now_file_timestamp, now_iso};
 use crate::domain::note::{
+    SetParentInput,
     SetSourceInput,
     CreateNoteInput, Note, NoteDetail, NoteListQuery, NoteListResult, NoteStatus, NoteSummary,
     SaveNoteInput, SaveNoteResult,
@@ -105,7 +106,16 @@ impl NoteService {
     pub fn create(&self, input: CreateNoteInput) -> Result<NoteDetail> {
         let title = normalize_title(&input.title);
         let tags = self.tags().normalize_names(input.tags.unwrap_or_default());
-        let category_id = input.category_id.clone();
+        // 子文档：父文档可以用 id 指定（前端），也允许直接写标题
+        let parent = match input.parent_id.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            Some(reference) => self.resolve_parent(reference, None)?,
+            None => None,
+        };
+        // 未显式指定分类时继承父文档的分类（子文档默认与父文档放在一起）
+        let category_id = input
+            .category_id
+            .clone()
+            .or_else(|| parent.as_ref().and_then(|note| note.category_id.clone()));
         let directory = self.directory_for_category(category_id.as_deref())?;
         let lookup = self.ctx.category_lookup()?;
         let category_path = category_id
@@ -130,6 +140,7 @@ impl NoteService {
             source_reliability: None,
             valid_until: None,
             relations: Vec::new(),
+            parent: parent.as_ref().map(|note| note.id.clone()),
             extra: Vec::new(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &body);
@@ -155,6 +166,7 @@ impl NoteService {
             last_indexed_at: None,
             file_size: None,
             file_mtime: None,
+            parent_id: parent.as_ref().map(|note| note.id.clone()),
             source_type: None,
             source_ref: None,
             source_reliability: None,
@@ -253,11 +265,13 @@ impl NoteService {
             source_ref: existing.frontmatter.source_ref.clone(),
             source_reliability: existing.frontmatter.source_reliability,
             valid_until: existing.frontmatter.valid_until.clone(),
+            parent: existing.frontmatter.parent.clone(),
             relations: existing.frontmatter.relations.clone(),
             extra: existing.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &input.content);
         self.refresh_file_stamp(&note.id, &note.file_path);
+        let _ = self.refresh_parent(&note);
         let content_hash = self
             .ctx
             .storage
@@ -362,6 +376,7 @@ impl NoteService {
             source_reliability: stored.frontmatter.source_reliability,
             valid_until: stored.frontmatter.valid_until.clone(),
             relations: stored.frontmatter.relations.clone(),
+            parent: stored.frontmatter.parent.clone(),
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -443,6 +458,7 @@ impl NoteService {
             source_reliability: stored.frontmatter.source_reliability,
             valid_until: stored.frontmatter.valid_until.clone(),
             relations: stored.frontmatter.relations.clone(),
+            parent: stored.frontmatter.parent.clone(),
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -481,6 +497,7 @@ impl NoteService {
             title: format!("{} 副本", note.title),
             category_id: note.category_id.clone(),
             initial_content: Some(stored.body),
+            parent_id: None,
             tags: Some(tags),
         })
     }
@@ -575,6 +592,103 @@ impl NoteService {
     }
 
     /// 设置标签。
+    /// 设置父文档（子文档层级）：写回 frontmatter 的 `parent` 并更新派生列。
+    pub fn set_parent(&self, input: SetParentInput) -> Result<NoteDetail> {
+        let note = self.note_or_err(&input.id)?;
+        let parent = match input.parent_id.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            Some(reference) => Some(self.resolve_parent(reference, Some(&note.id))?.ok_or_else(|| {
+                AppError::new(ErrorCode::NoteNotFound, "父文档不存在或已被删除。")
+            })?),
+            None => None,
+        };
+        // 防环：不能把自己或自己的后代设为父文档
+        if let Some(parent) = &parent {
+            let mut cursor = Some(parent.id.clone());
+            let mut hops = 0;
+            while let Some(current) = cursor {
+                if current == note.id {
+                    return Err(AppError::invalid_input("不能把文档设置到它自己的子层级下。"));
+                }
+                hops += 1;
+                if hops > 64 {
+                    break;
+                }
+                cursor = self.note(&current)?.and_then(|item| item.parent_id);
+            }
+        }
+
+        let stored = self.ctx.storage.read_note(&note.file_path)?;
+        let lookup = self.ctx.category_lookup()?;
+        let category_path = note
+            .category_id
+            .as_ref()
+            .map(|id| lookup.path_string(id))
+            .unwrap_or_default();
+        let frontmatter = Frontmatter {
+            id: Some(note.id.clone()),
+            title: Some(note.title.clone()),
+            note_type: stored.frontmatter.note_type.clone(),
+            status: stored.frontmatter.status.clone(),
+            category: Some(category_path).filter(|value| !value.is_empty()),
+            tags: stored.frontmatter.tags.clone(),
+            created_at: stored.frontmatter.created_at.clone(),
+            updated_at: Some(now_iso()),
+            source_type: stored.frontmatter.source_type.clone(),
+            source_ref: stored.frontmatter.source_ref.clone(),
+            source_reliability: stored.frontmatter.source_reliability,
+            valid_until: stored.frontmatter.valid_until.clone(),
+            relations: stored.frontmatter.relations.clone(),
+            parent: parent.as_ref().map(|item| item.id.clone()),
+            extra: stored.frontmatter.extra.clone(),
+        };
+        let markdown = frontmatter::serialize(&frontmatter, &stored.body);
+        self.ctx.storage.write_atomic(&note.file_path, &markdown)?;
+        self.ctx.db.with_conn(|conn| {
+            SqliteNoteRepository.set_parent(conn, &note.id, parent.as_ref().map(|item| item.id.as_str()))
+        })?;
+        self.refresh_file_stamp(&note.id, &note.file_path);
+        self.get(&note.id)
+    }
+
+    /// 解析父文档引用：优先按 id，其次按标题；`for_child` 用于排除自身。
+    fn resolve_parent(&self, reference: &str, for_child: Option<&str>) -> Result<Option<Note>> {
+        if let Some(note) = self.note(reference)? {
+            if Some(note.id.as_str()) != for_child {
+                return Ok(Some(note));
+            }
+        }
+        let found = self.ctx.db.with_conn(|conn| {
+            SqliteNoteRepository.find_active_id_by_title(conn, self.workspace_id(), reference)
+        })?;
+        match found {
+            Some(id) if Some(id.as_str()) != for_child => self.note(&id),
+            _ => Ok(None),
+        }
+    }
+
+    /// 外部编辑后同步父文档（frontmatter 里的 `parent` 可能是 id 或标题）。
+    pub fn refresh_parent(&self, note: &Note) -> Result<()> {
+        let stored = self.ctx.storage.read_note(&note.file_path)?;
+        let resolved = match stored.frontmatter.parent.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            Some(reference) => self.resolve_parent(reference, Some(&note.id))?,
+            None => None,
+        };
+        let parent_id = resolved.map(|item| item.id);
+        if parent_id == note.parent_id {
+            return Ok(());
+        }
+        self.ctx
+            .db
+            .with_conn(|conn| SqliteNoteRepository.set_parent(conn, &note.id, parent_id.as_deref()))?;
+        Ok(())
+    }
+
+    fn note(&self, id: &str) -> Result<Option<Note>> {
+        self.ctx
+            .db
+            .with_conn(|conn| SqliteNoteRepository.get(conn, id))
+    }
+
     /// 更新来源与时效（N1）。来源属于知识资产，写进 frontmatter，因此必须落盘。
     pub fn set_source(&self, input: SetSourceInput) -> Result<NoteDetail> {
         let note = self.note_or_err(&input.id)?;
@@ -612,6 +726,7 @@ impl NoteService {
             source_reliability: reliability,
             valid_until: trim(input.valid_until),
             relations: stored.frontmatter.relations.clone(),
+            parent: stored.frontmatter.parent.clone(),
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -658,6 +773,7 @@ impl NoteService {
             source_reliability: stored.frontmatter.source_reliability,
             valid_until: stored.frontmatter.valid_until.clone(),
             relations: stored.frontmatter.relations.clone(),
+            parent: stored.frontmatter.parent.clone(),
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
