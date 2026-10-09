@@ -1,4 +1,4 @@
-import { CheckSquare, FileText, FolderTree, ListFilter, Search, Star, Tag, Trash2, TriangleAlert, X } from 'lucide-react';
+import { CheckSquare, FileText, FolderTree, ListFilter, ListTree, Search, Star, Tag, Trash2, TriangleAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -17,7 +17,9 @@ import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
 import { useTagsStore } from '@/stores/tagsStore';
 import { useUiStore } from '@/stores/uiStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import type { NoteSort } from '@/types';
 
 import { BatchMoveDialog, BatchTagDialog } from './BatchActionDialogs';
 import { NoteListItem } from './NoteListItem';
@@ -39,11 +41,15 @@ export function NoteListPanel() {
   const scope = useNotesStore((state) => state.scope);
   const sort = useNotesStore((state) => state.sort);
   const keyword = useNotesStore((state) => state.keyword);
+  const rootOnly = useNotesStore((state) => state.rootOnly);
+  const setRootOnly = useNotesStore((state) => state.setRootOnly);
   const setSort = useNotesStore((state) => state.setSort);
   const setKeyword = useNotesStore((state) => state.setKeyword);
   const selectedId = useNotesStore((state) => state.selectedId);
   const categories = useCategoriesStore((state) => state.flat);
   const tags = useTagsStore((state) => state.tags);
+  /** 工作区设置里记住的排序（含「自定义顺序」）；切换知识库后随之恢复 */
+  const preferredSort = useWorkspaceStore((state) => state.settings?.listSort);
 
   const selectionMode = useNotesStore((state) => state.selectionMode);
   const selection = useNotesStore((state) => state.selection);
@@ -116,6 +122,11 @@ export function NoteListPanel() {
   const selectable = scope.kind !== 'trash' && scope.kind !== 'missing';
 
   useEffect(() => {
+    if (!preferredSort) return;
+    useNotesStore.getState().hydrateSort(preferredSort as NoteSort);
+  }, [preferredSort]);
+
+  useEffect(() => {
     void useNotesStore.getState().refresh();
   }, [scope.kind, location.search]);
 
@@ -165,10 +176,16 @@ export function NoteListPanel() {
       default:
         return {
           icon: FileText,
-          title: keyword ? '没有匹配的笔记' : '这里还没有笔记',
+          title: keyword
+            ? '没有匹配的笔记'
+            : rootOnly
+              ? '没有不在目录中的笔记'
+              : '这里还没有笔记',
           description: keyword
             ? '尝试更换关键词，或清空筛选条件。'
-            : '使用 ⌘N 新建笔记，或点击工具栏的新建按钮。',
+            : rootOnly
+              ? '当前所有笔记都被某个父文档收纳了。关闭「不在目录中」可查看全部笔记。'
+              : '使用 ⌘N 新建笔记，或点击工具栏的新建按钮。',
         };
     }
   })();
@@ -271,6 +288,24 @@ export function NoteListPanel() {
             >
               <CheckSquare className="h-3 w-3" />
               多选
+            </button>
+          ) : null}
+          {selectable ? (
+            <button
+              type="button"
+              data-testid="root-only-toggle"
+              title="只看没有被父文档收纳的顶层文档（对标语雀的「不在目录中」）"
+              aria-pressed={rootOnly}
+              className={cn(
+                'flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] transition-colors',
+                rootOnly
+                  ? 'bg-[var(--brand-soft)] text-[var(--brand)]'
+                  : 'text-[var(--ink-subtle)] hover:text-[var(--ink)]',
+              )}
+              onClick={() => void setRootOnly(!rootOnly)}
+            >
+              <ListTree className="h-3 w-3" />
+              不在目录中
             </button>
           ) : null}
           {SORT_OPTIONS.map((option) => (

@@ -36,6 +36,8 @@ interface NotesState {
   scope: NoteScope;
   sort: NoteSort;
   keyword: string;
+  /** 只看顶层文档（不在任何父文档下） */
+  rootOnly: boolean;
   selectedId: string | null;
   detail: NoteDetail | null;
   detailLoading: boolean;
@@ -44,7 +46,10 @@ interface NotesState {
   conflict: { noteId: string; currentContent: string } | null;
   setScope: (scope: NoteScope) => Promise<void>;
   setSort: (sort: NoteSort) => Promise<void>;
+  /** 从工作区设置恢复排序（不写回设置，避免自我触发） */
+  hydrateSort: (sort: NoteSort) => void;
   setKeyword: (keyword: string) => Promise<void>;
+  setRootOnly: (rootOnly: boolean) => Promise<void>;
   refresh: () => Promise<void>;
   select: (id: string | null) => Promise<void>;
   openDetail: (id: string) => Promise<void>;
@@ -80,23 +85,37 @@ interface NotesState {
 }
 
 /** 批量操作的统一反馈：成功数 + 失败条数（失败原因取第一条）。 */
-function toastBatch(report: BatchReport, requested: number, verb: string) {
+function toastBatch(
+  report: BatchReport,
+  requested: number,
+  verb: string,
+  undo?: { label: string; run: () => void },
+) {
   if (report.failures.length === 0) {
-    toast.success(`${verb} ${report.succeeded} 篇笔记`);
+    toast.success(`${verb} ${report.succeeded} 篇笔记`, {
+      action: undo ? { label: undo.label, onClick: undo.run } : undefined,
+    });
     return;
   }
   const first = report.failures[0];
   toast.warning(
     `${verb} ${report.succeeded}/${requested} 篇，${report.failures.length} 篇失败：${first?.message ?? ''}`,
+    { action: undo ? { label: undo.label, onClick: undo.run } : undefined },
   );
 }
 
-function queryFromScope(scope: NoteScope, sort: NoteSort, keyword: string): NoteListQuery {
+function queryFromScope(
+  scope: NoteScope,
+  sort: NoteSort,
+  keyword: string,
+  rootOnly: boolean,
+): NoteListQuery {
   const base: NoteListQuery = {
     sort,
     pageSize: 300,
     keyword: keyword.trim() ? keyword.trim() : null,
     status: 'active' as NoteStatus,
+    rootOnly,
   };
   switch (scope.kind) {
     case 'inbox':
@@ -124,6 +143,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   scope: { kind: 'all' },
   sort: 'updatedDesc',
   keyword: '',
+  rootOnly: false,
   selectedId: null,
   detail: null,
   detailLoading: false,
@@ -140,7 +160,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
 
   setSort: async (sort) => {
     set({ sort });
+    // 排序是视图偏好，记到工作区设置里：重开应用后仍是上次的选择
+    // （「自定义顺序」尤其需要，否则拖出来的顺序下次打开就看不到了）
+    void useWorkspaceStore.getState().updateSettings({ listSort: sort });
     await get().refresh();
+  },
+
+  hydrateSort: (sort) => {
+    if (get().sort === sort) return;
+    set({ sort });
+    void get().refresh();
   },
 
   setKeyword: async (keyword) => {
@@ -148,11 +177,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     await get().refresh();
   },
 
+  setRootOnly: async (rootOnly) => {
+    set({ rootOnly });
+    await get().refresh();
+  },
+
   refresh: async () => {
-    const { scope, sort, keyword } = get();
+    const { scope, sort, keyword, rootOnly } = get();
     set({ loading: true, error: null });
     try {
-      const result = await noteService.list(queryFromScope(scope, sort, keyword));
+      const result = await noteService.list(queryFromScope(scope, sort, keyword, rootOnly));
       set({ items: result.items, total: result.total });
     } catch (error) {
       set({ error: errorMessage(error), items: [], total: 0 });
@@ -388,7 +422,20 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (ids.length === 0) return;
     try {
       const report = await noteService.deleteMany(ids);
-      toastBatch(report, ids.length, '已移入回收站');
+      const failed = new Set(report.failures.map((item) => item.noteId));
+      const removed = ids.filter((id) => !failed.has(id));
+      // 对标语雀：批量删除后可随即撤销（逐篇恢复，回收站本身就是软删除）
+      toastBatch(report, ids.length, '已移入回收站', {
+        label: '撤销',
+        run: () =>
+          void (async () => {
+            for (const id of removed) {
+              await noteService.restore(id).catch(() => undefined);
+            }
+            await get().refresh();
+            toast.success(`已恢复 ${removed.length} 篇笔记`);
+          })(),
+      });
       set({ selection: [], selectionMode: false, detail: null, selectedId: null });
       await get().refresh();
     } catch (error) {
@@ -407,5 +454,6 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       saveError: null,
       conflict: null,
       keyword: '',
+      rootOnly: false,
     }),
 }));

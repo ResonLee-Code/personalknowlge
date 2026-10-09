@@ -119,6 +119,8 @@ export interface NoteListQuery {
   status?: NoteStatus | null;
   favoriteOnly?: boolean;
   inboxOnly?: boolean;
+  /** 只看没有被父文档收纳的顶层文档（对标语雀「不在目录中」） */
+  rootOnly?: boolean;
   keyword?: string | null;
   page?: number;
   pageSize?: number;
@@ -237,6 +239,8 @@ export interface AppSettings {
   editorSplitRatio: number;
   sidebarWidth: number;
   listWidth: number;
+  /** 笔记列表排序（含 `manual` = 自定义顺序） */
+  listSort: string;
   lastOpenedNoteId?: string | null;
   lastCategoryId?: string | null;
 }
@@ -252,6 +256,8 @@ export interface UpdateSettingsInput {
   editorSplitRatio?: number;
   sidebarWidth?: number;
   listWidth?: number;
+  /** 笔记列表排序（含 `manual` = 自定义顺序） */
+  listSort?: string;
   lastOpenedNoteId?: string;
   lastCategoryId?: string;
   theme?: string;

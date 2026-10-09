@@ -187,3 +187,45 @@ fn rename_and_delete_of_parent_keep_children_stable() {
     let items = fixture.notes().list(NoteListQuery::default()).expect("列表").items;
     assert!(items.iter().any(|item| item.id == child.note.id), "子文档不应随父文档消失");
 }
+
+#[test]
+fn root_only_filter_lists_notes_not_in_the_document_tree() {
+    let fixture = Fixture::new();
+    let parent = fixture
+        .notes()
+        .create(CreateNoteInput {
+            title: "父文档".into(),
+            category_id: None,
+            initial_content: None,
+            tags: None,
+            parent_id: None,
+        })
+        .expect("创建父文档");
+    let child = fixture
+        .notes()
+        .create(CreateNoteInput {
+            title: "子文档".into(),
+            category_id: None,
+            initial_content: None,
+            tags: None,
+            parent_id: Some(parent.note.id.clone()),
+        })
+        .expect("创建子文档");
+
+    let all = fixture.notes().list(NoteListQuery::default()).expect("全部").items;
+    assert!(all.iter().any(|item| item.id == child.note.id));
+
+    // 「不在目录中」= 没有被任何父文档收纳（对标语雀「移出目录 → 全部文档」的找回路径）
+    let roots = fixture
+        .notes()
+        .list(NoteListQuery { root_only: true, ..Default::default() })
+        .expect("只看顶层")
+        .items;
+    assert!(
+        roots.iter().all(|item| item.parent_id.is_none()),
+        "结果里不应出现子文档：{:?}",
+        roots.iter().map(|item| item.title.clone()).collect::<Vec<_>>()
+    );
+    assert!(roots.iter().any(|item| item.id == parent.note.id));
+    assert!(!roots.iter().any(|item| item.id == child.note.id));
+}

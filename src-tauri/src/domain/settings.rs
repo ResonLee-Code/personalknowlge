@@ -67,6 +67,8 @@ pub struct AppSettings {
     pub editor_split_ratio: f32,
     pub sidebar_width: u32,
     pub list_width: u32,
+    /// 笔记列表排序：`updatedDesc` | `updatedAsc` | `createdDesc` | `titleAsc` | `manual`
+    pub list_sort: String,
     /// 关闭前最后打开的笔记，便于恢复现场
     pub last_opened_note_id: Option<String>,
     /// 最近一次使用的分类
@@ -86,6 +88,7 @@ impl Default for AppSettings {
             editor_split_ratio: 0.5,
             sidebar_width: 240,
             list_width: 320,
+            list_sort: "updatedDesc".to_string(),
             last_opened_note_id: None,
             last_category_id: None,
         }
@@ -142,6 +145,8 @@ pub struct UpdateSettingsInput {
     pub sidebar_width: Option<u32>,
     #[serde(default, deserialize_with = "de_opt_u32")]
     pub list_width: Option<u32>,
+    /// 笔记列表排序（持久化「自定义顺序」等选择）
+    pub list_sort: Option<String>,
     pub last_opened_note_id: Option<String>,
     pub last_category_id: Option<String>,
     pub theme: Option<String>,

@@ -216,7 +216,13 @@ export function NoteListItem({
       return;
     }
     void remove(note.id).then(() => {
-      toast.success('已移入回收站');
+      // 对标语雀：删除后可随即撤销（回收站是软删除，恢复即撤销）
+      toast.success('已移入回收站', {
+        action: {
+          label: '撤销',
+          onClick: () => void restore(note.id).then(() => toast.success('已恢复笔记')),
+        },
+      });
       if (basePath !== '/trash') navigate(basePath);
     });
   };

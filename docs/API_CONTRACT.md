@@ -291,9 +291,14 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 排序**不改写 `updated_at`**（展示顺序不是内容变更），因此「最近修改」排序结果不变；
 - 列表查询新增 `sort: "manual"`，排序键为 `sort_order ASC, updated_at DESC, id DESC`
   （0 = 未排序的兜底顺序）；
+- 列表查询新增 `rootOnly: true`（只看 `parent_id IS NULL` 的顶层文档，对标语雀「不在目录中」）；
 - 前端契约：把条目拖到另一条的中间 = 先 `note_set_parent`（成为子文档），
   拖到上下边缘 = `notes_reorder`（同层插入）；拖拽落点判定在
   `src/lib/noteDragDrop.ts`（纯函数，已覆盖单元测试）。
+
+工作区设置新增 `listSort`（`settings_update`）：持久化列表排序选择
+（`updatedDesc` / `updatedAsc` / `createdDesc` / `titleAsc` / `manual`），
+未知值会被忽略而不是写库。
 
 ## 19. 前端服务层
 

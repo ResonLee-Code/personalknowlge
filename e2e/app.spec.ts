@@ -328,6 +328,31 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
     .not.toBe(orderBefore.join('|'));
   await page.screenshot({ path: path.join(SHOTS, '26-drag-reorder.png') });
 
+  // 24. 「不在目录中」筛选 + 删除可撤销（V1.2.1）
+  await page.goto('/#/notes');
+  const nestBox2 = await nestTarget().boundingBox();
+  if (!nestBox2) throw new Error('未找到嵌套目标');
+  await dragSource().dragTo(nestTarget(), {
+    targetPosition: { x: nestBox2.width / 2, y: nestBox2.height / 2 },
+  });
+  await expect(nestTarget()).toContainText('1 篇子文档');
+
+  // 只看顶层文档：折叠在父文档下的子文档不再出现
+  await page.getByTestId('root-only-toggle').click();
+  await expect(dragSource()).toHaveCount(0);
+  await expect(nestTarget()).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '27-root-only-filter.png') });
+  await page.getByTestId('root-only-toggle').click();
+  await expect(dragSource()).toBeVisible();
+
+  // 删除后可随即撤销
+  await dragSource().click({ button: 'right' });
+  await page.getByTestId('note-menu-delete').click();
+  await expect(dragSource()).toHaveCount(0);
+  await page.getByRole('button', { name: '撤销' }).last().click();
+  await expect(dragSource()).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '28-delete-undo.png') });
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

@@ -81,6 +81,7 @@ const emptySettings: AppSettings = {
   editorSplitRatio: 0.5,
   sidebarWidth: 240,
   listWidth: 320,
+  listSort: 'updatedDesc',
   lastOpenedNoteId: null,
   lastCategoryId: null,
 };
@@ -357,6 +358,7 @@ function listNotes(query: NoteListQuery = {}) {
     items = items.filter((note) => note.categoryId && ids.has(note.categoryId));
   }
   if (query.inboxOnly) items = items.filter((note) => !note.categoryId);
+  if (query.rootOnly) items = items.filter((note) => !note.parentId);
   if (query.favoriteOnly) items = items.filter((note) => note.favorite);
   if (query.tagId)
     items = items.filter((note) => (state.noteTags[note.id] ?? []).includes(query.tagId!));

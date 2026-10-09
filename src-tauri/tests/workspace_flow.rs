@@ -1007,6 +1007,7 @@ fn layout_settings_round_trip_and_clamp() {
             list_width: Some(432),
             editor_split_ratio: Some(0.512),
             editor_mode: Some("split".into()),
+            list_sort: Some("manual".into()),
             theme: Some("dark".into()),
             ..Default::default()
         })
@@ -1015,6 +1016,16 @@ fn layout_settings_round_trip_and_clamp() {
     assert_eq!(updated.list_width, 432);
     assert!((updated.editor_split_ratio - 0.512).abs() < 1e-6);
     assert_eq!(updated.editor_mode, "split");
+    assert_eq!(updated.list_sort, "manual", "「自定义顺序」应被记住");
+
+    // 未知排序值不落库（避免脏数据写进设置）
+    let rejected = service
+        .update_settings(UpdateSettingsInput {
+            list_sort: Some("bogus".into()),
+            ..Default::default()
+        })
+        .expect("未知排序应被忽略而不是报错");
+    assert_eq!(rejected.list_sort, "manual");
 
     // 越界的分屏比例应被夹取
     let clamped = service
@@ -1033,6 +1044,7 @@ fn layout_settings_round_trip_and_clamp() {
     assert_eq!(reopened.settings.sidebar_width, 301);
     assert_eq!(reopened.settings.list_width, 432);
     assert_eq!(reopened.settings.editor_mode, "split");
+    assert_eq!(reopened.settings.list_sort, "manual", "重开工作区后排序偏好保留");
 }
 
 #[test]

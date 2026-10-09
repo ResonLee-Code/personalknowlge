@@ -164,6 +164,9 @@ pub struct NoteListQuery {
     /// 只列出 Inbox（未分类）笔记
     #[serde(default)]
     pub inbox_only: bool,
+    /// 只看没有被任何父文档收纳的顶层文档（对标语雀「移出目录 → 全部文档」的找回路径）
+    #[serde(default)]
+    pub root_only: bool,
     #[serde(default)]
     pub keyword: Option<String>,
     #[serde(default)]
@@ -182,6 +185,7 @@ impl Default for NoteListQuery {
             status: Some(NoteStatus::Active),
             favorite_only: false,
             inbox_only: false,
+            root_only: false,
             keyword: None,
             page: None,
             page_size: None,

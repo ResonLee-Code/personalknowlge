@@ -266,6 +266,10 @@ impl NoteRepository for SqliteNoteRepository {
         if query.favorite_only {
             conditions.push("n.favorite = 1".to_string());
         }
+        if query.root_only {
+            // 没有父文档 = 不在文档层级中（对标语雀的「不在目录中」）
+            conditions.push("n.parent_id IS NULL".to_string());
+        }
         if let Some(tag_id) = &query.tag_id {
             conditions.push(
                 "EXISTS (SELECT 1 FROM note_tags nt WHERE nt.note_id = n.id AND nt.tag_id = ?)"
