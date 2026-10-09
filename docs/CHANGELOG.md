@@ -517,8 +517,12 @@ Windows（交叉编译，未签名，待真机验收）
 
 Linux（需在 Linux 上构建，本机无 Docker/Linux 环境，产物待产出）
   script scripts/linux/build-linux.sh          # deb + rpm + AppImage 一条命令
-  ci     .github/workflows/linux-release.yml   # ubuntu-22.04 上构建并上传工件
+  ci     .github/workflows/release.yml         # 与 macOS / Windows 同一条流水线（见下）
   doc    docs/LINUX_INSTALL_GUIDE.md
+
+三平台统一发布（V1.2.0 起）
+  ci     .github/workflows/release.yml         # 推送 v* 标签 → 三平台构建 + GitHub Release
+  doc    docs/RELEASE_PROCESS.md               # 触发方式、流水线结构、发版步骤、注意事项
 
 > 验收清单（含已自动验证项与需真机项）：[ACCEPTANCE_V1.2.0.md](./ACCEPTANCE_V1.2.0.md)。
 > V1.1.1 / V1.0.0 的构建信息保留在 git 历史与 `dist-windows/` 中。

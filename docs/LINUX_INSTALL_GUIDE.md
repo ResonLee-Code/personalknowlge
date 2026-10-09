@@ -35,9 +35,10 @@ src-tauri/target/release/bundle/appimage/*.AppImage
 
 ### 方式 B：用 GitHub Actions 构建（无需本地 Linux）
 
-Actions → **Linux release** → Run workflow（或推送 `v*` 标签）。
-工作流在 `ubuntu-22.04` 上跑 `pnpm test` + `cargo test`，再构建三种包并上传
-`personal-knowledge-os-linux` 工件（含 `checksums-linux.txt`）。
+Actions → **Release (macOS + Windows + Linux)** → Run workflow（只出工件）；
+或推送 `v*` 标签（三平台构建 + 自动创建 Release）。
+流水线在 `ubuntu-22.04` 上跑 `pnpm test` + `cargo test` 后构建 deb/rpm/AppImage，
+工件名 `pkos-linux`（含 `SHA256SUMS-linux.txt`）。详见 [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)。
 
 ## 二、安装
 

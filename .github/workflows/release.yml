@@ -1,0 +1,300 @@
+name: Release (macOS + Windows + Linux)
+
+# 一次触发产出三平台工件，并在推送 v* 标签时创建 GitHub Release。
+#
+# 触发：
+#   - 手动运行（Actions → Release → Run workflow）：只构建并上传工件，不创建 Release
+#   - 推送 v* 标签：先校验标签与 package.json 版本一致，构建三平台后创建 Release 并附上全部产物
+#
+# 平台与产物：
+#   - macOS（macos-14 / arm64）：.dmg + .app
+#   - Windows（windows-latest）：NSIS .exe + 便携版 .zip
+#   - Linux（ubuntu-22.04）：.deb + .rpm + .AppImage
+# 每个平台都会生成一份 SHA256SUMS-<platform>.txt 一并附到 Release。
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  preflight:
+    name: 版本校验与测试
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验标签与 package.json 版本一致
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "package.json 版本：${VERSION}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/v}"
+            if [ "${TAG}" != "${VERSION}" ]; then
+              echo "::error::标签 v${TAG} 与 package.json 版本 ${VERSION} 不一致，请先统一版本号"
+              exit 1
+            fi
+          fi
+
+      - name: 校验三处版本号一致（package.json / Cargo.toml / tauri.conf.json）
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const pkg = require('./package.json').version;
+          const tauri = require('./src-tauri/tauri.conf.json').version;
+          const cargo = fs.readFileSync('./src-tauri/Cargo.toml', 'utf8')
+            .match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+          if (pkg !== tauri || pkg !== cargo) {
+            console.error(`版本号不一致：package.json=${pkg}, tauri.conf.json=${tauri}, Cargo.toml=${cargo}`);
+            process.exit(1);
+          }
+          console.log(`版本号一致：${pkg}`);
+          NODE
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 前端与 Rust 测试
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
+          cd src-tauri
+          # 基准用例是 #[ignore]，这里跑常规测试
+          cargo test
+
+  macos:
+    name: macOS 打包（arm64）
+    needs: preflight
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 构建 .app + .dmg
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm tauri build --bundles app dmg
+
+      - name: 生成校验值
+        run: |
+          cd src-tauri/target/release/bundle
+          { shasum -a 256 dmg/*.dmg; echo "$(du -k "dmg"/*.dmg | awk '{print $1" KB\t"$2}')"; } \
+            > "$GITHUB_WORKSPACE/SHA256SUMS-macos.txt"
+          cat "$GITHUB_WORKSPACE/SHA256SUMS-macos.txt"
+
+      - name: 上传工件
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkos-macos
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            SHA256SUMS-macos.txt
+
+  windows:
+    name: Windows 打包（NSIS + 便携版）
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 构建 NSIS 安装包
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm tauri build --bundles nsis
+
+      - name: 生成便携版 zip 与校验值
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $release = "src-tauri/target/release"
+          $nsis = Get-ChildItem "$release/bundle/nsis/*.exe" | Select-Object -First 1
+          $portableDir = "dist-windows"
+          New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
+          Copy-Item $nsis.FullName "$portableDir/Personal Knowledge OS_${version}_x64-setup.exe"
+          Copy-Item "$release/personal-knowledge-os.exe" "$portableDir/Personal Knowledge OS.exe"
+          Compress-Archive -Force -Path "$portableDir/Personal Knowledge OS.exe" `
+            -DestinationPath "$portableDir/Personal Knowledge OS_${version}_x64-portable.zip"
+          Remove-Item "$portableDir/Personal Knowledge OS.exe"
+          Get-ChildItem "$portableDir/*.exe", "$portableDir/*.zip" |
+            ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
+            Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE/SHA256SUMS-windows.txt"
+          Get-Content "$env:GITHUB_WORKSPACE/SHA256SUMS-windows.txt"
+
+      - name: 上传工件
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkos-windows
+          if-no-files-found: error
+          path: |
+            dist-windows/*.exe
+            dist-windows/*.zip
+            SHA256SUMS-windows.txt
+
+  linux:
+    name: Linux 打包（deb + rpm + AppImage）
+    needs: preflight
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            pkg-config \
+            libssl-dev
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 构建 deb / rpm / AppImage
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm tauri build --bundles deb rpm appimage
+
+      - name: 生成校验值
+        run: |
+          cd src-tauri/target/release/bundle
+          find . -maxdepth 2 -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec sha256sum {} \; | sed 's#\./##' \
+            > "$GITHUB_WORKSPACE/SHA256SUMS-linux.txt"
+          cat "$GITHUB_WORKSPACE/SHA256SUMS-linux.txt"
+
+      - name: 上传工件
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkos-linux
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            SHA256SUMS-linux.txt
+
+  release:
+    name: 创建 GitHub Release
+    needs: [macos, windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: 下载全部工件
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: 汇总产物清单
+        run: |
+          find dist -type f | sort
+          cat dist/*/SHA256SUMS-*.txt > dist/SHA256SUMS-all.txt || true
+          cat dist/SHA256SUMS-all.txt
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Personal Knowledge OS ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          body: |
+            ## 产物
+
+            | 平台 | 文件 | 说明 |
+            | --- | --- | --- |
+            | macOS（arm64） | `*.dmg` | 未签名；首次打开请右键 →「打开」放行 |
+            | Windows（x64） | `*_x64-setup.exe` / `*_x64-portable.zip` | 未签名；SmartScreen 提示后放行 |
+            | Linux（x64） | `*.deb` / `*.rpm` / `*.AppImage` | 需要 WebKitGTK 4.1；AppImage 需 `chmod +x` |
+
+            校验值见 `SHA256SUMS-*.txt`。安装与验收清单：
+            [macOS](./docs/ACCEPTANCE_V1.2.0.md) · [Windows](./docs/WINDOWS_INSTALL_GUIDE.md) · [Linux](./docs/LINUX_INSTALL_GUIDE.md)
+          files: |
+            dist/**/*.dmg
+            dist/**/*.exe
+            dist/**/*.zip
+            dist/**/*.deb
+            dist/**/*.rpm
+            dist/**/*.AppImage
+            dist/**/SHA256SUMS-*.txt
