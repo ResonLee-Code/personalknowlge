@@ -61,6 +61,10 @@
 ### 文档
 
 - [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) 新增语雀条目操作对标矩阵与优先级；
+- 第二轮语雀调研取到官方原文（页面内 `window.appData` 的 `book.toc` +
+  `/api/docs/{slug}?mode=markdown` 的 `data.sourcecode`），
+  [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) 第 7 节改为逐条带出处的版本，
+  原始摘录见 [research/YUQUE_FEATURE_NOTES.md](./research/YUQUE_FEATURE_NOTES.md)；
 - [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) / [API_CONTRACT.md](./API_CONTRACT.md) /
   [UI_SPECIFICATION.md](./UI_SPECIFICATION.md) 同步 007 迁移、`note_set_parent` 与界面行为。
 
