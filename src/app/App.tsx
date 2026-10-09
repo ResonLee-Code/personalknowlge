@@ -11,6 +11,7 @@ import { CategoriesPage } from '@/features/categories/CategoriesPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { AttachmentsPage } from '@/features/attachments/AttachmentsPage';
 import { GraphPage } from '@/features/graph/GraphPage';
+import { ManagePage } from '@/features/manage/ManagePage';
 import { SearchPage } from '@/features/search/SearchPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { TagsPage } from '@/features/tags/TagsPage';
@@ -57,6 +58,7 @@ function BootstrappedApp() {
         <Route path="favorites/:id" element={<NotesSection baseScope={{ kind: 'favorites' }} />} />
         <Route path="graph" element={<GraphPage />} />
         <Route path="attachments" element={<AttachmentsPage />} />
+        <Route path="manage" element={<ManagePage />} />
         <Route path="trash" element={<NotesSection baseScope={{ kind: 'trash' }} />} />
         <Route path="trash/:id" element={<NotesSection baseScope={{ kind: 'trash' }} />} />
         <Route path="missing" element={<NotesSection baseScope={{ kind: 'missing' }} />} />

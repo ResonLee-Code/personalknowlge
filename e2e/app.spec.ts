@@ -484,6 +484,28 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.getByRole('button', { name: '撤销' }).last().click();
   await expect(parentRowForDelete).toBeVisible();
 
+  // 30. 目录管理页（V1.2.1 P2，对标语雀「目录管理」）
+  await page.goto('/#/manage');
+  await expect(page.getByRole('heading', { name: '目录管理' })).toBeVisible();
+  await expect(page.getByTestId('manage-row').first()).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '36-manage.png') });
+
+  // 筛选：切到「不在目录中」时，子文档行应从表里消失
+  const managedRows = () => page.getByTestId('manage-row');
+  const rowsBefore = await managedRows().count();
+  await page.getByTestId('manage-root-only').check();
+  await expect
+    .poll(async () => managedRows().count())
+    .toBeLessThan(rowsBefore);
+  await page.getByTestId('manage-root-only').uncheck();
+
+  // 批量：全选后打开移动对话框，取消退出
+  await page.getByTestId('manage-select-all').check();
+  await expect(page.getByTestId('manage-batch-toolbar')).toContainText('已选');
+  await page.getByTestId('manage-move').click();
+  await expect(page.getByRole('dialog')).toContainText('批量移动分类');
+  await page.getByRole('button', { name: '取消' }).click();
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 
