@@ -1,4 +1,4 @@
-import { FolderTree, Tag } from 'lucide-react';
+import { Copy, FolderTree, Tag } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -65,6 +65,69 @@ export function BatchMoveDialog({ onClose }: { onClose: () => void }) {
           </Button>
           <Button onClick={() => void submit()} disabled={busy}>
             移动 {selectedCount} 篇
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * 批量复制到分类（对标语雀条目菜单的「复制…」）：
+ * 复制出一份并放到目标分类，原作保持不动。
+ */
+export function BatchCopyDialog({ onClose }: { onClose: () => void }) {
+  const categories = useCategoriesStore((state) => state.flat);
+  const pathOf = useCategoriesStore((state) => state.pathOf);
+  const selectedCount = useNotesStore((state) => state.selection.length);
+  const copyManyTo = useNotesStore((state) => state.copyManyTo);
+  const [categoryId, setCategoryId] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    await copyManyTo(categoryId || null);
+    setBusy(false);
+    onClose();
+  };
+
+  return (
+    <Dialog open onOpenChange={(next) => (!next ? onClose() : undefined)}>
+      <DialogContent className="w-[min(520px,calc(100vw-2rem))]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Copy className="h-4 w-4 text-[var(--brand)]" />
+            批量复制到分类
+          </DialogTitle>
+          <DialogDescription>
+            复制选中的 {selectedCount} 篇笔记到指定分类；**原作保留在原位**，副本标题会带「副本」后缀。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="batch-copy-category">目标分类</Label>
+          <select
+            id="batch-copy-category"
+            value={categoryId}
+            onChange={(event) => setCategoryId(event.target.value)}
+            className="h-9 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-sm text-[var(--ink)]"
+          >
+            <option value="">Inbox（未分类）</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {pathOf(category.id)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            取消
+          </Button>
+          <Button onClick={() => void submit()} disabled={busy}>
+            <Copy className="h-3.5 w-3.5" />
+            复制 {selectedCount} 篇
           </Button>
         </DialogFooter>
       </DialogContent>

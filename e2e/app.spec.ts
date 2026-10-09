@@ -375,6 +375,26 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
     .poll(async () => (await page.getByTestId('note-list-item').allInnerTexts()).join('|'))
     .toBe(orderBeforePin.join('|'));
 
+  // 26. 折叠全部 / 批量复制到分类（V1.2.1 P1 收尾）
+  await page.goto('/#/notes');
+  await expect(dragSource()).toBeVisible();
+  await page.getByTestId('toggle-all-fold').click();
+  await expect(dragSource()).toHaveCount(0);
+  await page.getByTestId('toggle-all-fold').click();
+  await expect(dragSource()).toBeVisible();
+
+  await page.getByRole('button', { name: '多选' }).click();
+  await page.getByLabel('选择 索引设计笔记').check();
+  await page.getByLabel('选择 欢迎使用 Personal Knowledge OS').check();
+  await page.getByTestId('batch-copy').click();
+  await expect(page.getByRole('dialog')).toContainText('批量复制到分类');
+  await page.getByLabel('目标分类').selectOption({ label: '技术' });
+  await page.getByRole('button', { name: /复制 2 篇/ }).click();
+  // 复制后总数从 4 变成 6，且原作仍在
+  await expect(page.getByTestId('note-list-panel').getByText('6 篇')).toBeVisible();
+  await expect(page.getByText('索引设计笔记').first()).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '30-batch-copy.png') });
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

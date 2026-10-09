@@ -1,4 +1,19 @@
-import { CheckSquare, FileText, FolderTree, ListFilter, ListTree, Search, Star, Tag, Trash2, TriangleAlert, X } from 'lucide-react';
+import {
+  CheckSquare,
+  Copy,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  FileText,
+  FolderTree,
+  ListFilter,
+  ListTree,
+  Search,
+  Star,
+  Tag,
+  Trash2,
+  TriangleAlert,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -21,7 +36,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { NoteSort } from '@/types';
 
-import { BatchMoveDialog, BatchTagDialog } from './BatchActionDialogs';
+import { BatchCopyDialog, BatchMoveDialog, BatchTagDialog } from './BatchActionDialogs';
 import { NoteListItem } from './NoteListItem';
 
 const SORT_OPTIONS = [
@@ -58,6 +73,7 @@ export function NoteListPanel() {
   const deleteMany = useNotesStore((state) => state.deleteMany);
   const [batchMoveOpen, setBatchMoveOpen] = useState(false);
   const [batchTagOpen, setBatchTagOpen] = useState(false);
+  const [batchCopyOpen, setBatchCopyOpen] = useState(false);
   /** 折叠的父文档 id（默认全部展开） */
   const [collapsedIds, setCollapsedIds] = useState<string[]>([]);
 
@@ -254,6 +270,16 @@ export function NoteListPanel() {
             </button>
             <button
               type="button"
+              data-testid="batch-copy"
+              className="flex items-center gap-0.5 disabled:opacity-40"
+              disabled={selection.length === 0}
+              onClick={() => setBatchCopyOpen(true)}
+            >
+              <Copy className="h-3 w-3" />
+              复制到
+            </button>
+            <button
+              type="button"
               className="flex items-center gap-0.5 text-red-600 disabled:opacity-40"
               disabled={selection.length === 0}
               onClick={() => {
@@ -306,6 +332,28 @@ export function NoteListPanel() {
             >
               <ListTree className="h-3 w-3" />
               不在目录中
+            </button>
+          ) : null}
+          {rows.some((row) => row.childCount > 0) ? (
+            <button
+              type="button"
+              data-testid="toggle-all-fold"
+              title={collapsedIds.length > 0 ? '展开全部子文档' : '折叠全部子文档'}
+              className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-[var(--ink-subtle)] transition-colors hover:text-[var(--brand)]"
+              onClick={() =>
+                setCollapsedIds((previous) =>
+                  previous.length > 0
+                    ? []
+                    : rows.filter((row) => row.childCount > 0).map((row) => row.note.id),
+                )
+              }
+            >
+              {collapsedIds.length > 0 ? (
+                <ChevronsUpDown className="h-3 w-3" />
+              ) : (
+                <ChevronsDownUp className="h-3 w-3" />
+              )}
+              {collapsedIds.length > 0 ? '展开全部' : '折叠全部'}
             </button>
           ) : null}
           {SORT_OPTIONS.map((option) => (
@@ -407,6 +455,7 @@ export function NoteListPanel() {
 
       {batchMoveOpen ? <BatchMoveDialog onClose={() => setBatchMoveOpen(false)} /> : null}
       {batchTagOpen ? <BatchTagDialog onClose={() => setBatchTagOpen(false)} /> : null}
+      {batchCopyOpen ? <BatchCopyDialog onClose={() => setBatchCopyOpen(false)} /> : null}
 
       {/* 回收站：批量清理（永久删除，不可恢复） */}
       {scope.kind === 'trash' && items.length > 0 ? (

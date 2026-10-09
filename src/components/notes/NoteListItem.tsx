@@ -5,7 +5,9 @@ import {
   CornerLeftUp,
   Download,
   FilePlus2,
+  FileCode2,
   FolderTree,
+  Heading1,
   ListTree,
   MoreHorizontal,
   Pin,
@@ -60,6 +62,8 @@ function NoteMenuItems({
   onCreateChild,
   onPromote,
   onOutline,
+  onCopyPath,
+  onCopyTitle,
   onRename,
   onMove,
   onExport,
@@ -76,6 +80,8 @@ function NoteMenuItems({
   onCreateChild: () => void;
   onPromote: () => void;
   onOutline: () => void;
+  onCopyPath: () => void;
+  onCopyTitle: () => void;
   onRename: () => void;
   onMove: () => void;
   onExport: () => void;
@@ -128,6 +134,13 @@ function NoteMenuItems({
       ) : null}
       <Item onSelect={onOutline} data-testid="note-menu-outline">
         <ListTree className="h-3.5 w-3.5" /> 大纲预览
+      </Item>
+      {/* 对标语雀「复制链接」：本地知识库里对应的是相对路径与标题 */}
+      <Item onSelect={onCopyPath} data-testid="note-menu-copy-path">
+        <FileCode2 className="h-3.5 w-3.5" /> 复制相对路径
+      </Item>
+      <Item onSelect={onCopyTitle} data-testid="note-menu-copy-title">
+        <Heading1 className="h-3.5 w-3.5" /> 复制标题
       </Item>
       <Separator />
       <Item onSelect={onRename} data-testid="note-menu-rename">
@@ -225,6 +238,15 @@ export function NoteListItem({
     );
   };
 
+  const copyText = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`已复制${label}`);
+    } catch {
+      toast.error('复制失败，请检查系统的剪贴板权限');
+    }
+  };
+
   const handlePromote = () => {
     void setParent(note.id, null).then((ok) => {
       if (ok) toast.success('已升级为顶层文档');
@@ -256,6 +278,8 @@ export function NoteListItem({
     onCreateChild: () => setChildOpen(true),
     onPromote: handlePromote,
     onOutline: () => setOutlineOpen(true),
+    onCopyPath: () => void copyText(note.filePath, '相对路径'),
+    onCopyTitle: () => void copyText(note.title, '标题'),
     onRename: () => setRenameOpen(true),
     onMove: () => setMoveOpen(true),
     onExport: () => setExportOpen(true),

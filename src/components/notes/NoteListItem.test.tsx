@@ -131,6 +131,37 @@ describe('NoteListItem', () => {
     expect(await screen.findByTestId('note-menu-pin')).toHaveTextContent('取消置顶');
   });
 
+  it('菜单可复制相对路径与标题（对标语雀「复制链接」）', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    render(
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter>
+          <ul>
+            <NoteListItem note={note} selected={false} basePath="/notes" onOpen={() => {}} />
+          </ul>
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByTestId('note-list-item'),
+      keys: '[MouseRight]',
+    });
+    await userEvent.click(await screen.findByTestId('note-menu-copy-path'));
+    expect(writeText).toHaveBeenCalledWith(note.filePath);
+
+    await userEvent.pointer({
+      target: screen.getByTestId('note-list-item'),
+      keys: '[MouseRight]',
+    });
+    await userEvent.click(await screen.findByTestId('note-menu-copy-title'));
+    expect(writeText).toHaveBeenCalledWith(note.title);
+  });
+
   it('子文档条目提供「升级为顶层文档」，父文档提供折叠箭头', async () => {
     const onToggleCollapse = vi.fn();
     const { rerender } = render(

@@ -102,4 +102,29 @@ describe('笔记列表筛选与批量撤销', () => {
     expect(setPinned).toHaveBeenCalledWith('note_1', true);
     expect(list).toHaveBeenCalled();
   });
+
+  it('批量复制到分类：复制 + 移动副本，原作不动', async () => {
+    vi.spyOn(noteService, 'list').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 300,
+    });
+    const duplicate = vi
+      .spyOn(noteService, 'duplicate')
+      .mockResolvedValueOnce({ note: { id: 'copy_1' } } as never)
+      .mockResolvedValueOnce({ note: { id: 'copy_2' } } as never);
+    const move = vi.spyOn(noteService, 'move').mockResolvedValue({} as never);
+    const remove = vi.spyOn(noteService, 'remove').mockResolvedValue(undefined);
+
+    useNotesStore.setState({ selection: ['note_1', 'note_2'], selectionMode: true });
+    await useNotesStore.getState().copyManyTo('cat_target');
+
+    expect(duplicate).toHaveBeenCalledTimes(2);
+    expect(move).toHaveBeenNthCalledWith(1, 'copy_1', 'cat_target');
+    expect(move).toHaveBeenNthCalledWith(2, 'copy_2', 'cat_target');
+    // 复制语义：原作必须保留
+    expect(remove).not.toHaveBeenCalled();
+    expect(useNotesStore.getState().selection).toEqual([]);
+  });
 });

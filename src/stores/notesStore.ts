@@ -80,6 +80,8 @@ interface NotesState {
   setSelection: (ids: string[]) => void;
   clearSelection: () => void;
   moveMany: (categoryId: string | null) => Promise<void>;
+  /** 批量复制到分类（原作保留） */
+  copyManyTo: (categoryId: string | null) => Promise<void>;
   /** 拖拽等场景：直接给定 ids 移动 */
   moveNotes: (ids: string[], categoryId: string | null) => Promise<void>;
   tagMany: (tags: string[], mode?: 'add' | 'remove' | 'replace') => Promise<void>;
@@ -400,6 +402,30 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (ids.length === 0) return;
     await get().moveNotes(ids, categoryId);
     set({ selection: [], selectionMode: false });
+  },
+
+  copyManyTo: async (categoryId) => {
+    const ids = get().selection;
+    if (ids.length === 0) return;
+    let copied = 0;
+    const failures: string[] = [];
+    for (const id of ids) {
+      try {
+        // 复制语义：先 duplicating 出一份（保留正文/标签/父文档），再移动到目标分类
+        const detail = await noteService.duplicate(id);
+        if (categoryId) await noteService.move(detail.note.id, categoryId);
+        copied += 1;
+      } catch (error) {
+        failures.push(errorMessage(error));
+      }
+    }
+    set({ selection: [], selectionMode: false });
+    await get().refresh();
+    if (failures.length === 0) {
+      toast.success(`已复制 ${copied} 篇笔记（原作保留）`);
+    } else {
+      toast.warning(`复制 ${copied}/${ids.length} 篇，${failures.length} 篇失败：${failures[0] ?? ''}`);
+    }
   },
 
   moveNotes: async (ids, categoryId) => {
