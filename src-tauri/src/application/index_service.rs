@@ -569,6 +569,7 @@ impl IndexService {
                     parent_id: None,
                     // frontmatter 的 order 是文件里的顺序声明，扫描时投影到派生列
                     sort_order: stored.frontmatter.order.unwrap_or(0).max(0),
+                    pinned: stored.frontmatter.pinned,
                 },
                 plain_text,
                 tags: stored.frontmatter.tags.clone(),
@@ -753,6 +754,7 @@ impl IndexService {
             file_mtime: None,
             parent_id: None,
             sort_order: stored.frontmatter.order.unwrap_or(0).max(0),
+            pinned: stored.frontmatter.pinned,
         };
         // 幂等采纳：文件监听回调与显式扫描可能并发（两者都是「先读磁盘快照、再写库」），
         // 因此插入前在同一事务内再确认一次路径是否已被别的扫描采纳；已存在则直接跳过，
@@ -928,6 +930,14 @@ impl IndexService {
                 stored.frontmatter.source_reliability,
                 stored.frontmatter.valid_until.as_deref(),
             )?;
+            // 手动排序与置顶同样是「文件为准」的派生列：
+            // 用户用外部编辑器改 `order:` / `pinned:` 后要能生效（此前漏了这两个投影）
+            SqliteNoteRepository.set_sort_order(
+                conn,
+                &note.id,
+                stored.frontmatter.order.unwrap_or(0).max(0),
+            )?;
+            SqliteNoteRepository.set_pinned(conn, &note.id, stored.frontmatter.pinned)?;
             Ok(())
         })?;
 

@@ -182,6 +182,7 @@ function toSummary(note: Note): NoteSummary {
     title: note.title,
     parentId: note.parentId ?? null,
     sortOrder: note.sortOrder ?? 0,
+    pinned: note.pinned ?? false,
     filePath: note.filePath,
     categoryId: note.categoryId ?? null,
     categoryPath: categoryPath(note.categoryId),
@@ -372,6 +373,8 @@ function listNotes(query: NoteListQuery = {}) {
   }
   const sort = query.sort ?? 'updatedDesc';
   items = [...items].sort((a, b) => {
+    // 置顶在所有排序方式下都排在最前（与后端 ORDER BY pinned DESC, ... 一致）
+    if ((a.pinned ?? false) !== (b.pinned ?? false)) return a.pinned ? -1 : 1;
     if (sort === 'titleAsc') return a.title.localeCompare(b.title, 'zh-CN');
     if (sort === 'createdDesc') return b.createdAt.localeCompare(a.createdAt);
     if (sort === 'updatedAsc') return a.updatedAt.localeCompare(b.updatedAt);
@@ -419,6 +422,7 @@ function createNote(input: CreateNoteInput): NoteDetail {
     lastIndexedAt: createdAt,
     parentId: parent?.id ?? null,
     sortOrder: 0,
+    pinned: false,
   };
   state.notes.push(note);
   state.contents[id] = input.initialContent ?? '';
@@ -946,6 +950,14 @@ export async function handleMockInvoke(
       }
       note.parentId = parent?.id ?? null;
       note.updatedAt = now();
+      persist();
+      emit('notes://changed', { kind: 'modified', noteId: note.id });
+      return toDetail(note);
+    }
+    case 'note_set_pinned': {
+      const note = state.notes.find((item) => item.id === payload.id);
+      if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
+      note.pinned = Boolean(payload.pinned);
       persist();
       emit('notes://changed', { kind: 'modified', noteId: note.id });
       return toDetail(note);

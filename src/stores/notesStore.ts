@@ -67,6 +67,8 @@ interface NotesState {
   /** 手动排序：按传入顺序改写同层笔记的顺序（配合「自定义顺序」排序） */
   reorder: (ids: string[]) => Promise<boolean>;
   toggleFavorite: (id: string) => Promise<void>;
+  /** 置顶 / 取消置顶 */
+  setPinned: (id: string, pinned: boolean) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
   clearConflict: () => void;
   reset: () => void;
@@ -344,6 +346,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     } catch (error) {
       set({ error: errorMessage(error) });
       return false;
+    }
+  },
+
+  setPinned: async (id, pinned) => {
+    try {
+      const detail = await noteService.setPinned(id, pinned);
+      set({ detail: get().selectedId === id ? detail : get().detail });
+      await get().refresh();
+    } catch (error) {
+      set({ error: errorMessage(error) });
     }
   },
 

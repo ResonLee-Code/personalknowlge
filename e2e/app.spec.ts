@@ -353,6 +353,28 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(dragSource()).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '28-delete-undo.png') });
 
+  // 25. 置顶（对标语雀「置顶文档」）：置顶后排在列表最前，取消后回到原顺序
+  await page.goto('/#/notes');
+  const orderBeforePin = await page.getByTestId('note-list-item').allInnerTexts();
+  // 选一篇顶层笔记（子文档必须跟在父文档下，不会上浮到列表最前）
+  const pinTarget = page
+    .getByTestId('note-list-item')
+    .filter({ hasText: '欢迎使用 Personal Knowledge OS' })
+    .first();
+  await pinTarget.click({ button: 'right' });
+  await page.getByTestId('note-menu-pin').click();
+  await expect
+    .poll(async () => (await page.getByTestId('note-list-item').allInnerTexts())[0])
+    .toContain('欢迎使用');
+  await expect(page.getByTestId('note-list-item').first()).toContainText('已置顶');
+  await page.screenshot({ path: path.join(SHOTS, '29-pin.png') });
+
+  await page.getByTestId('note-list-item').first().click({ button: 'right' });
+  await page.getByTestId('note-menu-pin').click();
+  await expect
+    .poll(async () => (await page.getByTestId('note-list-item').allInnerTexts()).join('|'))
+    .toBe(orderBeforePin.join('|'));
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

@@ -74,6 +74,8 @@ export interface Note {
   parentId?: string | null;
   /** 手动排序位次（同层内，1 起；0 表示未显式排序） */
   sortOrder?: number;
+  /** 置顶：所有排序方式下都排在最前 */
+  pinned?: boolean;
   /** 来源与时效（V1.1.2 N1） */
   sourceType?: string | null;
   sourceRef?: string | null;
@@ -93,6 +95,8 @@ export interface NoteSummary {
   parentId?: string | null;
   /** 手动排序位次（配合「自定义顺序」排序使用） */
   sortOrder?: number;
+  /** 置顶（所有排序方式下都在最前） */
+  pinned?: boolean;
   filePath: string;
   categoryId?: string | null;
   categoryPath: string;

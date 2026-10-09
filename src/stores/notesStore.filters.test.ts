@@ -85,4 +85,21 @@ describe('笔记列表筛选与批量撤销', () => {
     options!.action!.onClick();
     await vi.waitFor(() => expect(restore).toHaveBeenCalledWith('note_2'));
   });
+
+  it('置顶会调用 note_set_pinned 并刷新列表', async () => {
+    vi.spyOn(noteService, 'list').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 300,
+    });
+    const setPinned = vi
+      .spyOn(noteService, 'setPinned')
+      .mockResolvedValue({ note: { id: 'note_1', pinned: true } } as never);
+    const list = vi.mocked(noteService.list);
+
+    await useNotesStore.getState().setPinned('note_1', true);
+    expect(setPinned).toHaveBeenCalledWith('note_1', true);
+    expect(list).toHaveBeenCalled();
+  });
 });

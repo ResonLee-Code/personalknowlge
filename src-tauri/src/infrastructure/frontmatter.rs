@@ -31,6 +31,8 @@ pub struct Frontmatter {
     pub parent: Option<String>,
     /// 手动排序：同层内的显示顺序（1 起，越小越靠前）
     pub order: Option<i64>,
+    /// 置顶文档：在所有排序下排在最前
+    pub pinned: bool,
     /// 用户显式声明的类型化关系（N2）
     pub relations: Vec<RelationEntry>,
     /// 未识别的字段，按原顺序保留
@@ -153,6 +155,7 @@ fn from_mapping(mapping: &Mapping) -> Frontmatter {
             "relations" => frontmatter.relations = as_relations(value),
             "parent" | "parent_id" | "parentId" => frontmatter.parent = as_string(value),
             "order" | "sort_order" | "sortOrder" => frontmatter.order = as_i64(value),
+            "pinned" | "is_pinned" | "isPinned" => frontmatter.pinned = as_bool(value),
             _ => frontmatter.extra.push((key_name.to_string(), value.clone())),
         }
     }
@@ -160,6 +163,19 @@ fn from_mapping(mapping: &Mapping) -> Frontmatter {
 }
 
 /// 数字解析：YAML 里 `5` 与 `'5'` 都要能读（序列化时可能被加引号）。
+/// 宽容地解析布尔：接受 `true` / `"true"` / `1` / `"yes"` 等形式。
+fn as_bool(value: &Value) -> bool {
+    match value {
+        Value::Bool(flag) => *flag,
+        Value::Number(number) => number.as_i64().map(|int| int != 0).unwrap_or(false),
+        Value::String(text) => {
+            let normalized = text.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "true" | "yes" | "1")
+        }
+        _ => false,
+    }
+}
+
 fn as_i64(value: &Value) -> Option<i64> {
     if let Some(number) = value.as_i64() {
         return Some(number);
@@ -261,6 +277,9 @@ pub fn serialize(frontmatter: &Frontmatter, body: &str) -> String {
     }
     push_scalar(&mut yaml, "valid_until", frontmatter.valid_until.as_ref());
     push_scalar(&mut yaml, "parent", frontmatter.parent.as_ref());
+    if frontmatter.pinned {
+        yaml.push_str("pinned: true\n");
+    }
     if let Some(order) = frontmatter.order.filter(|value| *value > 0) {
         // 写成数字（不加引号）：`order: 3`，便于用户手改
         yaml.push_str(&format!("order: {order}\n"));
@@ -290,6 +309,9 @@ pub fn serialize(frontmatter: &Frontmatter, body: &str) -> String {
         "order",
         "sort_order",
         "sortOrder",
+        "pinned",
+        "is_pinned",
+        "isPinned",
     ];
     if !frontmatter.extra.is_empty() {
         let mut extra = Mapping::new();

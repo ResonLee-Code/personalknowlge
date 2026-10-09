@@ -218,6 +218,24 @@ CREATE INDEX IF NOT EXISTS idx_notes_sort_order ON notes(sort_order);
 - 排序不改写 `updated_at`——它属于展示顺序而非内容变更；
 - 索引：`idx_notes_sort_order` 支撑「自定义顺序」列表的低成本排序。
 
+### notes 的置顶列（迁移 009，置顶文档）
+
+```sql
+ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+```
+
+| 列 | 含义 | 对应 frontmatter |
+| --- | --- | --- |
+| `pinned` | 置顶标记（1 = 置顶） | `pinned`（也接受 `is_pinned` / `isPinned`，布尔宽容解析） |
+
+- **派生数据**：应用内「置顶 / 取消置顶」写回 frontmatter 的 `pinned: true`，
+  外部编辑器手改后由扫描同步（`apply_external_edit` 投影）；
+- 所有排序键都前置 `pinned DESC`，因此置顶笔记在**任何排序方式**下都排在最前；
+- 置顶只在**同一层**内生效：子文档仍跟在父文档之后（不会被拽到顶层），
+  这与语雀「置顶文档」在目录里的表现一致；
+- 不建独立索引：`pinned` 基数极低（通常个位数），列表查询已带分页上限，
+  单独索引收益小于维护成本。
+
 ### 索引
 
 ```sql
@@ -273,7 +291,7 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 当前迁移列表：`001_init`（表结构）、`002_search_index`（FTS5）、`003_note_links`（双向链接），
 `004_note_assets`（类型化关系 + 来源时效）、`005_note_file_stamp`（文件快照）、
 `006_search_rowid_map`（FTS rowid 映射）、`007_note_parent`（子文档层级）、
-`008_notes_sort_order`（手动排序），`SCHEMA_VERSION = 8`。
+`008_notes_sort_order`（手动排序）、`009_notes_pinned`（置顶），`SCHEMA_VERSION = 9`。
 
 ## 5. 数据恢复能力
 

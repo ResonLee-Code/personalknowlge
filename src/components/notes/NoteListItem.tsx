@@ -8,6 +8,8 @@ import {
   FolderTree,
   ListTree,
   MoreHorizontal,
+  Pin,
+  PinOff,
   PencilLine,
   Star,
   StarOff,
@@ -54,6 +56,7 @@ function NoteMenuItems({
   note,
   onOpen,
   onToggleFavorite,
+  onTogglePinned,
   onCreateChild,
   onPromote,
   onOutline,
@@ -69,6 +72,7 @@ function NoteMenuItems({
   note: NoteSummary;
   onOpen: () => void;
   onToggleFavorite: () => void;
+  onTogglePinned: () => void;
   onCreateChild: () => void;
   onPromote: () => void;
   onOutline: () => void;
@@ -96,6 +100,17 @@ function NoteMenuItems({
         ) : (
           <>
             <Star className="h-3.5 w-3.5" /> 收藏
+          </>
+        )}
+      </Item>
+      <Item onSelect={onTogglePinned} data-testid="note-menu-pin">
+        {note.pinned ? (
+          <>
+            <PinOff className="h-3.5 w-3.5" /> 取消置顶
+          </>
+        ) : (
+          <>
+            <Pin className="h-3.5 w-3.5" /> 置顶
           </>
         )}
       </Item>
@@ -184,6 +199,7 @@ export function NoteListItem({
   const purge = useNotesStore((state) => state.purge);
   const duplicate = useNotesStore((state) => state.duplicate);
   const setParent = useNotesStore((state) => state.setParent);
+  const setPinned = useNotesStore((state) => state.setPinned);
   const selectionMode = useNotesStore((state) => state.selectionMode);
   const selectedForBatch = useNotesStore((state) => state.selection.includes(note.id));
   const toggleSelected = useNotesStore((state) => state.toggleSelected);
@@ -201,6 +217,12 @@ export function NoteListItem({
 
   const handleFavorite = () => {
     void toggleFavorite(note.id).then(() => toast.success(note.favorite ? '已取消收藏' : '已收藏'));
+  };
+
+  const handlePin = () => {
+    void setPinned(note.id, !note.pinned).then(() =>
+      toast.success(note.pinned ? '已取消置顶' : '已置顶（会一直排在最前）'),
+    );
   };
 
   const handlePromote = () => {
@@ -230,6 +252,7 @@ export function NoteListItem({
   const menuHandlers = {
     onOpen,
     onToggleFavorite: handleFavorite,
+    onTogglePinned: handlePin,
     onCreateChild: () => setChildOpen(true),
     onPromote: handlePromote,
     onOutline: () => setOutlineOpen(true),
@@ -414,6 +437,12 @@ export function NoteListItem({
                 ) : null}
 
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--ink-subtle)]">
+                  {note.pinned ? (
+                    <span className="flex items-center gap-0.5 text-[var(--brand)]">
+                      <Pin className="h-3 w-3" />
+                      已置顶
+                    </span>
+                  ) : null}
                   <span>{formatRelative(note.updatedAt)}</span>
                   {note.categoryPath ? <span>· {note.categoryPath}</span> : null}
                   {childCount > 0 ? <span>· {childCount} 篇子文档</span> : null}

@@ -50,6 +50,10 @@ export const noteService = {
   setFavorite: (id: string, favorite: boolean) =>
     call<NoteDetail>('note_set_favorite', { id, favorite }),
 
+  /** 置顶 / 取消置顶（对标语雀「置顶文档」；写回 frontmatter 的 pinned） */
+  setPinned: (id: string, pinned: boolean) =>
+    call<NoteDetail>('note_set_pinned', { id, pinned }),
+
   /** 设置父文档（子文档层级）；`parentId` 传 null 表示移到顶层 */
   setParent: (input: SetParentInput) => call<NoteDetail>('note_set_parent', { input }),
 

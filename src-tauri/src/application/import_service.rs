@@ -429,6 +429,7 @@ impl ImportService {
             relations: source.relations.clone(),
             parent: None,
             order: None,
+            pinned: false,
             extra: source.extra.clone(),
         };
         // 正文转换：Obsidian 嵌入 → 标准图片链接；Notion 相对链接 → URL 解码
@@ -487,6 +488,7 @@ impl ImportService {
             file_mtime: None,
             parent_id: None,
             sort_order: 0,
+            pinned: false,
             source_type: source.source_type.clone(),
             source_ref: source.source_ref.clone(),
             source_reliability: source.source_reliability,

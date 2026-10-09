@@ -300,7 +300,21 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 （`updatedDesc` / `updatedAsc` / `createdDesc` / `titleAsc` / `manual`），
 未知值会被忽略而不是写库。
 
-## 19. 前端服务层
+## 19. 置顶文档（V1.2.1）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `note_set_pinned` | `{ id, pinned: boolean }` | `NoteDetail` |
+
+- 写回 frontmatter 的 `pinned:`（`true` 时写入，取消时移除字段）并投影到 `notes.pinned`；
+- **所有排序键前置 `pinned DESC`**：`updatedDesc` / `updatedAsc` / `createdDesc` /
+  `titleAsc` / `manual` 下置顶笔记都排在最前；
+- 置顶只在同一层内生效（子文档仍跟在父文档之后），且**不改写 `updated_at`**；
+- `NoteSummary` 与 `Note` 新增 `pinned`（布尔，缺失视为 false）；
+- 扫描同步路径（`apply_external_edit`）会投影 `pinned` 与 `order`，
+  因此用户用外部编辑器手改 frontmatter 也能生效。
+
+## 20. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 

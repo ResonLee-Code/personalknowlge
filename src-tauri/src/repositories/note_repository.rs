@@ -52,6 +52,8 @@ pub trait NoteRepository {
     fn set_parent(&self, conn: &Connection, id: &str, parent_id: Option<&str>) -> Result<()>;
     /// 更新手动排序位次（同一层内的顺序，1 起；0 = 未排序）
     fn set_sort_order(&self, conn: &Connection, id: &str, sort_order: i64) -> Result<()>;
+    /// 更新置顶标记
+    fn set_pinned(&self, conn: &Connection, id: &str, pinned: bool) -> Result<()>;
 
     /// 同一父文档下的活跃笔记 id，按当前顺序（order 升序、更新时间兜底）返回
     fn active_ids_under_parent(
@@ -110,7 +112,7 @@ pub struct SqliteNoteRepository;
 const NOTE_COLUMNS: &str = "id, workspace_id, title, file_path, category_id, status, content_hash,
      word_count, favorite, created_at, updated_at, last_indexed_at,
      source_type, source_ref, source_reliability, valid_until, file_size, file_mtime, parent_id,
-     sort_order";
+     sort_order, pinned";
 
 fn map_note(row: &Row<'_>) -> rusqlite::Result<Note> {
     let status: String = row.get("status")?;
@@ -135,6 +137,7 @@ fn map_note(row: &Row<'_>) -> rusqlite::Result<Note> {
         file_mtime: row.get("file_mtime")?,
         parent_id: row.get("parent_id")?,
         sort_order: row.get("sort_order")?,
+        pinned: row.get::<_, i64>("pinned")? != 0,
     })
 }
 
@@ -144,9 +147,9 @@ impl NoteRepository for SqliteNoteRepository {
             "INSERT INTO notes (id, workspace_id, title, file_path, category_id, status,
                                 content_hash, word_count, favorite, created_at, updated_at,
                                 last_indexed_at, source_type, source_ref, source_reliability,
-                                valid_until, file_size, file_mtime, parent_id, sort_order)
+                                valid_until, file_size, file_mtime, parent_id, sort_order, pinned)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20)",
+                     ?17, ?18, ?19, ?20, ?21)",
             params![
                 note.id,
                 note.workspace_id,
@@ -168,6 +171,7 @@ impl NoteRepository for SqliteNoteRepository {
                 note.file_mtime,
                 note.parent_id,
                 note.sort_order,
+                i64::from(note.pinned),
             ],
         )?;
         Ok(())
@@ -180,6 +184,7 @@ impl NoteRepository for SqliteNoteRepository {
                               source_type = ?13, source_ref = ?14,
                               source_reliability = ?15, valid_until = ?16,
                               file_size = ?17, file_mtime = ?18, parent_id = ?19, sort_order = ?20,
+                              pinned = ?21,
                               created_at = ?9, updated_at = ?10, last_indexed_at = ?11
              WHERE id = ?1",
             params![
@@ -202,6 +207,7 @@ impl NoteRepository for SqliteNoteRepository {
                 note.file_mtime,
                 note.parent_id,
                 note.sort_order,
+                i64::from(note.pinned),
             ],
         )?;
         Ok(())
@@ -412,6 +418,14 @@ impl NoteRepository for SqliteNoteRepository {
         conn.execute(
             "UPDATE notes SET sort_order = ?2 WHERE id = ?1",
             params![id, sort_order],
+        )?;
+        Ok(())
+    }
+
+    fn set_pinned(&self, conn: &Connection, id: &str, pinned: bool) -> Result<()> {
+        conn.execute(
+            "UPDATE notes SET pinned = ?2 WHERE id = ?1",
+            params![id, i64::from(pinned)],
         )?;
         Ok(())
     }

@@ -67,6 +67,8 @@ pub struct Note {
     pub parent_id: Option<String>,
     /// 手动排序位次（同层内，1 起）；0 表示未显式排序
     pub sort_order: i64,
+    /// 置顶：在所有排序方式下排在最前
+    pub pinned: bool,
 }
 
 /// 列表展示用的笔记摘要。
@@ -93,6 +95,9 @@ pub struct NoteSummary {
     /// 手动排序位次（配合「自定义顺序」排序使用）
     #[serde(default)]
     pub sort_order: i64,
+    /// 置顶（所有排序下都在最前）
+    #[serde(default)]
+    pub pinned: bool,
     /// 搜索结果摘要（普通列表为空）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub snippet: Vec<TextSegment>,
@@ -139,12 +144,13 @@ impl NoteSort {
     pub fn order_by(self) -> &'static str {
         // 一律追加 id 作为次级排序键：同一毫秒写入的多篇笔记在 updated_at/created_at 上完全相同，
         // 没有次级键时 SQLite 的返回顺序不确定，会让分页与快照测试出现偶发失败。
+        // 置顶（对标语雀「置顶文档」）在所有排序方式下都排在最前。
         match self {
-            NoteSort::UpdatedDesc => "n.updated_at DESC, n.id DESC",
-            NoteSort::UpdatedAsc => "n.updated_at ASC, n.id ASC",
-            NoteSort::CreatedDesc => "n.created_at DESC, n.id DESC",
-            NoteSort::TitleAsc => "n.title COLLATE NOCASE ASC, n.id ASC",
-            NoteSort::Manual => "n.sort_order ASC, n.updated_at DESC, n.id DESC",
+            NoteSort::UpdatedDesc => "n.pinned DESC, n.updated_at DESC, n.id DESC",
+            NoteSort::UpdatedAsc => "n.pinned DESC, n.updated_at ASC, n.id ASC",
+            NoteSort::CreatedDesc => "n.pinned DESC, n.created_at DESC, n.id DESC",
+            NoteSort::TitleAsc => "n.pinned DESC, n.title COLLATE NOCASE ASC, n.id ASC",
+            NoteSort::Manual => "n.pinned DESC, n.sort_order ASC, n.updated_at DESC, n.id DESC",
         }
     }
 }

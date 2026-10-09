@@ -68,6 +68,7 @@ pub fn run() {
             commands::note_commands::note_set_source,
             commands::note_commands::note_set_parent,
             commands::note_commands::notes_reorder,
+            commands::note_commands::note_set_pinned,
             commands::batch_commands::notes_move_batch,
             commands::batch_commands::notes_tag_batch,
             commands::batch_commands::notes_delete_batch,

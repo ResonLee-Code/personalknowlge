@@ -347,6 +347,7 @@ impl RelationService {
             valid_until: stored.frontmatter.valid_until.clone(),
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
+            pinned: stored.frontmatter.pinned,
             relations: relations.to_vec(),
             extra: stored.frontmatter.extra.clone(),
         };

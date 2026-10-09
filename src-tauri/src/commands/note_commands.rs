@@ -164,6 +164,17 @@ pub async fn note_set_favorite(
     run(move || NoteService::new(context).set_favorite(&id, favorite)).await
 }
 
+/// 置顶 / 取消置顶（对标语雀「置顶文档」）。
+#[tauri::command]
+pub async fn note_set_pinned(
+    state: State<'_, AppState>,
+    id: String,
+    pinned: bool,
+) -> Result<NoteDetail> {
+    let context = state.inner.context()?;
+    run(move || NoteService::new(context).set_pinned(&id, pinned)).await
+}
+
 #[tauri::command]
 pub async fn note_set_tags(
     state: State<'_, AppState>,

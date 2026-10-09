@@ -143,6 +143,7 @@ impl NoteService {
             relations: Vec::new(),
             parent: parent.as_ref().map(|note| note.id.clone()),
             order: None,
+            pinned: false,
             extra: Vec::new(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &body);
@@ -170,6 +171,7 @@ impl NoteService {
             file_mtime: None,
             parent_id: parent.as_ref().map(|note| note.id.clone()),
             sort_order: 0,
+            pinned: false,
             source_type: None,
             source_ref: None,
             source_reliability: None,
@@ -270,6 +272,7 @@ impl NoteService {
             valid_until: existing.frontmatter.valid_until.clone(),
             parent: existing.frontmatter.parent.clone(),
             order: existing.frontmatter.order,
+            pinned: existing.frontmatter.pinned,
             relations: existing.frontmatter.relations.clone(),
             extra: existing.frontmatter.extra.clone(),
         };
@@ -382,6 +385,7 @@ impl NoteService {
             relations: stored.frontmatter.relations.clone(),
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
+            pinned: stored.frontmatter.pinned,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -465,6 +469,7 @@ impl NoteService {
             relations: stored.frontmatter.relations.clone(),
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
+            pinned: stored.frontmatter.pinned,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -647,6 +652,7 @@ impl NoteService {
             relations: stored.frontmatter.relations.clone(),
             parent: parent.as_ref().map(|item| item.id.clone()),
             order: stored.frontmatter.order,
+            pinned: stored.frontmatter.pinned,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -655,6 +661,50 @@ impl NoteService {
             SqliteNoteRepository.set_parent(conn, &note.id, parent.as_ref().map(|item| item.id.as_str()))
         })?;
         self.refresh_file_stamp(&note.id, &note.file_path);
+        self.get(&note.id)
+    }
+
+    /// 置顶 / 取消置顶（对标语雀「置顶文档」）：写回 frontmatter 的 `pinned`。
+    pub fn set_pinned(&self, id: &str, pinned: bool) -> Result<NoteDetail> {
+        let note = self.note_or_err(id)?;
+        let stored = self.ctx.storage.read_note(&note.file_path)?;
+        let lookup = self.ctx.category_lookup()?;
+        let category_path = note
+            .category_id
+            .as_ref()
+            .map(|id| lookup.path_string(id))
+            .unwrap_or_default();
+        let frontmatter = Frontmatter {
+            id: Some(note.id.clone()),
+            title: Some(note.title.clone()),
+            note_type: stored.frontmatter.note_type.clone(),
+            status: stored.frontmatter.status.clone(),
+            category: Some(category_path).filter(|value| !value.is_empty()),
+            tags: stored.frontmatter.tags.clone(),
+            created_at: stored.frontmatter.created_at.clone(),
+            // 置顶不是内容改动，保留原 updated_at
+            updated_at: stored
+                .frontmatter
+                .updated_at
+                .clone()
+                .or_else(|| Some(note.updated_at.clone())),
+            source_type: stored.frontmatter.source_type.clone(),
+            source_ref: stored.frontmatter.source_ref.clone(),
+            source_reliability: stored.frontmatter.source_reliability,
+            valid_until: stored.frontmatter.valid_until.clone(),
+            relations: stored.frontmatter.relations.clone(),
+            parent: stored.frontmatter.parent.clone(),
+            order: stored.frontmatter.order,
+            pinned,
+            extra: stored.frontmatter.extra.clone(),
+        };
+        let markdown = frontmatter::serialize(&frontmatter, &stored.body);
+        self.ctx.storage.write_atomic(&note.file_path, &markdown)?;
+        self.ctx
+            .db
+            .with_conn(|conn| SqliteNoteRepository.set_pinned(conn, &note.id, pinned))?;
+        self.refresh_file_stamp(&note.id, &note.file_path);
+        self.emit_change("modified", &note.id);
         self.get(&note.id)
     }
 
@@ -736,6 +786,7 @@ impl NoteService {
                 relations: stored.frontmatter.relations.clone(),
                 parent: stored.frontmatter.parent.clone(),
                 order: Some(order),
+                pinned: stored.frontmatter.pinned,
                 extra: stored.frontmatter.extra.clone(),
             };
             let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -830,6 +881,7 @@ impl NoteService {
             relations: stored.frontmatter.relations.clone(),
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
+            pinned: stored.frontmatter.pinned,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -878,6 +930,7 @@ impl NoteService {
             relations: stored.frontmatter.relations.clone(),
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
+            pinned: stored.frontmatter.pinned,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);

@@ -140,6 +140,7 @@ impl WorkspaceContext {
                 updated_at: note.updated_at,
                 parent_id: note.parent_id,
                 sort_order: note.sort_order,
+                pinned: note.pinned,
                 snippet: Vec::new(),
             })
             .collect())

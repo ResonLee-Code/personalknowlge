@@ -104,6 +104,31 @@ describe('NoteListItem', () => {
     expect(screen.getByTestId('note-menu-outline')).toBeInTheDocument();
     expect(screen.getByTestId('note-menu-rename')).toBeInTheDocument();
     expect(screen.getByTestId('note-menu-export')).toBeInTheDocument();
+    expect(screen.getByTestId('note-menu-pin')).toHaveTextContent('置顶');
+  });
+
+  it('置顶状态会反映在菜单文案与条目元信息上', async () => {
+    render(
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter>
+          <ul>
+            <NoteListItem
+              note={{ ...note, pinned: true }}
+              selected={false}
+              basePath="/notes"
+              onOpen={() => {}}
+            />
+          </ul>
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText('已置顶')).toBeInTheDocument();
+    await userEvent.pointer({
+      target: screen.getByTestId('note-list-item'),
+      keys: '[MouseRight]',
+    });
+    expect(await screen.findByTestId('note-menu-pin')).toHaveTextContent('取消置顶');
   });
 
   it('子文档条目提供「升级为顶层文档」，父文档提供折叠箭头', async () => {
