@@ -65,3 +65,34 @@ describe('CreateChildNoteDialog', () => {
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+describe('CreateChildNoteDialog 同层重名提示', () => {
+  it('同一父文档下已有同名子文档时给出提醒（不阻断创建）', async () => {
+    useNotesStore.setState({
+      items: [
+        {
+          id: 'note_sibling',
+          title: '1.1 目的',
+          parentId: 'note_parent',
+          filePath: 'a.md',
+          categoryPath: '技术',
+          status: 'active',
+          favorite: false,
+          wordCount: 1,
+          createdAt: '2026-10-01T00:00:00+08:00',
+          updatedAt: '2026-10-01T00:00:00+08:00',
+          tags: [],
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <CreateChildNoteDialog parent={parent} onClose={() => {}} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(screen.getByLabelText('子文档标题'), '1.1 目的');
+    expect(await screen.findByTestId('child-title-duplicate')).toBeInTheDocument();
+  });
+});

@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { CreateChildNoteDialog } from '@/components/notes/CreateChildNoteDialog';
+import { DeleteNoteDialog } from '@/components/notes/DeleteNoteDialog';
 import { MoveNoteDialog } from '@/components/notes/MoveNoteDialog';
 import { NoteOutlineDialog } from '@/components/notes/NoteOutlineDialog';
 import {
@@ -223,7 +224,12 @@ export function NoteListItem({
   const [renameOpen, setRenameOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
+  /** 当前列表结果里的直接子文档（用于删除确认框与提示） */
+  const children = useNotesStore((state) => state.items).filter(
+    (item) => item.parentId === note.id,
+  );
   const titleSegments = keyword ? splitHighlight(note.title, [keyword]) : [{ text: note.title, matched: false }];
   const snippet = note.snippet ?? [];
   const deleted = note.status === 'deleted';
@@ -257,6 +263,11 @@ export function NoteListItem({
   const handleDelete = () => {
     if (deleted) {
       void restore(note.id).then(() => toast.success('已从回收站恢复'));
+      return;
+    }
+    // 有子文档时先确认（子文档默认保留，可勾选一起删除）
+    if (children.length > 0) {
+      setDeleteOpen(true);
       return;
     }
     void remove(note.id).then(() => {
@@ -508,6 +519,16 @@ export function NoteListItem({
       ) : null}
       {exportOpen ? (
         <ExportNoteDialog noteId={note.id} title={note.title} onClose={() => setExportOpen(false)} />
+      ) : null}
+      {deleteOpen ? (
+        <DeleteNoteDialog
+          note={note}
+          children={children}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={() => {
+            if (basePath !== '/trash') navigate(basePath);
+          }}
+        />
       ) : null}
     </li>
   );

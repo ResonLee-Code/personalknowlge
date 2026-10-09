@@ -29,9 +29,17 @@ export function CreateChildNoteDialog({
   onClose: () => void;
 }) {
   const create = useNotesStore((state) => state.create);
+  /** 同层重名提示（不阻断创建，只提醒） */
+  const siblings = useNotesStore((state) => state.items).filter(
+    (item) => item.parentId === parent.id,
+  );
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const duplicated = title.trim()
+    ? siblings.some((item) => item.title.trim().toLowerCase() === title.trim().toLowerCase())
+    : false;
 
   const submit = async () => {
     const trimmed = title.trim();
@@ -78,6 +86,11 @@ export function CreateChildNoteDialog({
               if (event.key === 'Enter') void submit();
             }}
           />
+          {duplicated ? (
+            <p data-testid="child-title-duplicate" className="text-[11px] text-amber-600">
+              同一父文档下已有同名子文档（语雀允许重名，这里只做提醒）。
+            </p>
+          ) : null}
         </div>
 
         <DialogFooter>

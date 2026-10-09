@@ -464,6 +464,26 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.screenshot({ path: path.join(SHOTS, '34-history-restored.png') });
   await expect(page.locator('.cm-content')).not.toContainText('历史版本测试行');
 
+  // 29. 删除有子文档的笔记：默认保留子文档，可勾选一起删除（V1.2.1 P2）
+  await page.goto('/#/notes');
+  const parentRowForDelete = page
+    .getByTestId('note-list-item')
+    .filter({ hasText: 'SQLite 全文搜索学习笔记' })
+    .first();
+  await expect(parentRowForDelete).toContainText('1 篇子文档');
+  await parentRowForDelete.click({ button: 'right' });
+  await page.getByTestId('note-menu-delete').click();
+  await expect(page.getByRole('dialog')).toContainText('删除有子文档的笔记');
+  await expect(page.getByTestId('delete-with-children')).not.toBeChecked();
+  await page.screenshot({ path: path.join(SHOTS, '35-delete-parent.png') });
+  await page.getByTestId('delete-confirm').click();
+  // 父文档进回收站，子文档保留并回到顶层展示
+  await expect(parentRowForDelete).toHaveCount(0);
+  await expect(dragSource()).toBeVisible();
+  // 用 toast 的「撤销」恢复
+  await page.getByRole('button', { name: '撤销' }).last().click();
+  await expect(parentRowForDelete).toBeVisible();
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 
