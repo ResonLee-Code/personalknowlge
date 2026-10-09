@@ -507,8 +507,16 @@ Personal Knowledge OS_1.2.0_aarch64.dmg
   built  2026-10-07（macOS aarch64 本地构建，未签名）
 ```
 
-> Windows 安装包仍为 V1.0.0 构建（`dist-windows/`），按约定等待指令后再同步到 V1.2.0。
-> V1.1.1 的构建信息（dmg sha256 3b7d4cca…）保留在 git 历史中。
+Windows（交叉编译，未签名，待真机验收）
+  path   dist-windows/Personal Knowledge OS_1.2.0_x64-setup.exe
+  size   3259700 bytes（3.1 MB）
+  sha256 d75b97e535c7ed972122d7dcd981d005d6e39dc3e4823d2a27b09ba5154ad606
+  path   dist-windows/Personal Knowledge OS_1.2.0_x64-portable.zip
+  size   3973990 bytes（3.8 MB）
+  sha256 ea25ed29e5e7e33692cd2c16ab5956d9a4e96aad6ceaa3aa1b86c3187ed47392
+
+> 验收清单（含已自动验证项与需真机项）：[ACCEPTANCE_V1.2.0.md](./ACCEPTANCE_V1.2.0.md)。
+> V1.1.1 / V1.0.0 的构建信息保留在 git 历史与 `dist-windows/` 中。
 
 ## V1.0.1 — 2026-10-07
 

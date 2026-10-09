@@ -1,14 +1,14 @@
 # Windows 安装与使用说明
 
-适用于 Personal Knowledge OS **V1.1.1**（Windows 10 1809 及以上 / Windows 11，x64）。
+适用于 Personal Knowledge OS **V1.2.0**（Windows 10 1809 及以上 / Windows 11，x64）。
 
 ## 版本状态（重要）
 
 | 项目 | 现状 |
 | --- | --- |
-| 应用代码 | **V1.1.1**（双向链接与反链面板、图片粘贴、大纲、⌘P、模板、知识图谱、导出） |
-| Windows 安装包 | ✅ 已构建 V1.1.1（2026-10-07，NSIS + 便携版）；⚠️ **由 macOS 交叉编译产出、未签名，尚未在真实 Windows 上验收** |
-| macOS 安装包 | ✅ V1.1.1 已构建（dmg sha256 见 CHANGELOG「当前构建」） |
+| 应用代码 | **V1.2.0**（来源与时效、类型化关系、附件管理、Obsidian/Notion 导入、批量操作、拖拽、搜索历史、图谱导出、1 万篇导入 4 秒） |
+| Windows 安装包 | ✅ 已构建 V1.2.0（2026-10-10，NSIS + 便携版）；⚠️ **由 macOS 交叉编译产出、未签名，尚未在真实 Windows 上验收** |
+| macOS 安装包 | ✅ V1.2.0 已构建（dmg sha256 79dbc9b0…，见 CHANGELOG「当前构建」） |
 
 本地（macOS）重新打包的命令：
 
@@ -40,7 +40,7 @@ CI=true ./node_modules/.bin/tauri build \
 
 ### 方式 A：安装包（推荐）
 
-1. 取得 `Personal Knowledge OS_1.1.1_x64-setup.exe`（NSIS 安装包）。
+1. 取得 `Personal Knowledge OS_1.2.0_x64-setup.exe`（NSIS 安装包）。
 2. 双击运行。若出现 Windows SmartScreen 提示（当前构建未做代码签名），
    点击「更多信息」→「仍要运行」。
 3. 选择安装范围：
@@ -53,13 +53,13 @@ CI=true ./node_modules/.bin/tauri build \
 
 ```powershell
 # 仅当前用户
-.\Personal Knowledge OS_1.1.1_x64-setup.exe /S
+.\Personal Knowledge OS_1.2.0_x64-setup.exe /S
 
 # 所有用户
-.\Personal Knowledge OS_1.1.1_x64-setup.exe /S /allusers
+.\Personal Knowledge OS_1.2.0_x64-setup.exe /S /allusers
 
 # 指定安装目录
-.\Personal Knowledge OS_1.1.1_x64-setup.exe /S /D=C:\Tools\PersonalKnowledgeOS
+.\Personal Knowledge OS_1.2.0_x64-setup.exe /S /D=C:\Tools\PersonalKnowledgeOS
 ```
 
 > `/D=` 必须是最后一个参数，且路径不要加引号。
@@ -203,16 +203,16 @@ MyKnowledge\
 ## 七、从源码构建 Windows 安装包
 
 > 本次交付的安装包即由「交叉编译」方式在 macOS 上生成：
-> `dist-windows/Personal Knowledge OS_1.1.1_x64-setup.exe`（NSIS）与
-> `dist-windows/Personal Knowledge OS_1.1.1_x64-portable.zip`（便携版）。
+> `dist-windows/Personal Knowledge OS_1.2.0_x64-setup.exe`（NSIS）与
+> `dist-windows/Personal Knowledge OS_1.2.0_x64-portable.zip`（便携版）。
 > 交叉编译产物未做代码签名，首次运行需要放行 SmartScreen。
 
 本次交付产物的校验值（SHA-256，可在 PowerShell 中用
 `Get-FileHash <文件> -Algorithm SHA256` 核对）：
 
 ```text
-12254786038d06f84162549c2d6751dc4a8f67de42e29bb969be48e7e0192ff4  Personal Knowledge OS_1.1.1_x64-setup.exe
-bef3f436b2dd9f038809dd86452aff96f1cba28579d8a33d934d1955f19bbef6  Personal Knowledge OS_1.1.1_x64-portable.zip
+d75b97e535c7ed972122d7dcd981d005d6e39dc3e4823d2a27b09ba5154ad606  Personal Knowledge OS_1.2.0_x64-setup.exe
+ea25ed29e5e7e33692cd2c16ab5956d9a4e96aad6ceaa3aa1b86c3187ed47392  Personal Knowledge OS_1.2.0_x64-portable.zip
 ```
 
 > 注意：交叉编译只能验证产物结构（架构、GUI 子系统、资源节、内部文件清单）
@@ -228,7 +228,7 @@ pnpm install
 .\scripts\windows\build-windows.ps1            # 生成 NSIS 安装包
 ```
 
-产物：`src-tauri\target\release\bundle\nsis\Personal Knowledge OS_1.1.1_x64-setup.exe`
+产物：`src-tauri\target\release\bundle\nsis\Personal Knowledge OS_1.2.0_x64-setup.exe`
 
 ### 在 macOS / Linux 上交叉编译
 
