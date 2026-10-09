@@ -31,6 +31,7 @@ import { MarkdownPreview } from '@/components/editor/MarkdownPreview';
 import { OutlinePanel } from '@/components/editor/OutlinePanel';
 import { RelationsPanel } from '@/components/editor/RelationsPanel';
 import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
+import { SaveTemplateDialog } from '@/components/editor/SaveTemplateDialog';
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { SourceDialog } from '@/components/editor/SourceDialog';
 import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
@@ -106,6 +107,7 @@ export function NoteEditorPage() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [relations, setRelations] = useState<RelationView | null>(null);
   const [forceOverwrite, setForceOverwrite] = useState(false);
   const loadedId = useRef<string | null>(null);
@@ -118,7 +120,13 @@ export function NoteEditorPage() {
   const [countsFor, setCountsFor] = useState<string | null>(null);
   /** 保存 / 重命名后递增，驱动反向链接面板重新拉取派生数据 */
   const [linkRevision, setLinkRevision] = useState(0);
-  const [outlineOpen, setOutlineOpen] = useState(false);
+  /**
+   * 大纲形态（对标语雀）：hidden = 不显示；pinned = 固定在右侧；
+   * mini = 贴边收起（鼠标移上去临时悬浮展开，可「钉住大纲」固定）。
+   */
+  const [outlineMode, setOutlineMode] = useState<'hidden' | 'pinned' | 'mini'>('hidden');
+  /** mini 态下鼠标是否悬停在贴边条上（临时展开） */
+  const [outlineHover, setOutlineHover] = useState(false);
   /** 当前光标所在标题的偏移，用于大纲高亮 */
   const [activeHeadingOffset, setActiveHeadingOffset] = useState<number | null>(null);
   const editorViewRef = useRef<ReactCodeMirrorRef | null>(null);
@@ -482,10 +490,13 @@ export function NoteEditorPage() {
             <Button
               size="icon"
               variant="ghost"
-              title={outlineOpen ? '隐藏大纲' : '显示大纲'}
-              aria-pressed={outlineOpen}
-              className={cn(outlineOpen && 'text-[var(--brand)]')}
-              onClick={() => setOutlineOpen((value) => !value)}
+              title={outlineMode === 'hidden' ? '显示大纲' : '隐藏大纲'}
+              aria-pressed={outlineMode !== 'hidden'}
+              className={cn(outlineMode !== 'hidden' && 'text-[var(--brand)]')}
+              onClick={() => {
+                setOutlineHover(false);
+                setOutlineMode((value) => (value === 'hidden' ? 'pinned' : 'hidden'));
+              }}
             >
               <ListTree className="h-4 w-4" />
             </Button>
@@ -532,6 +543,12 @@ export function NoteEditorPage() {
               <DropdownMenuItem onSelect={() => void showPath()}>复制相对路径</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void reveal()}>在文件夹中显示</DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => setSaveTemplateOpen(true)}
+                disabled={readOnly}
+              >
+                <FileText className="h-3.5 w-3.5" /> 另存为模板…
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setExportOpen(true)}>
                 <Download className="h-3.5 w-3.5" /> 导出（Markdown / HTML / Word / PDF）
               </DropdownMenuItem>
@@ -687,7 +704,7 @@ export function NoteEditorPage() {
         />
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         <div ref={attachSplitContainer} className="flex min-h-0 min-w-0 flex-1">
           {editorMode !== 'preview' ? (
             <div
@@ -738,12 +755,47 @@ export function NoteEditorPage() {
           </div>
           ) : null}
         </div>
-        {outlineOpen && editorMode !== 'preview' ? (
+        {editorMode !== 'preview' && outlineMode === 'pinned' ? (
           <OutlinePanel
             headings={headings}
             activeOffset={activeHeadingOffset}
             onJump={jumpToHeading}
+            onCollapse={() => setOutlineMode('mini')}
           />
+        ) : null}
+        {editorMode !== 'preview' && outlineMode === 'mini' ? (
+          <div
+            data-testid="outline-mini"
+            title="大纲（鼠标移上去展开）"
+            className="flex w-3.5 shrink-0 cursor-pointer items-center justify-center border-l border-[var(--border-subtle)] bg-[var(--surface)]"
+            onMouseEnter={() => setOutlineHover(true)}
+            onMouseLeave={() => setOutlineHover(false)}
+            onClick={() => setOutlineHover(true)}
+          >
+            <span className="select-none text-[10px] tracking-widest text-[var(--ink-subtle)] [writing-mode:vertical-rl]">
+              大纲
+            </span>
+          </div>
+        ) : null}
+        {/* mini 态：悬浮展开的大纲（绝对定位，不挤压正文） */}
+        {editorMode !== 'preview' && outlineMode === 'mini' && outlineHover ? (
+          <div
+            data-testid="outline-overlay"
+            className="absolute right-0 top-0 z-20 h-full shadow-2xl"
+            onMouseEnter={() => setOutlineHover(true)}
+            onMouseLeave={() => setOutlineHover(false)}
+          >
+            <OutlinePanel
+              headings={headings}
+              activeOffset={activeHeadingOffset}
+              onJump={jumpToHeading}
+              pinned={false}
+              onPin={() => {
+                setOutlineHover(false);
+                setOutlineMode('pinned');
+              }}
+            />
+          </div>
         ) : null}
       </div>
 
@@ -781,6 +833,13 @@ export function NoteEditorPage() {
             setSourceOpen(false);
             void useNotesStore.getState().openDetail(note.id);
           }}
+        />
+      ) : null}
+      {saveTemplateOpen ? (
+        <SaveTemplateDialog
+          defaultName={note.title}
+          content={content.replace(/^---[\s\S]*?---\n/, '')}
+          onClose={() => setSaveTemplateOpen(false)}
         />
       ) : null}
       {exportOpen ? (

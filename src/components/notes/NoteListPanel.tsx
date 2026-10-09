@@ -304,12 +304,13 @@ export function NoteListPanel() {
           </div>
         ) : null}
 
-        <div className="flex items-center gap-1">
+        {/* 视图开关 + 排序：窄列表下换行，但按钮文字不折断 */}
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
           {selectable ? (
             <button
               type="button"
               title="多选（批量移动 / 打标签 / 删除）"
-              className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-[var(--ink-subtle)] transition-colors hover:text-[var(--brand)]"
+              className="flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] text-[var(--ink-subtle)] transition-colors hover:text-[var(--brand)]"
               onClick={() => setSelectionMode(!selectionMode)}
             >
               <CheckSquare className="h-3 w-3" />
@@ -323,7 +324,7 @@ export function NoteListPanel() {
               title="只看没有被父文档收纳的顶层文档（对标语雀的「不在目录中」）"
               aria-pressed={rootOnly}
               className={cn(
-                'flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] transition-colors',
+                'flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] transition-colors',
                 rootOnly
                   ? 'bg-[var(--brand-soft)] text-[var(--brand)]'
                   : 'text-[var(--ink-subtle)] hover:text-[var(--ink)]',
@@ -339,7 +340,7 @@ export function NoteListPanel() {
               type="button"
               data-testid="toggle-all-fold"
               title={collapsedIds.length > 0 ? '展开全部子文档' : '折叠全部子文档'}
-              className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-[var(--ink-subtle)] transition-colors hover:text-[var(--brand)]"
+              className="flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] text-[var(--ink-subtle)] transition-colors hover:text-[var(--brand)]"
               onClick={() =>
                 setCollapsedIds((previous) =>
                   previous.length > 0
@@ -362,7 +363,7 @@ export function NoteListPanel() {
               type="button"
               onClick={() => void setSort(option.value)}
               className={cn(
-                'rounded px-1.5 py-0.5 text-[11px] transition-colors',
+                'shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] transition-colors',
                 sort === option.value
                   ? 'bg-[var(--brand-soft)] text-[var(--brand)]'
                   : 'text-[var(--ink-subtle)] hover:text-[var(--ink)]',

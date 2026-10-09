@@ -582,6 +582,16 @@ export interface RenderTemplateInput {
   title?: string | null;
 }
 
+/** 把当前笔记正文另存为模板（对标语雀「另存为模板」） */
+export interface SaveTemplateInput {
+  /** 模板名（不含扩展名） */
+  name?: string | null;
+  /** 模板正文（Markdown，不含 frontmatter） */
+  content: string;
+  /** 覆盖同名模板 */
+  overwrite?: boolean;
+}
+
 export interface RenderedTemplate {
   name: string;
   content: string;

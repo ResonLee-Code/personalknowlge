@@ -47,6 +47,20 @@ pub struct RenderedTemplate {
     pub content: String,
 }
 
+/// 把一篇笔记另存为模板（对标语雀的「另存为模板」）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveTemplateInput {
+    /// 模板名（不含扩展名）；为空时回落到笔记标题
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 模板正文（Markdown，不含 frontmatter）
+    pub content: String,
+    /// 覆盖同名模板
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
 pub struct TemplateService {
     ctx: Arc<WorkspaceContext>,
 }
@@ -128,6 +142,61 @@ impl TemplateService {
         }
         Ok(path)
     }
+
+    /// 把当前笔记正文另存为模板：写入 `.knowledge/templates/<name>.md`。
+    ///
+    /// 与语雀「另存为模板」一致——模板是纯本地文件，用户也可以直接在文件夹里编辑；
+    /// 正文里的 `{{title}}` 等占位符保持原样，下次用模板新建时再替换。
+    pub fn save(&self, input: SaveTemplateInput) -> Result<TemplateSummary> {
+        let name = normalize_template_name(input.name.as_deref())?;
+        let dir = self.ctx.paths.templates_dir();
+        fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("{name}.md"));
+        if path.exists() && !input.overwrite {
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                format!("模板「{name}」已存在，请换一个名字或确认覆盖。"),
+            ));
+        }
+        let body = input.content.trim_end();
+        // 模板首行补一个 `{{title}}` 标题，新建笔记时会被替换成实际标题
+        let content = if body.starts_with("# ") {
+            format!("{body}\n")
+        } else {
+            format!("# {{{{title}}}}\n\n{body}\n")
+        };
+        // 复用笔记写入的原子写（先写临时文件再 rename），避免半截模板文件
+        self.ctx.storage.write_atomic_absolute(&path, content.as_bytes())?;
+        let file_name = format!("{name}.md");
+        let title = read_first_heading(&path).unwrap_or_else(|| name.clone());
+        Ok(TemplateSummary {
+            name,
+            file_name,
+            title,
+            bytes: content.len() as u64,
+        })
+    }
+}
+
+/// 规范化模板名：去掉扩展名、禁止路径分隔符与 `..`，长度限制 60 字符。
+fn normalize_template_name(raw: Option<&str>) -> Result<String> {
+    let trimmed = raw.unwrap_or("").trim();
+    let stem = trimmed.strip_suffix(".md").unwrap_or(trimmed).trim();
+    if stem.is_empty() {
+        return Err(AppError::new(ErrorCode::InvalidInput, "请填写模板名。"));
+    }
+    if stem.contains(['/', '\\']) || stem.contains("..") {
+        return Err(AppError::new(ErrorCode::InvalidInput, "模板名不能包含路径分隔符。"));
+    }
+    let cleaned: String = stem
+        .chars()
+        .filter(|ch| !matches!(ch, ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .collect();
+    let limited: String = cleaned.chars().take(60).collect();
+    if limited.trim().is_empty() {
+        return Err(AppError::new(ErrorCode::InvalidInput, "模板名不合法。"));
+    }
+    Ok(limited.trim().to_string())
 }
 
 /// 读取文件首个 `#` 标题（最多读取 200 行）。

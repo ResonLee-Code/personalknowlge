@@ -3,7 +3,7 @@
 use tauri::State;
 
 use crate::application::template_service::{
-    RenderTemplateInput, RenderedTemplate, TemplateService, TemplateSummary,
+    RenderTemplateInput, RenderedTemplate, SaveTemplateInput, TemplateService, TemplateSummary,
 };
 use crate::core::error::Result;
 use crate::state::AppState;
@@ -25,4 +25,14 @@ pub async fn template_render(
 ) -> Result<RenderedTemplate> {
     let context = state.inner.context()?;
     run(move || TemplateService::new(context).render(input)).await
+}
+
+/// 把当前笔记正文另存为模板（对标语雀「另存为模板」）。
+#[tauri::command]
+pub async fn template_save(
+    state: State<'_, AppState>,
+    input: SaveTemplateInput,
+) -> Result<TemplateSummary> {
+    let context = state.inner.context()?;
+    run(move || TemplateService::new(context).save(input)).await
 }

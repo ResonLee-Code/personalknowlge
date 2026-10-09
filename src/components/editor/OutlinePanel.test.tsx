@@ -31,4 +31,22 @@ describe('OutlinePanel', () => {
     render(<OutlinePanel headings={[]} onJump={() => {}} />);
     expect(screen.getByText(/正文还没有标题/)).toBeInTheDocument();
   });
+
+  it('钉住态提供「隐藏大纲」，悬浮态提供「钉住大纲」（对标语雀）', async () => {
+    const onCollapse = vi.fn();
+    const onPin = vi.fn();
+    const { rerender } = render(
+      <OutlinePanel headings={headings} onJump={() => {}} onCollapse={onCollapse} />,
+    );
+
+    await userEvent.click(screen.getByTestId('outline-collapse'));
+    expect(onCollapse).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('outline-pin')).not.toBeInTheDocument();
+
+    rerender(
+      <OutlinePanel headings={headings} onJump={() => {}} pinned={false} onPin={onPin} />,
+    );
+    await userEvent.click(screen.getByTestId('outline-pin'));
+    expect(onPin).toHaveBeenCalledTimes(1);
+  });
 });

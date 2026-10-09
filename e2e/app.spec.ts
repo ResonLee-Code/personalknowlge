@@ -395,6 +395,35 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByText('索引设计笔记').first()).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '30-batch-copy.png') });
 
+  // 27. 大纲「钉住 / mini 态」与「另存为模板」入口（V1.2.1 P2）
+  await page.goto('/#/notes');
+  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await page.getByRole('button', { name: '显示大纲' }).click();
+  await expect(page.getByTestId('outline-panel')).toBeVisible();
+
+  // 收起为贴边 mini 态：面板消失、留下贴边条；鼠标移上去临时展开
+  await page.getByTestId('outline-collapse').click();
+  await expect(page.getByTestId('outline-panel')).toHaveCount(0);
+  await expect(page.getByTestId('outline-mini')).toBeVisible();
+  await page.getByTestId('outline-mini').hover();
+  await expect(page.getByTestId('outline-overlay')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '31-outline-mini.png') });
+
+  // 钉住后固定展示，不再依赖悬停
+  await page.getByTestId('outline-pin').click();
+  await expect(page.getByTestId('outline-panel')).toBeVisible();
+  await expect(page.getByTestId('outline-mini')).toHaveCount(0);
+
+  // 另存为模板入口（浏览器预览模式没有工作区目录，这里验证入口与提示）
+  await page.getByRole('button', { name: '更多操作' }).click();
+  await page.getByRole('menuitem', { name: /另存为模板/ }).click();
+  await expect(page.getByRole('dialog')).toContainText('另存为模板');
+  await expect(page.getByRole('dialog')).toContainText('浏览器预览模式');
+  await page.screenshot({ path: path.join(SHOTS, '32-save-template.png') });
+  await page.getByRole('button', { name: '取消' }).click();
+  await page.getByRole('button', { name: '隐藏大纲' }).click();
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

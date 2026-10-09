@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use personal_knowledge_os_lib::application::note_service::NoteService;
 use personal_knowledge_os_lib::application::template_service::{
-    RenderTemplateInput, TemplateService,
+    RenderTemplateInput, SaveTemplateInput, TemplateService,
 };
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
@@ -113,5 +113,67 @@ fn rejects_missing_and_unsafe_template_names() {
             .templates()
             .render(RenderTemplateInput { name: name.into(), title: None });
         assert!(result.is_err(), "模板名 {name:?} 应被拒绝");
+    }
+}
+
+#[test]
+fn saves_note_body_as_template_and_reuses_it() {
+    let fixture = Fixture::new();
+
+    // 另存为模板：正文没有一级标题时，自动补 `# {{title}}`
+    let saved = fixture
+        .templates()
+        .save(SaveTemplateInput {
+            name: Some("周报".into()),
+            content: "## 本周完成\n\n- \n\n## 下周计划\n\n- ".into(),
+            overwrite: false,
+        })
+        .expect("另存为模板");
+    assert_eq!(saved.name, "周报");
+    assert_eq!(saved.file_name, "周报.md");
+    assert_eq!(saved.title, "周报", "标题取首个 `#`，占位符标题会被跳过");
+    let path = fixture.root.join(".knowledge").join("templates").join("周报.md");
+    let raw = std::fs::read_to_string(&path).expect("读取模板文件");
+    assert!(raw.starts_with("# {{title}}\n"), "应补上标题占位符：\n{raw}");
+    assert!(raw.contains("## 本周完成"));
+
+    // 模板可直接被「新建笔记 → 模板」使用（占位符替换）
+    let rendered = fixture
+        .templates()
+        .render(RenderTemplateInput { name: "周报".into(), title: Some("第 42 周".into()) })
+        .expect("套用模板");
+    assert!(rendered.content.contains("# 第 42 周"));
+    assert!(rendered.content.contains("## 本周完成"));
+
+    // 同名模板默认拒绝覆盖，勾选覆盖后才写入
+    let duplicate = fixture.templates().save(SaveTemplateInput {
+        name: Some("周报".into()),
+        content: "新内容".into(),
+        overwrite: false,
+    });
+    assert!(duplicate.is_err(), "同名模板应要求显式覆盖");
+    fixture
+        .templates()
+        .save(SaveTemplateInput {
+            name: Some("周报".into()),
+            content: "# {{title}}\n\n新内容".into(),
+            overwrite: true,
+        })
+        .expect("覆盖写入");
+    let updated = std::fs::read_to_string(&path).expect("读取模板文件");
+    assert!(updated.contains("新内容"));
+    assert!(!updated.contains("## 本周完成"), "覆盖后应只剩新内容");
+}
+
+#[test]
+fn rejects_unsafe_template_names() {
+    let fixture = Fixture::new();
+    for bad in ["", "   ", "../逃逸", "子目录/模板"] {
+        let result = fixture.templates().save(SaveTemplateInput {
+            name: Some(bad.into()),
+            content: "x".into(),
+            overwrite: true,
+        });
+        assert!(result.is_err(), "不合法模板名应被拒绝：{bad}");
     }
 }

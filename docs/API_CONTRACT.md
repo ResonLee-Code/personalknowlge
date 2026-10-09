@@ -314,7 +314,19 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 扫描同步路径（`apply_external_edit`）会投影 `pinned` 与 `order`，
   因此用户用外部编辑器手改 frontmatter 也能生效。
 
-## 20. 前端服务层
+## 20. 本地模板：另存为模板（V1.2.1）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `template_save` | `{ input: { name?, content, overwrite? } }` | `TemplateSummary` |
+
+- 把笔记正文写入 `.knowledge/templates/<name>.md`（模板是普通 Markdown，用户可直接编辑）；
+- 正文没有一级标题时自动补 `# {{title}}`，保证套用时标题占位符可用；
+- `overwrite` 默认 `false`：同名模板要求显式覆盖，避免误删用户模板；
+- 模板名做校验：去扩展名、禁止路径分隔符与 `..`、过滤 `: * ? " < > |`、限制 60 字符。
+- 读取与套用仍走既有的 `templates_list` / `template_render`（第 11 节）。
+
+## 21. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 
