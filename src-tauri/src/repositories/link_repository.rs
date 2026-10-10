@@ -43,6 +43,12 @@ pub trait LinkRepository {
     /// 全库**已解析**的链接（不含外链），用于知识图谱等派生视图。
     fn list_resolved(&self, conn: &Connection, workspace_id: &str) -> Result<Vec<NoteLinkRow>>;
     fn list_titles(&self, conn: &Connection, workspace_id: &str) -> Result<Vec<NoteTitleRow>>;
+    /// 图谱专用：只取 `(source, target, link_type)`，跳过标题等无用列（大库下省一半以上分配）
+    fn list_resolved_pairs(
+        &self,
+        conn: &Connection,
+        workspace_id: &str,
+    ) -> Result<Vec<(String, String, String)>>;
     fn clear_workspace(&self, conn: &Connection, workspace_id: &str) -> Result<()>;
     fn unbind_target(&self, conn: &Connection, target_note_id: &str) -> Result<usize>;
     fn rebind_target(
@@ -171,6 +177,30 @@ impl LinkRepository for SqliteLinkRepository {
             list.push(row?);
         }
         Ok(list)
+    }
+
+    fn list_resolved_pairs(
+        &self,
+        conn: &Connection,
+        workspace_id: &str,
+    ) -> Result<Vec<(String, String, String)>> {
+        let mut statement = conn.prepare(
+            "SELECT source_note_id, target_note_id, link_type FROM note_links
+             WHERE workspace_id = ?1 AND target_note_id IS NOT NULL AND link_type <> 'url'
+             ORDER BY source_note_id ASC, position ASC",
+        )?;
+        let rows = statement.query_map(params![workspace_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut pairs = Vec::new();
+        for row in rows {
+            pairs.push(row?);
+        }
+        Ok(pairs)
     }
 
     fn list_titles(&self, conn: &Connection, workspace_id: &str) -> Result<Vec<NoteTitleRow>> {

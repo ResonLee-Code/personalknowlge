@@ -279,9 +279,10 @@ export function GraphPage() {
 
       {data?.truncated ? (
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
-          节点或连接过多，已按连接度显示前 {formatCount(data.nodes.length)} 个节点（共{' '}
-          {formatCount(data.totalNodes)} 个节点 / {formatCount(data.totalEdges)} 条连接）。
-          建议先按分类或标签筛选，或聚焦到某篇笔记。
+          节点或连接过多（共 {formatCount(data.totalNodes)} 个节点 / {formatCount(data.totalEdges)}{' '}
+          条连接），当前显示 {formatCount(data.nodes.length)} 个节点：
+          已按**分类配额 + 连接优先**抽样——每个分类都保留代表，并把高连接节点的邻居一起带进来，
+          因此看到的是成片的簇而不是散点。想看得更细可按分类 / 标签筛选，或聚焦到某篇笔记。
         </div>
       ) : null}
 

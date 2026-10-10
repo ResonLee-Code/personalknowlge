@@ -177,3 +177,113 @@ fn truncates_by_degree_and_reports_totals() {
     // 截断后只保留 3 个节点 → 中心节点在结果里的邻居数是 2（度数按可见子图重算）
     assert_eq!(hub_node.degree, 2);
 }
+
+/// 大库抽样：连接优先 + 分类配额（V1.2.1 C2）。
+///
+/// 反例设定：分类 A 有 12 篇互相链接（度数高），B / C 各 2 篇低度数。
+/// 旧策略「全局按度数取前 N」会把 B / C 全部丢掉（小分类在大库里直接消失）；
+/// 新策略按分类配额抽样，且优先把种子节点的邻居一起带进来。
+#[test]
+fn samples_large_graph_with_category_quotas_and_connectivity() {
+    use personal_knowledge_os_lib::application::category_service::CategoryService;
+    use personal_knowledge_os_lib::domain::category::CreateCategoryInput;
+
+    let fixture = Fixture::new();
+    let context = fixture.app.context().expect("工作区已打开");
+    let categories = CategoryService::new(Arc::clone(&context));
+    let mut make_category = |name: &str| {
+        categories
+            .create(CreateCategoryInput {
+                name: name.to_string(),
+                parent_id: None,
+                create_directory: None,
+            })
+            .expect("建分类")
+            .id
+    };
+    let dense = make_category("密集分类");
+    let small_b = make_category("小分类B");
+    let small_c = make_category("小分类C");
+
+    // A：12 篇围成环（每篇度数 2）
+    let mut dense_ids = Vec::new();
+    for index in 0..12 {
+        let id = fixture.note(&format!("密集 {index}"), "");
+        fixture
+            .notes()
+            .save(SaveNoteInput {
+                id: id.clone(),
+                content: format!("链接到 [[密集 {}]]", (index + 1) % 12),
+                base_content_hash: None,
+                title: None,
+                category_id: Some(dense.clone()),
+                tags: None,
+            })
+            .expect("保存");
+        dense_ids.push(id);
+    }
+    // B / C：各 2 篇，只有分类内 1 条边
+    for (index, category) in [(0, &small_b), (1, &small_b), (0, &small_c), (1, &small_c)] {
+        let partner = 1 - index;
+        let id = fixture.note(&format!("{}-{index}", category), "");
+        fixture
+            .notes()
+            .save(SaveNoteInput {
+                id: id.clone(),
+                content: format!("[[{}-{partner}]]", category),
+                base_content_hash: None,
+                title: None,
+                category_id: Some(category.to_string()),
+                tags: None,
+            })
+            .expect("保存");
+    }
+
+    let graph = fixture
+        .graph()
+        .graph(GraphQuery {
+            max_nodes: Some(8),
+            max_edges: Some(50),
+            ..Default::default()
+        })
+        .expect("查询图谱");
+
+    assert!(graph.truncated, "17 篇里只取 8 个节点，应标记截断");
+    assert_eq!(graph.nodes.len(), 8);
+    assert_eq!(graph.total_nodes, 17, "欢迎笔记 + 12 + 4");
+
+    let categories_in_sample: std::collections::HashSet<Option<String>> =
+        graph.nodes.iter().map(|node| node.category_id.clone()).collect();
+    for (label, expected) in [
+        ("密集分类", Some(dense.clone())),
+        ("小分类B", Some(small_b.clone())),
+        ("小分类C", Some(small_c.clone())),
+        ("未分类（欢迎笔记）", None),
+    ] {
+        assert!(
+            categories_in_sample.contains(&expected),
+            "{label} 在抽样后不应消失：{categories_in_sample:?}"
+        );
+    }
+
+    // 连接优先：密集分类的节点之间应保留内部边
+    let dense_edges = graph
+        .edges
+        .iter()
+        .filter(|edge| {
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.id == edge.source && node.category_id.as_deref() == Some(dense.as_str()))
+                && graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == edge.target && node.category_id.as_deref() == Some(dense.as_str()))
+        })
+        .count();
+    assert!(dense_edges > 0, "抽样应保留同一分类内部的连接：{:?}", graph.edges);
+    assert!(
+        graph.nodes.iter().any(|node| node.degree > 0),
+        "样本里应有带连接的节点"
+    );
+}

@@ -45,21 +45,32 @@ impl GraphService {
             status: Some(NoteStatus::Active),
             ..Default::default()
         };
-        // 仓储单页上限 500，图谱需要完整节点集 → 按页取全部
+        // 图谱需要**完整**节点集：无过滤时一次查询取全（避免大库下逐页往返被拖慢/截断）；
+        // 有过滤（分类 / 标签 / 关键词）时才按 500/页分页，直到取完（上限 50 万兜底）。
+        let unfiltered = list_query.category_id.is_none()
+            && list_query.tag_id.is_none()
+            && list_query.keyword.is_none();
         let mut notes = Vec::new();
-        let mut page = 1i64;
-        loop {
-            let mut paged = list_query.clone();
-            paged.page = Some(page);
-            let (batch, total) = self.ctx.db.with_conn(|conn| {
-                SqliteNoteRepository.list(conn, &workspace_id, &paged)
+        if unfiltered {
+            notes = self.ctx.db.with_conn(|conn| {
+                SqliteNoteRepository.list_by_status(conn, &workspace_id, NoteStatus::Active)
             })?;
-            let batch_len = batch.len();
-            notes.extend(batch);
-            if batch_len == 0 || notes.len() as i64 >= total || page >= 100 {
-                break;
+        } else {
+            let mut page = 1i64;
+            loop {
+                let mut paged = list_query.clone();
+                paged.page = Some(page);
+                paged.page_size = Some(500);
+                let (batch, total) = self.ctx.db.with_conn(|conn| {
+                    SqliteNoteRepository.list(conn, &workspace_id, &paged)
+                })?;
+                let batch_len = batch.len();
+                notes.extend(batch);
+                if batch_len == 0 || notes.len() as i64 >= total || notes.len() >= 500_000 {
+                    break;
+                }
+                page += 1;
             }
-            page += 1;
         }
 
         let updated_after = query.updated_after.clone();
@@ -76,34 +87,25 @@ impl GraphService {
         let links = self
             .ctx
             .db
-            .with_conn(|conn| SqliteLinkRepository.list_resolved(conn, &workspace_id))?;
+            .with_conn(|conn| SqliteLinkRepository.list_resolved_pairs(conn, &workspace_id))?;
 
-        let mut edge_map: BTreeMap<(String, String), (String, u32)> = BTreeMap::new();
+        // 大库下这里会走几十万次：键用 `HashMap` + 复用同一份字符串索引，避免 BTreeMap 的比较开销
+        let mut edge_map: HashMap<(String, String), (String, u32)> = HashMap::new();
         let mut adjacency: HashMap<String, BTreeSet<String>> = HashMap::new();
-        for link in links {
-            let Some(target) = link.target_note_id.clone() else {
-                continue;
-            };
-            if !allowed.contains(&link.source_note_id) || !allowed.contains(&target) {
+        for (source, target, link_type) in links {
+            if !allowed.contains(&source) || !allowed.contains(&target) {
                 continue;
             }
-            if link.source_note_id == target {
+            if source == target {
                 // 自链接不计入图谱（避免自环影响布局与度数）
                 continue;
             }
-            let key = (link.source_note_id.clone(), target.clone());
             let entry = edge_map
-                .entry(key)
-                .or_insert_with(|| (link.link_type.as_str().to_string(), 0));
+                .entry((source.clone(), target.clone()))
+                .or_insert_with(|| (link_type.clone(), 0));
             entry.1 += 1;
-            adjacency
-                .entry(link.source_note_id.clone())
-                .or_default()
-                .insert(target.clone());
-            adjacency
-                .entry(target)
-                .or_default()
-                .insert(link.source_note_id.clone());
+            adjacency.entry(source.clone()).or_default().insert(target.clone());
+            adjacency.entry(target).or_default().insert(source);
         }
 
         // 3) 聚焦：以目标笔记为起点做 N 跳 BFS
@@ -158,13 +160,7 @@ impl GraphService {
         let max_nodes = query.max_nodes.unwrap_or(DEFAULT_MAX_NODES).max(1);
         let mut truncated = false;
         if nodes.len() > max_nodes {
-            nodes.sort_by(|left, right| {
-                right
-                    .degree
-                    .cmp(&left.degree)
-                    .then_with(|| right.updated_at.cmp(&left.updated_at))
-            });
-            nodes.truncate(max_nodes);
+            nodes = sample_nodes(nodes, &adjacency, max_nodes);
             truncated = true;
         }
 
@@ -222,4 +218,97 @@ impl GraphService {
             duration_ms: started.elapsed().as_millis() as u64,
         })
     }
+}
+
+/// 大库抽样：**连接优先 + 分类配额**。
+///
+/// 为什么不是「全局按度数取前 N」：那样会把图切碎——30k 篇基准里取 2000 个节点只剩 407 条边，
+/// 用户看到的是散点而不是结构。这里改成：
+/// 1. 按分类分配名额（与分类规模成比例，至少 1 个），保证各分类都有代表；
+/// 2. 组内先取度数最高的节点作为种子，再**沿邻居向外扩张**填满名额（连通性优先）；
+/// 3. 名额没填满时，用剩余节点按度数补足。
+fn sample_nodes(
+    nodes: Vec<GraphNode>,
+    adjacency: &HashMap<String, BTreeSet<String>>,
+    budget: usize,
+) -> Vec<GraphNode> {
+    let mut by_id: HashMap<String, GraphNode> =
+        nodes.into_iter().map(|node| (node.id.clone(), node)).collect();
+
+    // 分类分组（None 视为一个独立组），并统计规模
+    let mut groups: BTreeMap<Option<String>, Vec<String>> = BTreeMap::new();
+    for node in by_id.values() {
+        groups
+            .entry(node.category_id.clone())
+            .or_default()
+            .push(node.id.clone());
+    }
+    for ids in groups.values_mut() {
+        ids.sort_by(|left, right| {
+            let degree = |id: &String| by_id.get(id).map(|node| node.degree).unwrap_or(0);
+            degree(right).cmp(&degree(left)).then_with(|| right.cmp(left))
+        });
+    }
+    let total: usize = groups.values().map(Vec::len).sum();
+    let group_count = groups.len().max(1);
+
+    let mut selected: Vec<String> = Vec::with_capacity(budget);
+    let mut taken: HashSet<String> = HashSet::new();
+    for (index, (_, ids)) in groups.iter().enumerate() {
+        if selected.len() >= budget {
+            break;
+        }
+        // 按规模配额；最后一个组拿走剩余名额，避免四舍五入丢名额
+        let share = if index + 1 == group_count {
+            budget.saturating_sub(selected.len())
+        } else {
+            ((ids.len() * budget) / total.max(1)).max(1)
+        };
+        let mut quota = share.min(budget - selected.len());
+        for seed in ids {
+            if quota == 0 {
+                break;
+            }
+            if taken.contains(seed) {
+                continue;
+            }
+            taken.insert(seed.clone());
+            selected.push(seed.clone());
+            quota -= 1;
+            // 连接优先：先把种子的邻居拉进来
+            if let Some(neighbours) = adjacency.get(seed) {
+                for neighbour in neighbours {
+                    if quota == 0 {
+                        break;
+                    }
+                    if by_id.contains_key(neighbour) && taken.insert(neighbour.clone()) {
+                        selected.push(neighbour.clone());
+                        quota -= 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // 名额没满（例如孤点很多）：按度数补足
+    if selected.len() < budget {
+        let mut rest: Vec<(u32, String)> = by_id
+            .values()
+            .filter(|node| !taken.contains(&node.id))
+            .map(|node| (node.degree, node.id.clone()))
+            .collect();
+        rest.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        for (_, id) in rest {
+            if selected.len() >= budget {
+                break;
+            }
+            taken.insert(id.clone());
+            selected.push(id);
+        }
+    }
+
+    selected
+        .into_iter()
+        .filter_map(|id| by_id.remove(&id))
+        .collect()
 }

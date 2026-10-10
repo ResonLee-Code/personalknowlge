@@ -3,7 +3,7 @@
 //! 用**本地 HTTP 服务**覆盖真实抓取路径（不去访问外网，测试可离线稳定运行）：
 //! 302 跳转 → 最终地址、HTML 解析成 Markdown、非 HTML 与 404 的错误提示。
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
