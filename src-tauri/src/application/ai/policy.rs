@@ -217,9 +217,58 @@ pub fn apply_policy(policy: &mut AiPolicy, input: &UpdateAiPolicyInput) {
     if let Some(endpoint) = &input.search_endpoint {
         policy.search_endpoint = normalize_search_endpoint(endpoint);
     }
+    if let Some(endpoint) = &input.local_model_endpoint {
+        policy.local_model_endpoint = normalize_local_endpoint(endpoint);
+    }
+    if let Some(name) = &input.local_model_name {
+        let trimmed = name.trim();
+        policy.local_model_name = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+    }
+    if let Some(enabled) = input.local_model_compose {
+        policy.local_model_compose = enabled;
+    }
+    if let Some(enabled) = input.local_model_score {
+        policy.local_model_score = enabled;
+    }
     if let Some(budget) = &input.budget {
         policy.budget = budget.clamped();
     }
+}
+
+/// 本地模型地址规范化：只接受 http(s) 且去掉结尾的 `/`；不合法视为「未配置」。
+///
+/// 只允许本机地址（localhost / 127.0.0.1 / ::1）：本地模型不应该是一个远程服务；
+/// 远程模型属于另一档决策（需要单独授权），本版不做。
+pub fn normalize_local_endpoint(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    if !(lowered.starts_with("http://") || lowered.starts_with("https://")) {
+        return None;
+    }
+    let rest = trimmed.split_once("://").map(|(_, rest)| rest).unwrap_or(trimmed);
+    let host = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .rsplit('@')
+        .next()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let local = host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]";
+    if !local {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 /// 检索源地址规范化：只接受 http(s) 且必须含 `{query}`；不合法一律视为「未配置」。

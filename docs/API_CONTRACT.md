@@ -396,6 +396,10 @@ interface ReviewDueNote {
   **默认为空**——应用不预置任何第三方检索服务；不合法（非 http(s) 或缺 `{query}`）视为未配置。
   `ai_web_search` / 研究收集都先过域名黑白名单（检索源本身也算外发目标），
   未配置检索源返回 `INVALID_INPUT` 且不发请求；
+- `AiPolicy.localModelEndpoint` / `localModelName` / `localModelCompose` / `localModelScore`（D5）：
+  本地模型（Ollama HTTP）。地址**只接受本机**（`localhost` / `127.0.0.1` / `::1`，其余清空），
+  两个开关**默认关闭**，都关时一个请求都不发；开启后模型不可用会**自动降级**到规则档 / 模板实现。
+  复用 `ai_policy_get` / `ai_policy_set`，无新增命令；
 - 切换联网档位会清空既有的确认时间戳（切回「仅本地」后再切到联网需重新确认一次）；
 - 审计写在 `.knowledge/logs/ai-audit.jsonl`，仅记录行为元数据（时间 / 能力 / 是否外发 / 结果 / 耗时 / 备注）。
 

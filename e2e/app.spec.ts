@@ -1,8 +1,20 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const SHOTS = path.resolve(process.cwd(), 'docs/screenshots');
+
+/**
+ * 点击提示条里的「撤销」。
+ *
+ * 提示条自带进出场动画，在机器忙碌时 Playwright 的「元素稳定」检查会一直重试直到超时；
+ * 这里直接派发 click 事件（React 的合成事件照样会触发），避免与动画赛跑。
+ */
+async function clickUndo(page: Page) {
+  const undo = page.getByRole('button', { name: '撤销' }).last();
+  await expect(undo).toBeVisible();
+  await undo.dispatchEvent('click');
+}
 
 // 每次运行都从干净的内存后端开始
 test.beforeEach(async ({ page }) => {
@@ -262,8 +274,9 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByText(/3 个节点/)).toBeVisible();
   await expect(page.getByText(/1 条连接/)).toBeVisible();
   await expect(page.getByTestId('graph-canvas')).toBeVisible();
-  // 等布局收敛（收敛后提示语会从「正在计算布局」切换）
-  await expect(page.getByText(/拖拽节点可固定位置/)).toBeVisible({ timeout: 10_000 });
+  // 等布局收敛（收敛后提示语会从「正在计算布局」切换）。
+  // 收敛依赖力导向迭代的 tick 数，机器忙碌时会明显变慢，因此这里给足 25 秒。
+  await expect(page.getByText(/拖拽节点可固定位置/)).toBeVisible({ timeout: 25_000 });
   await page.screenshot({ path: path.join(SHOTS, '21-graph.png') });
 
   // 22. 子文档层级 / 右键菜单 / 大纲预览（V1.2.1，对标语雀）
@@ -362,7 +375,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await dragSource().click({ button: 'right' });
   await page.getByTestId('note-menu-delete').click();
   await expect(dragSource()).toHaveCount(0);
-  await page.getByRole('button', { name: '撤销' }).last().click();
+  await clickUndo(page);
   await expect(dragSource()).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '28-delete-undo.png') });
 
@@ -510,7 +523,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(parentRowForDelete).toHaveCount(0);
   await expect(dragSource()).toBeVisible();
   // 用 toast 的「撤销」恢复
-  await page.getByRole('button', { name: '撤销' }).last().click();
+  await clickUndo(page);
   await expect(parentRowForDelete).toBeVisible();
 
   // 30. 目录管理页（V1.2.1 P2，对标语雀「目录管理」）
@@ -572,6 +585,10 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.getByTestId('ai-search-endpoint').fill('https://searx.example/search?q={query}&format=json');
   await page.getByTestId('ai-search-endpoint').blur();
   await expect(page.getByTestId('ai-search-endpoint')).toHaveValue(/searx\.example/);
+  // 本地模型（D5）：默认不启用（空地址 + 两个开关关闭），浏览器预览不调用本地模型
+  await expect(page.getByTestId('ai-local-endpoint')).toHaveValue('');
+  await expect(page.getByTestId('ai-local-compose')).not.toBeChecked();
+  await expect(page.getByTestId('ai-local-score')).not.toBeChecked();
 
   // 33. 研究助手（D2）：本地调研 → 六段报告 → 确认写入
   // 先准备三篇本地材料（两条指向「方案」，一条指向「限制」→ 单一来源进待验证）

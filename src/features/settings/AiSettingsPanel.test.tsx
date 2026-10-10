@@ -17,6 +17,10 @@ const conservative: AiPolicy = {
   allowFetchBody: false,
   domainAllowlist: [],
   domainDenylist: [],
+  localModelEndpoint: null,
+  localModelName: null,
+  localModelCompose: false,
+  localModelScore: false,
   budget: { maxSubquestions: 5, maxPages: 12, maxDurationSecs: 480 },
   auditMaxEntries: 500,
 };
@@ -137,5 +141,38 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
         searchEndpoint: 'https://searx.example/search?q={query}&format=json',
       }),
     );
+  });
+
+  it('本地模型默认不启用：地址/模型名为空、两个开关都是关的（D5）', async () => {
+    render(<AiSettingsPanel />);
+
+    expect(await screen.findByTestId('ai-local-endpoint')).toHaveValue('');
+    expect(screen.getByTestId('ai-local-model')).toHaveValue('');
+    expect(screen.getByTestId('ai-local-compose')).not.toBeChecked();
+    expect(screen.getByTestId('ai-local-score')).not.toBeChecked();
+    // 提示里说明「只连本机」「不会真的调用」
+    expect(screen.getByText(/只连本机地址/)).toBeInTheDocument();
+  });
+
+  it('本地模型开关与模型名分别提交（失败降级由后端负责）', async () => {
+    // 回显输入：开关是受控组件，测试要看到「点一下就提交真值」而不是固定返回值
+    const setPolicy = vi
+      .spyOn(aiService, 'setPolicy')
+      .mockImplementation(async (input) => ({ ...conservative, enabled: true, ...input }));
+    render(<AiSettingsPanel />);
+
+    await userEvent.type(
+      await screen.findByTestId('ai-local-endpoint'),
+      'http://127.0.0.1:11434',
+    );
+    await userEvent.tab();
+    await waitFor(() =>
+      expect(setPolicy).toHaveBeenCalledWith({ localModelEndpoint: 'http://127.0.0.1:11434' }),
+    );
+
+    await userEvent.click(screen.getByTestId('ai-local-compose'));
+    await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ localModelCompose: true }));
+    await userEvent.click(screen.getByTestId('ai-local-score'));
+    await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ localModelScore: true }));
   });
 });

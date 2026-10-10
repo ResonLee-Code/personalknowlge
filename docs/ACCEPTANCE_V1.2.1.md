@@ -14,12 +14,12 @@
 
 | 项目 | 结果 | 证据 |
 | --- | --- | --- |
-| Rust 全量测试 | ✅ 28 个测试目标全绿（库单测 103 项 + 集成测试） | `cd src-tauri && cargo test --offline` |
+| Rust 全量测试 | ✅ 29 个测试目标全绿（库单测 107 项 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
-| 前端单元 / 组件测试 | ✅ 41 个文件、215 用例全通过 | `CI=true pnpm test` |
+| 前端单元 / 组件测试 | ✅ 41 个文件、217 用例全通过 | `CI=true pnpm test` |
 | 前端生产构建 | ✅ 构建成功 | `CI=true pnpm build` |
-| 端到端主流程 | ✅ 1 条 34 步流程通过（浏览器预览后端） | `CI=true pnpm test:e2e`（截图见 `docs/screenshots/`） |
+| 端到端主流程 | ✅ 1 条 34 步流程通过（浏览器预览后端） | `CI=true pnpm test:e2e`（截图见 `docs/screenshots/`）；重负载下时序敏感，配置了 1 次重试与 10s 断言超时（原因写在 `playwright.config.ts` 注释里） |
 
 关键断言（对应 V1.2.1 新增能力的「可测证据」）：
 
@@ -35,6 +35,7 @@
 | 联网检索 | 仅本地口径下检索源**一个请求都不发**；放行后分级与预算生效、疑似注入页丢弃；未配置检索源不外发 | `tests/web_search_flow.rs`（3 项） |
 | 待复核提醒 | 0 / 14 / 365 天三档窗口、过期天数、无法解析的时效字段跳过、回收站不提醒 | `tests/review_flow.rs`（2 项） |
 | 决策层打分 | 来源可信度 ∈ (0,1]、交叉验证结论置信度高于单一来源；注入桩 `DecisionModel` 可改变打分（A/B 通路） | `tests/research_flow.rs` |
+| 本地模型接入 | 开启后可信度由模型分决定且报告写明 provider；连不上自动降级且流程不中断；开关关闭时零请求；远程地址被拒绝 | `tests/local_model_flow.rs`（3 项） |
 
 ## B. 性能（✅ 已自动验证，本机 2026-10-11 实测）
 

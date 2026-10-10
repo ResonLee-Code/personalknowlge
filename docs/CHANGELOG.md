@@ -153,6 +153,27 @@
 - 新命令：`ai_policy_get` / `ai_policy_set` / `ai_audit_tail` / `ai_kb_search` / `ai_web_fetch` / `ai_web_search`；
   错误码新增 `AI_DISABLED` / `NETWORK_DISABLED`（前后端一致）。
 
+### 本地模型接入：Ollama HTTP（阶段 D5 收口，2026-10-11）
+
+把「模型接入层」按你确认的形态（**本地 Ollama HTTP**）落地，**默认关闭、只连本机、失败自动降级**：
+
+- **接入点**：`application/ai/local_model.rs` 的 `OllamaModel` 同时实现 `GenerativeModel`（生成）
+  与 `DecisionModel`（打分）；研究助手通过 `composer_model()` / `decision_model()` 选择它，
+  因此**换模型不需要改流水线**（这也是 Jev 将来接入的位置）；
+- **两道开关**（默认都关）：① 用本地模型**写报告**（只影响「模型推测」段的文字）；
+  ② 用本地模型**打分**（与规则档 A/B；提示语如实标注「模型分未校准、级别折算仍占一半，不是 Jev」）；
+- **只连本机**：`policy::normalize_local_endpoint` 只接受 `localhost` / `127.0.0.1` / `::1`，
+  填远程地址会被清空（远程模型需要单独授权，本版不做）；
+- **失败即降级**：没装 Ollama / 没 pull / 超时 / 输出不合规时——打分退回规则档、报告退回模板实现，
+  并在报告警告块写明原因；研究流程**不会因为模型不可用而中断**；
+- **输出严格校验**：打分要求模型只输出 `{"scores":[{"id","score","reason"}]}`；
+  与候选 id 不匹配的条目、分数越界或缺字段一律按规则处理，**模型编造的 id 一律不采信**
+  （`parse_decision_output`，非法输出报错让上层降级，而不是猜）；
+- **测试**：`local_model.rs` 4 项单测（provider 标识、输出校验与越界夹取、非法输出必须报错、
+  生成提示词带引用编号）；`tests/local_model_flow.rs` 3 项集成测试（用本机桩服务假装 Ollama：
+  开启后可信度由模型分决定且报告写明 provider、**连不上自动降级且流程不中断**、
+  开关关闭时**一个请求都不发** + 远程地址被拒绝）；设置页组件测试增 2 项；E2E 增「默认不启用」断言。
+
 ### 验收清单 V1.2.1（阶段 A4，2026-10-11）
 
 新增 [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md)：本机可执行的验收项**全部带命令与实测数字**

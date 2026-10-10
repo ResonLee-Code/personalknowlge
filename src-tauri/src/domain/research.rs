@@ -244,6 +244,8 @@ pub enum WarningKind {
     NoLocalEvidence,
     /// 报告含有未接模型的模板生成内容
     TemplateGenerated,
+    /// 报告/推测段由本地模型生成（未经人工核对）
+    ModelGenerated,
 }
 
 /// 一条警告。
@@ -419,6 +421,9 @@ pub struct ResearchSession {
     pub abort_reason: Option<String>,
     /// 已落库的笔记 id（写回后回填）
     pub written_note_id: Option<String>,
+    /// 本次打分用的决策模型标识（规则档 `rule` / `local.ollama:<模型>`）
+    #[serde(default)]
+    pub decision_provider: Option<String>,
 }
 
 impl ResearchSession {
@@ -503,6 +508,7 @@ mod tests {
             elapsed_ms: 0,
             abort_reason: None,
             written_note_id: None,
+            decision_provider: None,
         };
         assert!(session.summary_line().contains("Rust 异步"));
         let summary = ResearchSessionSummary::from(&session);

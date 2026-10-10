@@ -630,6 +630,14 @@ export interface AiPolicy {
   domainDenylist: string[];
   /** 联网检索源地址模板（必须含 `{query}`，可选 `{limit}`）；默认不预置 */
   searchEndpoint?: string | null;
+  /** 本地模型地址（Ollama HTTP，仅允许本机地址）；为空 = 不启用 */
+  localModelEndpoint?: string | null;
+  /** 本地模型名（例如 `qwen2.5:7b`）；为空 = 不启用 */
+  localModelName?: string | null;
+  /** 用本地模型写报告（生成侧；关闭时用模板实现） */
+  localModelCompose: boolean;
+  /** 用本地模型打分（决策侧近似；未校准，默认关闭，仅用于与规则档 A/B） */
+  localModelScore: boolean;
   budget: AiResearchBudget;
   auditMaxEntries: number;
 }
@@ -644,6 +652,10 @@ export interface UpdateAiPolicyInput {
   domainDenylist?: string[];
   /** 检索源地址模板；传空字符串表示清除 */
   searchEndpoint?: string | null;
+  localModelEndpoint?: string | null;
+  localModelName?: string | null;
+  localModelCompose?: boolean;
+  localModelScore?: boolean;
   budget?: AiResearchBudget;
 }
 
@@ -697,7 +709,8 @@ export type ResearchWarningKind =
   | 'stale'
   | 'externalNotAvailable'
   | 'noLocalEvidence'
-  | 'templateGenerated';
+  | 'templateGenerated'
+  | 'modelGenerated';
 
 /** 研究请求（`research_start` 输入；只有课题必填） */
 export interface ResearchRequest {

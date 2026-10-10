@@ -130,6 +130,10 @@ const defaultAiPolicy: AiPolicy = {
   domainAllowlist: [],
   domainDenylist: [],
   budget: { maxSubquestions: 5, maxPages: 12, maxDurationSecs: 480 },
+  localModelEndpoint: null,
+  localModelName: null,
+  localModelCompose: false,
+  localModelScore: false,
   auditMaxEntries: 500,
 };
 
@@ -2082,6 +2086,19 @@ export async function handleMockInvoke(
             ? endpoint
             : null;
       }
+      if (input.localModelEndpoint !== undefined) {
+        // 只允许本机地址（与 Rust `normalize_local_endpoint` 同规则）
+        const endpoint = (input.localModelEndpoint ?? '').trim().replace(/\/+$/, '');
+        const host = endpoint.replace(/^https?:\/\//i, '').split(/[/?#]/)[0]!.split('@').pop()!.split(':')[0]!;
+        const isLocal = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host.toLowerCase());
+        next.localModelEndpoint = /^https?:\/\//i.test(endpoint) && isLocal ? endpoint : null;
+      }
+      if (input.localModelName !== undefined) {
+        const name = (input.localModelName ?? '').trim();
+        next.localModelName = name.length > 0 ? name : null;
+      }
+      if (typeof input.localModelCompose === 'boolean') next.localModelCompose = input.localModelCompose;
+      if (typeof input.localModelScore === 'boolean') next.localModelScore = input.localModelScore;
       if (input.budget) {
         next.budget = {
           maxSubquestions: Math.min(10, Math.max(1, Math.round(input.budget.maxSubquestions))),

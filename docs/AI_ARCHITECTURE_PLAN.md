@@ -17,6 +17,10 @@
 > **D5** 已落地决策层打分与置信度（规则档）：来源 `credibility` / 结论 `confidence` 进入报告，
 > `DecisionModel` 注入点就绪（`with_decision_model`）——**Jev 接入只替换 provider**，
 > 需要先定模型访问方式（倾向 Ollama HTTP）。见 [CHANGELOG.md](./CHANGELOG.md) 的「研究助手」五节。
+>
+> **模型接入层（§5）已落地**：`application/ai/local_model.rs` 的 `OllamaModel` 同时实现
+> `GenerativeModel`（生成）与 `DecisionModel`（打分），只连本机、默认关闭、失败自动降级；
+> `Jev` 与远程模型仍是待定项（需要访问方式 / 显式授权）。
 
 ## 1. 目标与不做的事
 

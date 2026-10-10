@@ -20,13 +20,13 @@ use crate::application::ai::source_grade::{self, grade_local_note, Grade};
 use crate::application::ai::template_provider::TemplateGenerativeModel;
 use crate::application::ai::tools::AiTools;
 use crate::application::ai::rule_provider::RuleDecisionProvider;
+use crate::application::ai::local_model::OllamaModel;
 use crate::application::ai::traits::{
-    DecisionCandidate, DecisionKind, DecisionModel, DecisionState,
+    DecisionCandidate, DecisionKind, DecisionModel, DecisionState, GenerationRequest,
+    GenerativeModel, RetrievalOrigin, RetrievedChunk,
 };
+use crate::domain::ai::AiPolicy;
 use super::web_search;
-use crate::application::ai::traits::{
-    GenerationRequest, GenerativeModel, RetrievalOrigin, RetrievedChunk,
-};
 use crate::application::context::WorkspaceContext;
 use crate::application::note_service::NoteService;
 use crate::core::error::{AppError, ErrorCode, Result};
@@ -113,10 +113,25 @@ impl ResearchService {
         AiTools::new(Arc::clone(&self.ctx))
     }
 
-    /// 用决策层给来源打可信度分（一次调用，批量打分；失败时退回「级别折算」）。
-    fn score_sources(&self, topic: &str, sources: &mut [ResearchSource]) {
+    /// 本次打分该用哪个决策模型：策略里显式开启本地模型打分且地址/模型名齐全时用它，
+    /// 否则用注入的默认模型（规则档）。Jev 接入时同样只改这里。
+    fn decision_model(&self) -> Arc<dyn DecisionModel> {
+        let policy = self.ctx.settings().ai;
+        if policy.local_model_score {
+            if let Some((endpoint, model)) = policy.local_model() {
+                return Arc::new(OllamaModel::new(endpoint, model));
+            }
+        }
+        Arc::clone(&self.decision)
+    }
+
+    /// 用决策层给来源打可信度分（一次调用，批量打分）。
+    ///
+    /// 返回**实际生效的** provider 标识：本地模型出错时自动降级到默认（规则档），
+    /// 并把降级原因写进审计与报告，绝不让研究流程卡住。
+    fn score_sources(&self, topic: &str, sources: &mut [ResearchSource]) -> (String, Option<String>) {
         if sources.is_empty() {
-            return;
+            return (self.decision.id().to_string(), None);
         }
         let key_of = |source: &ResearchSource| -> String {
             source
@@ -139,7 +154,22 @@ impl ResearchService {
                 })
                 .collect(),
         };
-        let scores = self.decision.decide(DecisionKind::Relevance, &state).ok();
+        let model = self.decision_model();
+        let mut provider = model.id().to_string();
+        let mut fallback_note = None;
+        // 本地模型不可用（没装 / 没 pull / 超时 / 输出不合规）→ 退回默认模型，流程不中断
+        let scores = match model.decide(DecisionKind::Relevance, &state) {
+            Ok(results) => Some(results),
+            Err(error) => {
+                fallback_note = Some(format!(
+                    "本地模型打分失败（{}），已退回 {}",
+                    error.message,
+                    self.decision.id()
+                ));
+                provider = self.decision.id().to_string();
+                self.decision.decide(DecisionKind::Relevance, &state).ok()
+            }
+        };
         for source in sources.iter_mut() {
             let key = key_of(source);
             let model_score = scores.as_ref().and_then(|results| {
@@ -150,6 +180,7 @@ impl ResearchService {
             });
             source.credibility = blended_credibility(model_score, source.reliability);
         }
+        (provider, fallback_note)
     }
 
     // ---------------------------------------------------------------- ① 立项
@@ -228,6 +259,7 @@ impl ResearchService {
             elapsed_ms: started.elapsed().as_millis() as u64,
             abort_reason: None,
             written_note_id: None,
+            decision_provider: None,
         };
         self.save(&session)?;
         self.policy().audit(
@@ -423,8 +455,14 @@ impl ResearchService {
                 question.local_hits = per_question.get(index).copied().unwrap_or(0);
             }
         }
-        // 决策层打分（§9.6）：规则档默认，Jev / 本地模型接入后只换注入的 provider
-        self.score_sources(&plan.topic, &mut sources);
+        // 决策层打分（§9.6）：规则档默认；开了本地模型就由它打分、失败自动降级
+        let (decision_provider, score_fallback) = self.score_sources(&plan.topic, &mut sources);
+        session.decision_provider = Some(decision_provider);
+        if let Some(note) = score_fallback {
+            tracing::debug!(target: "ai", "{note}");
+            self.policy()
+                .audit("research_score", true, "error", 0, Some(&note));
+        }
         session.sources = sources;
         session.status = ResearchStatus::Collected;
         session.updated_at = now_iso();
@@ -543,7 +581,11 @@ impl ResearchService {
         }
 
         // 验证阶段先落一份「半成品报告」：结论/事实/待验证已定，正文与警告留给 compose。
-        let draft = pending_report(&session, claims, &conflicting, self.decision.id());
+        let provider = session
+            .decision_provider
+            .clone()
+            .unwrap_or_else(|| self.decision.id().to_string());
+        let draft = pending_report(&session, claims, &conflicting, &provider);
         session.report = Some(draft);
         session.status = ResearchStatus::Verified;
         session.updated_at = now_iso();
@@ -604,8 +646,9 @@ impl ResearchService {
             .clone()
             .ok_or_else(|| AppError::internal("会话缺少验证结果。"))?;
 
-        // 模板实现只做「罗列方向」，文本必须自带「未接模型」标注
-        let model = TemplateGenerativeModel::new();
+        // 生成侧：开了本地模型就用它写推测段，否则用模板实现（文本自带「未接模型」标注）。
+        // 本地模型失败时**自动降级**到模板，并把原因写进审计与警告块。
+        let template = TemplateGenerativeModel::new();
         let evidence: Vec<RetrievedChunk> = session
             .sources
             .iter()
@@ -622,22 +665,60 @@ impl ResearchService {
                 origin: RetrievalOrigin::Bm25,
             })
             .collect();
-        let speculation = model
-            .complete(&GenerationRequest {
-                prompt: format!("为课题「{}」写推测段", plan.topic),
-                evidence,
-                max_tokens: Some(512),
-                allow_remote: false,
-            })?
+        let request = GenerationRequest {
+            prompt: format!("为课题「{}」写推测段", plan.topic),
+            evidence,
+            max_tokens: Some(512),
+            allow_remote: false,
+        };
+        let composer: Option<Arc<dyn GenerativeModel>> = composer_model(&policy);
+        let mut model_fallback: Option<String> = None;
+        let response = match composer.as_ref() {
+            Some(model) => match model.complete(&request) {
+                Ok(response) => response,
+                Err(error) => {
+                    model_fallback = Some(format!(
+                        "本地模型生成失败（{}），本次已退回模板实现",
+                        error.message
+                    ));
+                    template.complete(&request)?
+                }
+            },
+            None => template.complete(&request)?,
+        };
+        if let Some(note) = &model_fallback {
+            tracing::debug!(target: "ai", "{note}");
+            self.policy().audit(
+                "research_compose",
+                true,
+                "error",
+                0,
+                Some("LOCAL_MODEL_FALLBACK"),
+            );
+        }
+        let speculation = response
             .text
             .lines()
             .map(str::to_string)
             .collect::<Vec<_>>();
+        let composer_label = response.model.clone();
 
         report.generated_at = now_iso();
-        report.composer = model.id().to_string();
+        report.composer = composer_label.clone();
         report.speculation = speculation;
-        report.warnings = collect_warnings(&session, &report, policy.network == NetworkMode::AllowNetwork);
+        report.warnings = collect_warnings(
+            &session,
+            &report,
+            policy.network == NetworkMode::AllowNetwork,
+            composer_label.starts_with("local.ollama"),
+        );
+        if let Some(note) = model_fallback {
+            report.warnings.push(ResearchWarning {
+                kind: WarningKind::ModelGenerated,
+                message: note,
+                references: Vec::new(),
+            });
+        }
         report.valid_until = Some(date_offset_days(REVIEW_PERIOD_DAYS));
         report.source_reliability = session
             .sources
@@ -654,7 +735,7 @@ impl ResearchService {
         session.steps.push(ResearchStepLog {
             step: "compose".to_string(),
             at: now_iso(),
-            detail: format!("已生成报告（模板实现，未接模型）：{}", model.id()),
+            detail: format!("已生成报告：{composer_label}"),
         });
         self.save(&session)?;
         self.policy().audit(
@@ -662,7 +743,7 @@ impl ResearchService {
             false,
             "ok",
             started.elapsed().as_millis() as u64,
-            Some(report_composer_note()),
+            Some(&composer_label),
         );
         Ok(session)
     }
@@ -1038,8 +1119,13 @@ pub fn confidence_label(value: f32) -> &'static str {
     }
 }
 
-fn report_composer_note() -> &'static str {
-    "template.draft"
+/// 生成侧模型：策略里开启「用本地模型写报告」且地址/模型名齐全时返回它，否则 `None`（用模板）。
+fn composer_model(policy: &AiPolicy) -> Option<Arc<dyn GenerativeModel>> {
+    if !policy.local_model_compose {
+        return None;
+    }
+    let (endpoint, model) = policy.local_model()?;
+    Some(Arc::new(OllamaModel::new(endpoint, model)))
 }
 
 /// 校验并归一化课题（过于宽泛时要求补充范围）。
@@ -1239,6 +1325,7 @@ fn collect_warnings(
     session: &ResearchSession,
     report: &ResearchReport,
     network_allowed: bool,
+    model_generated: bool,
 ) -> Vec<ResearchWarning> {
     let mut warnings = Vec::new();
     let weak: Vec<usize> = session
@@ -1322,12 +1409,23 @@ fn collect_warnings(
             references: Vec::new(),
         });
     }
-    warnings.push(ResearchWarning {
-        kind: WarningKind::TemplateGenerated,
-        message:
-            "本报告由**模板实现**生成（未接入模型）：结论段是来源原句摘录，推测段只是待确认方向的罗列。"
-                .to_string(),
-        references: Vec::new(),
+    warnings.push(if model_generated {
+        ResearchWarning {
+            kind: WarningKind::ModelGenerated,
+            message: format!(
+                "推测段由**本地模型** `{}` 生成（未经人工核对，也未经交叉验证）：结论段仍是来源原句摘录。",
+                report.composer
+            ),
+            references: Vec::new(),
+        }
+    } else {
+        ResearchWarning {
+            kind: WarningKind::TemplateGenerated,
+            message:
+                "本报告由**模板实现**生成（未接入模型）：结论段是来源原句摘录，推测段只是待确认方向的罗列。"
+                    .to_string(),
+            references: Vec::new(),
+        }
     });
     warnings
 }

@@ -87,6 +87,14 @@ pub struct AiPolicy {
     pub search_endpoint: Option<String>,
     /// 研究预算
     pub budget: ResearchBudget,
+    /// 本地模型地址（Ollama HTTP，例如 `http://127.0.0.1:11434`）；为空 = 不启用本地模型
+    pub local_model_endpoint: Option<String>,
+    /// 本地模型名（例如 `qwen2.5:7b`）；为空 = 不启用
+    pub local_model_name: Option<String>,
+    /// 用本地模型**写报告**（生成侧；关闭时用模板实现）
+    pub local_model_compose: bool,
+    /// 用本地模型**打分**（决策侧近似；未校准，默认关闭，仅用于与规则档 A/B）
+    pub local_model_score: bool,
     /// 审计日志条数上限（超出后截断最旧的记录）
     pub audit_max_entries: u32,
 }
@@ -102,6 +110,10 @@ impl Default for AiPolicy {
             domain_denylist: Vec::new(),
             search_endpoint: None,
             budget: ResearchBudget::default(),
+            local_model_endpoint: None,
+            local_model_name: None,
+            local_model_compose: false,
+            local_model_score: false,
             audit_max_entries: 500,
         }
     }
@@ -120,7 +132,23 @@ pub struct UpdateAiPolicyInput {
     pub domain_denylist: Option<Vec<String>>,
     /// 检索源地址模板；传空字符串表示清除
     pub search_endpoint: Option<String>,
+    pub local_model_endpoint: Option<String>,
+    pub local_model_name: Option<String>,
+    pub local_model_compose: Option<bool>,
+    pub local_model_score: Option<bool>,
     pub budget: Option<ResearchBudget>,
+}
+
+impl AiPolicy {
+    /// 本地模型是否可用（地址与模型名都填了才算配置完成）。
+    pub fn local_model(&self) -> Option<(&str, &str)> {
+        let endpoint = self.local_model_endpoint.as_deref()?.trim();
+        let name = self.local_model_name.as_deref()?.trim();
+        if endpoint.is_empty() || name.is_empty() {
+            return None;
+        }
+        Some((endpoint, name))
+    }
 }
 
 /// 一条审计记录（**不含正文**，只记行为与结果）。

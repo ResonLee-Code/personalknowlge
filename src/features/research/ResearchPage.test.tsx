@@ -19,6 +19,10 @@ const enabledPolicy: AiPolicy = {
   allowFetchBody: false,
   domainAllowlist: [],
   domainDenylist: [],
+  localModelEndpoint: null,
+  localModelName: null,
+  localModelCompose: false,
+  localModelScore: false,
   budget: { maxSubquestions: 5, maxPages: 12, maxDurationSecs: 480 },
   auditMaxEntries: 500,
 };

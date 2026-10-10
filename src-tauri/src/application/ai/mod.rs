@@ -9,6 +9,7 @@
 //! - 唯一已实现的是离线兜底 `RuleDecisionProvider`（无网络、无新依赖）
 
 pub mod policy;
+pub mod local_model;
 pub mod research;
 pub mod rule_provider;
 pub mod source_grade;
@@ -18,6 +19,7 @@ pub mod traits;
 pub mod web_search;
 
 pub use policy::AiPolicyService;
+pub use local_model::OllamaModel;
 pub use research::ResearchService;
 pub use rule_provider::RuleDecisionProvider;
 pub use template_provider::TemplateGenerativeModel;

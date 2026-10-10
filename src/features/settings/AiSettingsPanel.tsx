@@ -173,6 +173,44 @@ export function AiSettingsPanel() {
       </div>
 
       <div className="space-y-2 px-3 py-2.5">
+        <Label>本地模型（Ollama HTTP，可选；默认关闭）</Label>
+        <div className="space-y-1">
+          <Input
+            data-testid="ai-local-endpoint"
+            defaultValue={policy.localModelEndpoint ?? ''}
+            placeholder="http://127.0.0.1:11434"
+            onBlur={(event) =>
+              void apply({ localModelEndpoint: event.target.value }, '已保存本地模型地址')
+            }
+          />
+          <Input
+            data-testid="ai-local-model"
+            defaultValue={policy.localModelName ?? ''}
+            placeholder="qwen2.5:7b（模型名，需先 ollama pull）"
+            onBlur={(event) => void apply({ localModelName: event.target.value }, '已保存模型名')}
+          />
+        </div>
+        <Row label="用本地模型写报告" hint="只影响「模型推测」段的文字；失败自动退回模板实现">
+          <Switch
+            data-testid="ai-local-compose"
+            checked={policy.localModelCompose}
+            onCheckedChange={(checked) => void apply({ localModelCompose: checked })}
+          />
+        </Row>
+        <Row label="用本地模型打分" hint="与规则档 A/B 用；模型分未校准，级别折算仍占一半（不是 Jev）">
+          <Switch
+            data-testid="ai-local-score"
+            checked={policy.localModelScore}
+            onCheckedChange={(checked) => void apply({ localModelScore: checked })}
+          />
+        </Row>
+        <p className="text-[11px] text-[var(--ink-subtle)]">
+          只连本机地址（localhost / 127.0.0.1）；远程模型需要单独授权，本版不做。
+          两项开关都关闭时一个请求都不会发；浏览器预览模式不会真的调用本地模型。
+        </p>
+      </div>
+
+      <div className="space-y-2 px-3 py-2.5">
         <Label>研究预算（超出即停并汇报进度）</Label>
         <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--ink-muted)]">
           <label className="flex items-center gap-1.5">
