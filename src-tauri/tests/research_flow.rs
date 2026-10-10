@@ -19,7 +19,8 @@ use personal_knowledge_os_lib::core::time::today_date;
 use personal_knowledge_os_lib::domain::ai::UpdateAiPolicyInput;
 use personal_knowledge_os_lib::domain::note::{CreateNoteInput, SetSourceInput};
 use personal_knowledge_os_lib::domain::research::{
-    ResearchRequest, ResearchSession, ResearchStatus, SourceLevel, WarningKind,
+    ResearchRequest, ResearchSession, ResearchStatus, ResearchWriteInput, SourceLevel, WarningKind,
+    WRITE_MODE_ABANDON, WRITE_MODE_APPEND, WRITE_MODE_CREATE,
 };
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
@@ -348,4 +349,158 @@ fn local_source_levels_follow_note_reliability_metadata() {
         report.source_reliability, 2,
         "报告整体可靠性按**最低级别**取整（最保守）"
     );
+}
+
+#[test]
+fn write_back_creates_an_inbox_note_with_metadata_and_an_optional_source_note() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    seed(&fixture);
+
+    let session = run_until(
+        &fixture,
+        request("Rust 异步运行时调度"),
+        &["collect", "verify", "compose", "proposal"],
+    );
+    let notes = NoteService::new(fixture.context());
+    let result = fixture
+        .research()
+        .write(ResearchWriteInput {
+            session_id: session.id.clone(),
+            mode: WRITE_MODE_CREATE.to_string(),
+            include_speculation: true,
+            create_source_note: true,
+            ..Default::default()
+        })
+        .expect("写入");
+    assert_eq!(result.outcome, "created");
+    assert!(result.diff_preview.lines().all(|line| line.starts_with('+')));
+    let note_id = result.note_id.clone().expect("落库笔记 id");
+
+    let detail = notes.get(&note_id).expect("读回笔记");
+    assert!(detail.note.category_id.is_none(), "默认落 Inbox（未分类）");
+    assert_eq!(detail.note.source_type.as_deref(), Some("research"));
+    assert!(detail.note.source_ref.as_deref().unwrap_or("").contains("[1]"));
+    assert_eq!(detail.note.source_reliability, Some(result.source_reliability));
+    assert!(detail.note.valid_until.is_some(), "研究产物必须带复核时间");
+    assert!(detail.content.contains("资料截至"), "正文含报告抬头");
+    assert!(
+        detail.content.contains("附：模型推测（未验证）"),
+        "勾选后才追加推测附录"
+    );
+
+    // 来源清单子文档：父文档指向报告
+    let source_note_id = result.source_note_id.clone().expect("来源清单");
+    let source_note = notes.get(&source_note_id).expect("读回来源清单");
+    assert_eq!(source_note.note.parent_id.as_deref(), Some(note_id.as_str()));
+    assert!(source_note.content.contains("分级依据") || source_note.content.contains("级别"));
+
+    // 会话状态推进为 written，且审计里仍然没有任何外发
+    let reloaded = fixture.research().get(&session.id).expect("读取会话");
+    assert_eq!(reloaded.status, ResearchStatus::Written);
+    assert_eq!(reloaded.written_note_id.as_deref(), Some(note_id.as_str()));
+    let audit = fixture.policy().audit_tail(50).expect("审计");
+    assert!(audit.iter().any(|entry| entry.capability == "research_write"));
+    assert!(audit.iter().all(|entry| !entry.outbound));
+
+    // 重复写入必须被拒绝（避免重复落库）
+    let again = fixture
+        .research()
+        .write(ResearchWriteInput {
+            session_id: session.id.clone(),
+            mode: WRITE_MODE_CREATE.to_string(),
+            ..Default::default()
+        })
+        .expect_err("已写入的会话不能再次落库");
+    assert_eq!(again.code.as_str(), "INVALID_INPUT");
+}
+
+#[test]
+fn append_mode_keeps_the_existing_note_and_leaves_a_rollback_snapshot() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    seed(&fixture);
+    let notes = NoteService::new(fixture.context());
+
+    // 先有一篇同标题笔记（正文非空），提案必须提示「同标题」
+    let existing = notes
+        .create(CreateNoteInput {
+            title: "调研报告：Rust 异步运行时调度".to_string(),
+            category_id: None,
+            initial_content: Some("原有的结论：先看 tokio 文档。".to_string()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("新建同标题笔记")
+        .note
+        .id;
+
+    let session = run_until(
+        &fixture,
+        request("Rust 异步运行时调度"),
+        &["collect", "verify", "compose", "proposal"],
+    );
+    assert_eq!(
+        session.proposal.as_ref().expect("提案").duplicates.len(),
+        1,
+        "提案必须先提示同标题"
+    );
+
+    let result = fixture
+        .research()
+        .write(ResearchWriteInput {
+            session_id: session.id.clone(),
+            mode: WRITE_MODE_APPEND.to_string(),
+            target_note_id: Some(existing.clone()),
+            ..Default::default()
+        })
+        .expect("追加");
+    assert_eq!(result.outcome, "appended");
+    assert_eq!(result.note_id.as_deref(), Some(existing.as_str()));
+    assert!(
+        result.diff_preview.lines().any(|line| line.starts_with(' ')),
+        "追加模式的 diff 必须带上下文行"
+    );
+
+    let detail = notes.get(&existing).expect("读回笔记");
+    assert!(detail.content.contains("原有的结论"), "追加不能覆盖原有正文");
+    assert!(detail.content.contains("资料截至"), "新报告已追加");
+    assert!(!detail.content.contains("附：模型推测"), "默认不写推测段");
+
+    // 追加走 note_save → 自动留历史快照，可回滚
+    let history = notes.history_list(&existing).expect("历史");
+    assert!(!history.is_empty(), "追加前必须留下可回滚的快照");
+}
+
+#[test]
+fn abandon_mode_writes_nothing_and_is_recorded() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    seed(&fixture);
+
+    let session = run_until(
+        &fixture,
+        request("Rust 异步运行时调度"),
+        &["collect", "verify", "compose", "proposal"],
+    );
+    let before = NoteService::new(fixture.context()).recent(100).expect("笔记数").len();
+    let result = fixture
+        .research()
+        .write(ResearchWriteInput {
+            session_id: session.id.clone(),
+            mode: WRITE_MODE_ABANDON.to_string(),
+            ..Default::default()
+        })
+        .expect("放弃");
+    assert_eq!(result.outcome, "abandoned");
+    assert!(result.note_id.is_none());
+
+    let after = NoteService::new(fixture.context()).recent(100).expect("笔记数").len();
+    assert_eq!(before, after, "放弃不得新建任何笔记");
+    let reloaded = fixture.research().get(&session.id).expect("读取会话");
+    assert_eq!(reloaded.status, ResearchStatus::Proposed, "放弃不改变状态");
+    assert!(reloaded
+        .steps
+        .iter()
+        .any(|step| step.step == "write" && step.detail.contains("放弃")));
 }

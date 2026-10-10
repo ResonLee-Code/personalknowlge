@@ -8,7 +8,8 @@ use tauri::State;
 use crate::application::ai::research::ResearchService;
 use crate::core::error::Result;
 use crate::domain::research::{
-    ResearchRequest, ResearchSession, ResearchSessionSummary,
+    ResearchRequest, ResearchSession, ResearchSessionSummary, ResearchWriteInput,
+    ResearchWriteResult,
 };
 use crate::state::AppState;
 
@@ -77,6 +78,16 @@ pub async fn research_proposal(
 ) -> Result<ResearchSession> {
     let context = state.inner.context()?;
     run(move || ResearchService::new(context).proposal(&session_id)).await
+}
+
+/// ⑤ 落库：**用户确认后**把报告写入知识库（默认 Inbox、同标题不覆盖、可回滚）。
+#[tauri::command]
+pub async fn research_write(
+    state: State<'_, AppState>,
+    input: ResearchWriteInput,
+) -> Result<ResearchWriteResult> {
+    let context = state.inner.context()?;
+    run(move || ResearchService::new(context).write(input)).await
 }
 
 /// 中止会话（已得材料保留为草稿）。

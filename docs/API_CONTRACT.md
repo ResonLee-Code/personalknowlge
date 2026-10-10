@@ -386,6 +386,7 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 | `research_verify` | `{ sessionId }` | `ResearchSession` | 按子问题汇总，≥2 个独立来源才算交叉验证 |
 | `research_compose` | `{ sessionId }` | `ResearchSession` | 渲染固定六段报告（顶部「资料截至 YYYY-MM-DD」） |
 | `research_proposal` | `{ sessionId }` | `ResearchSession` | 写入提案（默认 Inbox、写前 diff、同标题提示）；**不落库** |
+| `research_write` | `{ input: ResearchWriteInput }` | `ResearchWriteResult` | 用户确认后落库：`create` / `append` / `abandon` |
 | `research_abort` | `{ sessionId, reason? }` | `ResearchSession` | 中止；已得材料保留为草稿 |
 
 - 步骤状态机：`planned → collected → verified → composed → proposed`；顺序不可跳过
@@ -396,6 +397,22 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
   ④ 与本知识库的关系（`[[标题]]`）⑤ 待验证清单 ⑥ 参考来源；推测段由模板 Provider 生成，
   默认不写入笔记，需要时在写入确认里勾选；
 - 审计：每一步都写 `research_*` 记录（不含正文）；**默认口径下 `outbound` 恒为 `false`**。
+
+### 24.1 写入纪律（`research_write`）
+
+| 字段 | 说明 |
+| --- | --- |
+| `mode` | `create`（默认，落 Inbox 或 `categoryId`）/ `append`（追加到 `targetNoteId` 或唯一的同标题笔记）/ `abandon`（不写任何东西，只记一步日志） |
+| `title` | 覆盖标题；缺省用提案标题 |
+| `includeSpeculation` | 是否把「模型推测」作为附录写入（**默认 false**） |
+| `createSourceNote` | 是否同时创建「来源清单」子文档 |
+
+- 同标题**不覆盖**：`create` 永远新建；`append` 必须显式给目标（或提案里唯一命中），
+  且走 `note_save` → 自动留历史快照，可在「版本历史」里回滚；
+- 写入后由后端补 N1 元数据：`source_type: research`、`source_ref`、`source_reliability`
+  （按最低来源级别取整）、`valid_until`（默认 +180 天）；
+- 会话状态推进为 `written`（`writtenNoteId` 回填）；已写入的会话再调 `research_write`
+  会返回 `INVALID_INPUT`，需要重新生成提案。
 
 ## 25. 前端服务层
 

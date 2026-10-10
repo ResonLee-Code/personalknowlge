@@ -29,6 +29,22 @@ import type {
   NoteListQuery,
   NoteSummary,
   OutgoingLink,
+  ResearchClaim,
+  ResearchDuplicateNote,
+  ResearchKbRelation,
+  ResearchProposal,
+  ResearchReport,
+  ResearchRequest,
+  ResearchSession,
+  ResearchSessionSummary,
+  ResearchSource,
+  ResearchSourceLevel,
+  ResearchStatus,
+  ResearchSubQuestion,
+  ResearchWarning,
+  ResearchWriteInput,
+  ResearchWriteMode,
+  ResearchWriteResult,
   SaveNoteInput,
   ReorderNotesInput,
   SearchQuery,
@@ -57,6 +73,8 @@ interface MockState {
   /** AI 策略与审计（默认最保守，与 Rust 端一致） */
   ai: AiPolicy;
   aiAudit: AiAuditEntry[];
+  /** 研究会话（D1/D2）：key = sessionId */
+  research: Record<string, ResearchSession>;
 }
 
 interface MockHistoryEntry {
@@ -122,7 +140,11 @@ function load(): MockState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as MockState;
-      return { ...parsed, settings: { ...emptySettings, ...parsed.settings } };
+      return {
+        ...parsed,
+        settings: { ...emptySettings, ...parsed.settings },
+        research: parsed.research ?? {},
+      };
     }
   } catch {
     // 忽略损坏的本地数据
@@ -139,6 +161,7 @@ function load(): MockState {
     history: {},
     ai: { ...defaultAiPolicy },
     aiAudit: [],
+    research: {},
   };
 }
 
@@ -341,6 +364,520 @@ function mockClip(url: string): ClippedPage {
     fetchedAt: now(),
     bytes: markdown.length,
   };
+}
+
+// ---------------------------------------------------------------- 研究助手（D1/D2）
+
+/** 子问题的「意图标记」：把命中的材料按规则归属到子问题（与 Rust 端同一套表）。 */
+const RESEARCH_INTENT_MARKERS: string[][] = [
+  ['定义', '概念', '是什么', '概述', '介绍', '原理'],
+  ['方案', '做法', '实现', '对比', '比较', '选型', '用法', '实践'],
+  ['场景', '适用', '限制', '注意', '前提', '边界', '约束', '条件'],
+  ['风险', '争议', '问题', '失败', '坑', '缺陷', '缺点', '事故'],
+  ['进展', '新版', '更新', '发布', '最近', '趋势', '未来'],
+];
+
+/** 过于宽泛、必须先追问范围的课题（与 Rust 端一致）。 */
+const RESEARCH_BROAD_TOPICS = [
+  'ai',
+  '人工智能',
+  '机器学习',
+  '深度学习',
+  '大模型',
+  '编程',
+  '技术',
+  '笔记',
+  '知识库',
+  '知识管理',
+  '工作',
+  '生活',
+  '学习',
+  '投资',
+  '写作',
+];
+
+const RESEARCH_TEMPLATES = [
+  '「{topic}」的核心概念与定义是什么？',
+  '「{topic}」有哪些主流方案或做法？',
+  '「{topic}」的适用场景与限制条件是什么？',
+  '「{topic}」常见的争议、风险或失败案例有哪些？',
+  '近两年「{topic}」有什么值得关注的新进展？',
+];
+
+const RESEARCH_HITS_PER_QUESTION = 6;
+const RESEARCH_MAX_SOURCES = 24;
+const RESEARCH_REVIEW_DAYS = 180;
+
+const RESEARCH_LEVEL_LABEL: Record<ResearchSourceLevel, string> = {
+  A: 'A 权威',
+  B: 'B 可信',
+  C: 'C 一般',
+  D: 'D 弱',
+  E: 'E 不可用',
+};
+
+const RESEARCH_LEVEL_RELIABILITY: Record<ResearchSourceLevel, number> = {
+  A: 5,
+  B: 4,
+  C: 3,
+  D: 2,
+  E: 1,
+};
+
+function LEVEL_FROM_RELIABILITY(value: number): ResearchSourceLevel {
+  const levels: ResearchSourceLevel[] = ['E', 'D', 'C', 'B', 'A'];
+  return levels[Math.min(5, Math.max(1, Math.round(value))) - 1] ?? 'C';
+}
+
+/** AI 总开关闸门（研究助手的每一步都要先过）。 */
+function requireAi(): void {
+  if (!state.ai.enabled) {
+    fail('AI_DISABLED', 'AI 能力未开启：请到「设置 → AI」打开总开关（默认关闭，且不会自动联网）。');
+  }
+}
+
+function auditResearch(capability: string, outcome: AiAuditEntry['outcome'], note: string | null) {
+  state.aiAudit = pushAudit(state.aiAudit, capability, false, outcome, note);
+}
+
+function researchValidateTopic(raw: string): string {
+  const topic = raw.trim();
+  if (!topic) fail('INVALID_INPUT', '课题不能为空。');
+  const chars = [...topic].length;
+  if (chars < 4 || RESEARCH_BROAD_TOPICS.includes(topic.toLowerCase())) {
+    fail(
+      'INVALID_INPUT',
+      `课题「${topic}」过于宽泛：请补充范围（领域、关注点或时间窗），例如「Rust 异步运行时的调度策略」。`,
+    );
+  }
+  if (chars > 200) fail('INVALID_INPUT', '课题过长（上限 200 字），请精简后再试。');
+  return topic;
+}
+
+function researchSubQuestions(topic: string, max: number): ResearchSubQuestion[] {
+  const count = Math.max(1, Math.min(RESEARCH_TEMPLATES.length, Math.round(max)));
+  return RESEARCH_TEMPLATES.slice(0, count).map((template, index) => ({
+    id: `q${index + 1}`,
+    question: template.replace('{topic}', topic),
+    keywords: [topic],
+    localHits: 0,
+  }));
+}
+
+/** 关键词切分：ASCII 词 + 中文双字（近似后端的 FTS5 双字方案）。 */
+function researchTokens(keyword: string): string[] {
+  const tokens: string[] = [];
+  (keyword.match(/[A-Za-z0-9_+-]{2,}/g) ?? []).forEach((word) =>
+    tokens.push(word.toLowerCase()),
+  );
+  (keyword.match(/[\u4e00-\u9fff]+/g) ?? []).forEach((run) => {
+    const chars = [...run];
+    if (chars.length === 1) tokens.push(chars[0]!);
+    for (let index = 0; index + 1 < chars.length; index += 1) {
+      tokens.push(`${chars[index]}${chars[index + 1]}`);
+    }
+  });
+  return Array.from(new Set(tokens));
+}
+
+/** 本地检索：按命中词数排序（浏览器预览不跑 SQLite，用等价规则近似）。 */
+function researchLocalHits(topic: string, limit: number): Note[] {
+  const tokens = researchTokens(topic);
+  // 后端 FTS5 的 MATCH 是 AND + 中文连续短语，比「命中任意一个词」严格得多；
+  // 这里要求命中过半的词，避免把只沾一个字的无关笔记也捞成「来源」。
+  const required = Math.max(1, Math.ceil(tokens.length / 2));
+  return state.notes
+    .filter((note) => note.status === 'active')
+    .map((note) => {
+      const haystack = `${note.title} ${state.contents[note.id] ?? ''}`.toLowerCase();
+      return { note, hits: tokens.filter((token) => haystack.includes(token)).length };
+    })
+    .filter((item) => item.hits >= required)
+    .sort((left, right) => right.hits - left.hits || right.note.updatedAt.localeCompare(left.note.updatedAt))
+    .slice(0, limit)
+    .map((item) => item.note);
+}
+
+function researchAssign(
+  title: string,
+  snippet: string,
+  questions: ResearchSubQuestion[],
+): number {
+  const haystack = `${title} ${snippet}`.toLowerCase();
+  let best = 0;
+  let bestScore = 0;
+  questions.forEach((_, index) => {
+    const markers = RESEARCH_INTENT_MARKERS[index] ?? [];
+    const score = markers.filter((marker) => haystack.includes(marker.toLowerCase())).length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = index;
+    }
+  });
+  return best;
+}
+
+function researchGrade(note: Note): { level: ResearchSourceLevel; reason: string } {
+  if (typeof note.sourceReliability === 'number') {
+    return {
+      level: LEVEL_FROM_RELIABILITY(note.sourceReliability),
+      reason: `沿用笔记已标注的 sourceReliability=${note.sourceReliability}`,
+    };
+  }
+  switch ((note.sourceType ?? '').trim()) {
+    case 'official':
+      return { level: 'B', reason: '来源类型为 official，但未标注可靠性' };
+    case 'book':
+      return { level: 'B', reason: '来源类型为 book，但未标注可靠性' };
+    case 'experiment':
+      return { level: 'C', reason: '来源类型为 experiment（自测数据）' };
+    case 'personal':
+      return { level: 'D', reason: '来源类型为 personal（个人推测）' };
+    default:
+      return {
+        level: 'D',
+        reason: '笔记未标注 sourceReliability：按「弱」处理（建议在笔记里补标注）',
+      };
+  }
+}
+
+function researchFirstSentence(text: string): string {
+  const trimmed = text.trim();
+  const cut = trimmed.search(/[。！？；\n]/);
+  const head = cut === -1 ? trimmed : trimmed.slice(0, cut + 1);
+  return head.split(/\s+/).join(' ');
+}
+
+function researchIsoDate(offsetDays = 0): string {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  // 用本地日期（与 Rust 端 `today_date()` 一致）：toISOString 会按 UTC 差一天
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function researchCitations(claim: ResearchClaim): string {
+  return claim.citations.map((value) => `[${value}]`).join(' ');
+}
+
+function researchStale(note: Note, windowDays: number): boolean {
+  if (note.validUntil) return note.validUntil.slice(0, 10) < researchIsoDate();
+  const ageDays = (Date.now() - new Date(note.updatedAt).getTime()) / 86_400_000;
+  return ageDays > windowDays;
+}
+
+/** 验证阶段：按子问题汇总（≥2 个独立来源才算交叉验证）。 */
+function researchVerifyClaims(session: ResearchSession): ResearchClaim[] {
+  const questions = session.plan?.subQuestions ?? [];
+  return questions.map((question) => {
+    const evidence = session.sources.filter((source) => source.subQuestionId === question.id);
+    if (evidence.length === 0) {
+      return {
+        subQuestionId: question.id,
+        text: `「${question.question}」：本地知识库暂无材料。`,
+        citations: [],
+        bestLevel: 'E',
+        crossVerified: false,
+        fresh: true,
+        relatedNotes: [],
+      };
+    }
+    const independent = Array.from(
+      new Set(evidence.map((source) => source.noteId ?? `ref${source.reference}`)),
+    );
+    const quotes = evidence
+      .slice(0, 2)
+      .map((source) => researchFirstSentence(source.snippet))
+      .filter((value) => value.length > 0);
+    const levels = evidence.map((source) => source.level);
+    const bestLevel = levels.reduce<ResearchSourceLevel>(
+      (best, level) => (level > best ? level : best),
+      'E',
+    );
+    return {
+      subQuestionId: question.id,
+      text: `关于「${question.question}」：${quotes.join('；')}`,
+      citations: evidence.map((source) => source.reference),
+      bestLevel,
+      crossVerified: independent.length >= 2,
+      fresh: !evidence.some((source) => source.stale),
+      relatedNotes: evidence
+        .map((source) => source.noteId)
+        .filter((value): value is string => Boolean(value)),
+    };
+  });
+}
+
+/** 汇总阶段：把验证结果拆成报告的六段 + 警告。 */
+function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]): ResearchReport {
+  const seen: string[] = [];
+  const conclusions: ResearchClaim[] = [];
+  const keyFacts: ResearchClaim[] = [];
+  const pending: ResearchClaim[] = [];
+  claims.forEach((claim) => {
+    if (!claim.crossVerified) {
+      pending.push(claim);
+      return;
+    }
+    const fingerprint = claim.citations.join(',');
+    if (seen.includes(fingerprint)) return;
+    seen.push(fingerprint);
+    if (claim.fresh && conclusions.length < 5) conclusions.push(claim);
+    if (keyFacts.length < 8) keyFacts.push(claim);
+  });
+
+  const relations: ResearchKbRelation[] = [];
+  (session.plan?.localBaseline ?? []).forEach((baseline) => {
+    const used = session.sources.some((source) => source.noteId === baseline.noteId);
+    relations.push({
+      noteId: baseline.noteId,
+      title: baseline.title,
+      relation: used ? '补充（已作为证据）' : '相关（本地已有笔记）',
+    });
+  });
+  session.sources.forEach((source) => {
+    if (!source.noteId || relations.some((item) => item.noteId === source.noteId)) return;
+    relations.push({ noteId: source.noteId, title: source.title, relation: '证据来源' });
+  });
+
+  const warnings: ResearchWarning[] = [];
+  const unverified = session.sources.filter((source) => source.level === 'E');
+  if (unverified.length > 0) {
+    warnings.push({
+      kind: 'unverifiedSources',
+      message: `有 ${unverified.length} 条来源属于「E 不可用」：只作线索，未进入结论段。`,
+      references: unverified.map((source) => source.reference),
+    });
+  }
+  const single = pending.flatMap((claim) => claim.citations);
+  if (single.length > 0) {
+    warnings.push({
+      kind: 'singleSource',
+      message: `有 ${single.length} 条来源是单一来源、没有交叉验证：只列在「待验证清单」，不进结论段。`,
+      references: single,
+    });
+  }
+  const stale = session.sources.filter((source) => source.stale);
+  if (stale.length > 0) {
+    warnings.push({
+      kind: 'stale',
+      message: `有 ${stale.length} 条来源可能已过时（超出时间窗或 valid_until 已过）：请核对时效后再引用。`,
+      references: stale.map((source) => source.reference),
+    });
+  }
+  if (session.sources.length === 0) {
+    warnings.push({
+      kind: 'noLocalEvidence',
+      message: '本地知识库没有找到任何材料：本报告只有计划与建议，没有结论。',
+      references: [],
+    });
+  }
+  if (state.ai.network === 'allowNetwork') {
+    warnings.push({
+      kind: 'externalNotAvailable',
+      message: '联网档位已打开，但外部检索尚未接入（阶段 D3）：本次未发起任何网络请求。',
+      references: [],
+    });
+  }
+  warnings.push({
+    kind: 'templateGenerated',
+    message:
+      '本报告由**模板实现**生成（未接入模型）：结论段是来源原句摘录，推测段只是待确认方向的罗列。',
+    references: [],
+  });
+
+  return {
+    generatedAt: now(),
+    dataCutoff: researchIsoDate(),
+    composer: 'template.draft',
+    conclusions,
+    keyFacts,
+    conflicts: [],
+    kbRelations: relations,
+    pending,
+    references: session.sources,
+    speculation: [],
+    warnings,
+    sourceReliability: session.sources.reduce(
+      (lowest, source) => Math.min(lowest, source.reliability),
+      5,
+    ),
+    validUntil: researchIsoDate(RESEARCH_REVIEW_DAYS),
+    markdown: '',
+  };
+}
+
+function researchEscapeTable(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+}
+
+/** 渲染固定六段报告（顺序不可变）。 */
+function researchRenderMarkdown(session: ResearchSession, report: ResearchReport): string {
+  const plan = session.plan;
+  const out: string[] = [];
+  out.push(`# 调研报告：${plan?.topic ?? session.request.topic}`, '');
+  out.push(`> **资料截至 ${report.dataCutoff}** · 生成方式 \`${report.composer}\`（未接入模型）`);
+  out.push(
+    `> 会话 \`${session.id}\` · 子问题 ${plan?.subQuestions.length ?? 0} 个 · 来源 ${report.references.length} 条`,
+    '',
+  );
+  if (report.warnings.length > 0) {
+    out.push('> **⚠️ 警告**');
+    report.warnings.forEach((warning) => {
+      const refs = warning.references.map((value) => `[${value}]`).join('');
+      out.push(`> - ${warning.message}${refs ? `（${refs}）` : ''}`);
+    });
+    out.push('');
+  }
+
+  out.push('## 1. 结论先行', '');
+  if (report.conclusions.length === 0) {
+    out.push('_本次没有达到「≥2 个独立来源」的结论。_', '');
+  } else {
+    report.conclusions.forEach((claim, index) => {
+      out.push(`${index + 1}. ${claim.text} ${researchCitations(claim)}`);
+    });
+    out.push('');
+  }
+
+  out.push('## 2. 关键事实', '');
+  if (report.keyFacts.length === 0) {
+    out.push('_没有交叉验证过的事实。_', '');
+  } else {
+    out.push('| 结论 | 支持来源（级别） | 是否交叉验证 | 时效 |');
+    out.push('| --- | --- | --- | --- |');
+    report.keyFacts.forEach((claim) => {
+      const levels = report.references
+        .filter((source) => claim.citations.includes(source.reference))
+        .map((source) => `[${source.reference}] ${RESEARCH_LEVEL_LABEL[source.level]}`)
+        .join('、');
+      out.push(
+        `| ${researchEscapeTable(claim.text)} | ${researchEscapeTable(levels)} | ${
+          claim.crossVerified ? '是' : '否'
+        } | ${claim.fresh ? '时间内' : '可能已过时'} |`,
+      );
+    });
+    out.push('');
+  }
+
+  out.push('## 3. 争议与不确定性', '');
+  if (report.conflicts.length === 0) {
+    out.push('_本次未检出冲突：D1/D2 没有语义比对能力，冲突检测要等模型与 Jev 介入（D4）。_', '');
+  } else {
+    report.conflicts.forEach((claim) => out.push(`- ${claim.text} ${researchCitations(claim)}`));
+    out.push('');
+  }
+
+  out.push('## 4. 与本知识库的关系', '');
+  if (report.kbRelations.length === 0) {
+    out.push('_没有关联的本地笔记。_', '');
+  } else {
+    report.kbRelations.forEach((relation) =>
+      out.push(`- [[${relation.title}]] —— ${relation.relation}`),
+    );
+    out.push('');
+  }
+
+  out.push('## 5. 待验证清单', '');
+  if (report.pending.length === 0) {
+    out.push('_没有待验证项。_', '');
+  } else {
+    report.pending.forEach((claim) => {
+      const why =
+        claim.citations.length === 0
+          ? '本地没有材料：建议补充或（阶段 D3 起）联网检索'
+          : '只有单一来源，未交叉验证';
+      out.push(`- ${claim.text} ${researchCitations(claim)} —— ${why}`);
+    });
+    out.push('');
+  }
+
+  out.push('## 6. 参考来源', '');
+  if (report.references.length === 0) {
+    out.push('_没有参考来源。_');
+  } else {
+    report.references.forEach((source) => {
+      const location = source.url ?? (source.noteId ? `note://${source.noteId}` : '本地');
+      out.push(
+        `[${source.reference}] ${source.title} · ${RESEARCH_LEVEL_LABEL[source.level]} · published ${
+          source.publishedAt ?? '时效未知'
+        } · 获取 ${source.fetchedAt} · ${location}（${source.gradeReason}）`,
+      );
+    });
+  }
+  return out.join('\n');
+}
+
+function researchFindDuplicates(title: string): ResearchDuplicateNote[] {
+  const key = title.split(/\s+/).join('').toLowerCase();
+  return state.notes
+    .filter((note) => note.status === 'active')
+    .filter((note) => note.title.split(/\s+/).join('').toLowerCase() === key)
+    .map((note) => ({ noteId: note.id, title: note.title, updatedAt: note.updatedAt }));
+}
+
+function researchBuildProposal(session: ResearchSession, report: ResearchReport): ResearchProposal {
+  const title = `调研报告：${session.request.topic}`;
+  const sourceRef = report.references
+    .map((source) =>
+      source.url
+        ? `[${source.reference}] ${source.title} ${source.url}`
+        : `[${source.reference}] ${source.title} (${RESEARCH_LEVEL_LABEL[source.level]} 笔记)`,
+    )
+    .join('；');
+  const body = [
+    report.markdown,
+    '',
+    '---',
+    '',
+    `> 本报告由研究助手生成（${report.composer}）：结论段为**来源原句摘录**，未做语义归并；`,
+    '> 推测段默认不写入笔记，需要时请在写入确认里勾选。',
+    `> 会话 \`${session.id}\` · 生成于 ${report.generatedAt}`,
+  ].join('\n');
+  return {
+    title,
+    categoryId: null,
+    tags: ['调研报告', '待复核'],
+    sourceType: 'research',
+    sourceRef,
+    sourceReliability: report.sourceReliability,
+    validUntil: report.validUntil ?? null,
+    body,
+    diffPreview: body
+      .split('\n')
+      .map((line) => `+${line}`)
+      .join('\n'),
+    duplicates: researchFindDuplicates(title),
+    suggestSourceNote: report.references.length > 3,
+  };
+}
+
+function researchSave(session: ResearchSession): ResearchSession {
+  session.updatedAt = now();
+  // 存快照并按值返回：真实 IPC 每次都会反序列化成新对象，
+  // 如果这里把同一个引用交给界面，React 的状态比较会认为「没变化」而不重渲染。
+  state.research[session.id] = structuredClone(session);
+  persist();
+  return structuredClone(session);
+}
+
+function researchRequire(sessionId: string): ResearchSession {
+  const session = state.research[sessionId];
+  if (!session) fail('INVALID_INPUT', `找不到研究会话 ${sessionId}。`);
+  return structuredClone(session);
+}
+
+function researchRequireStatus(session: ResearchSession, expected: ResearchStatus[], action: string) {
+  if (!expected.includes(session.status)) {
+    fail(
+      'INVALID_INPUT',
+      `会话当前状态是 ${session.status}，${action}需要状态为「${expected.join(' / ')}」。`,
+    );
+  }
+}
+
+function researchStep(session: ResearchSession, step: string, detail: string) {
+  session.steps.push({ step, at: now(), detail });
 }
 
 function plainText(markdown: string): string {
@@ -1031,6 +1568,7 @@ export async function handleMockInvoke(
         history: {},
         ai: { ...defaultAiPolicy },
         aiAudit: [],
+        research: {},
       };
       persist();
       return null;
@@ -1392,6 +1930,344 @@ export async function handleMockInvoke(
       if (!state.ai.enabled) fail('AI_DISABLED', 'AI 能力未开启：请到「设置 → AI」打开总开关。');
       fail('INVALID_INPUT', '联网搜索尚未接入（阶段 D3）：当前可先用「网页剪藏」按已知地址抓取。');
       break;
+    }
+    case 'research_start': {
+      requireWorkspace();
+      requireAi();
+      const input = (payload.input ?? {}) as ResearchRequest;
+      const topic = researchValidateTopic(String(input.topic ?? ''));
+      const timeWindowDays = Math.min(
+        3650,
+        Math.max(7, Math.round(input.timeWindowDays ?? 730)),
+      );
+      const maxSub = Math.min(10, Math.max(1, Math.round(state.ai.budget.maxSubquestions)));
+      const subQuestions = researchSubQuestions(topic, maxSub);
+      const localBaseline = researchLocalHits(topic, 3).map((note) => ({
+        noteId: note.id,
+        title: note.title,
+        snippet: plainText(state.contents[note.id] ?? '').slice(0, 120),
+      }));
+      const planNotes = [
+        '本次只用本地知识库材料（外部检索属于阶段 D3，接入前不会发起任何请求）。',
+        `子问题 ${subQuestions.length} 个 · 时间窗 ${timeWindowDays} 天 · 抓取页上限 ${state.ai.budget.maxPages}（外部检索启用后生效）。`,
+        '子问题与关键词由模板生成；语义化的查询改写要等模型接入（N5/D4）。',
+        '来源按 §9.3 规则分级：域名内置表 → 内容自证（标题/作者/日期）→ 兜底「弱」。',
+      ];
+      if (localBaseline.length === 0) {
+        planNotes.push('本地知识库暂无相关笔记：本次没有「已知基线」可复用。');
+      }
+      const createdAt = now();
+      const session: ResearchSession = {
+        id: `research_${ulid()}`,
+        request: {
+          topic,
+          scope: input.scope ?? null,
+          timeWindowDays,
+          writeBack: Boolean(input.writeBack),
+          targetCategoryId: input.targetCategoryId ?? null,
+        },
+        status: 'planned',
+        createdAt,
+        updatedAt: createdAt,
+        plan: {
+          topic,
+          scope: input.scope ?? null,
+          subQuestions,
+          localBaseline,
+          timeWindowDays,
+          budget: { ...state.ai.budget },
+          notes: planNotes,
+        },
+        sources: [],
+        report: null,
+        proposal: null,
+        steps: [{ step: 'plan', at: createdAt, detail: '已立项：生成研究计划与本地基线' }],
+        elapsedMs: 0,
+        abortReason: null,
+        writtenNoteId: null,
+      };
+      auditResearch('research_start', 'ok', null);
+      return researchSave(session);
+    }
+    case 'research_get':
+      requireWorkspace();
+      return researchRequire(String(payload.sessionId ?? ''));
+    case 'research_list': {
+      requireWorkspace();
+      const limit = Math.max(1, Math.min(200, Number(payload.limit ?? 20)));
+      return Object.values(state.research)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .slice(0, limit)
+        .map<ResearchSessionSummary>((session) => ({
+          id: session.id,
+          topic: session.request.topic,
+          status: session.status,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          sourceCount: session.sources.length,
+          writtenNoteId: session.writtenNoteId ?? null,
+        }));
+    }
+    case 'research_collect': {
+      requireWorkspace();
+      requireAi();
+      const session = researchRequire(String(payload.sessionId ?? ''));
+      researchRequireStatus(session, ['planned'], '收集材料');
+      const plan = session.plan;
+      if (!plan) fail('INVALID_INPUT', '会话缺少研究计划。');
+      const candidates = researchLocalHits(plan.topic, RESEARCH_MAX_SOURCES * 2);
+      const sources: ResearchSource[] = [];
+      const perQuestion = plan.subQuestions.map(() => 0);
+      const seen: string[] = [];
+      candidates.forEach((note) => {
+        if (sources.length >= RESEARCH_MAX_SOURCES) return;
+        const snippet = plainText(state.contents[note.id] ?? '').slice(0, 160) || note.title;
+        const index = researchAssign(note.title, snippet, plan.subQuestions);
+        const question = plan.subQuestions[index];
+        if (!question || (perQuestion[index] ?? 0) >= RESEARCH_HITS_PER_QUESTION) return;
+        const fingerprint = `${question.id}:${note.id}`;
+        if (seen.includes(fingerprint)) return;
+        seen.push(fingerprint);
+        perQuestion[index] = (perQuestion[index] ?? 0) + 1;
+        const grade = researchGrade(note);
+        sources.push({
+          reference: sources.length + 1,
+          title: note.title,
+          url: note.sourceRef?.startsWith('http') ? note.sourceRef : null,
+          origin: 'local',
+          noteId: note.id,
+          subQuestionId: question.id,
+          level: grade.level,
+          reliability: RESEARCH_LEVEL_RELIABILITY[grade.level],
+          gradeReason: grade.reason,
+          publishedAt: null,
+          fetchedAt: note.updatedAt,
+          applicableVersion: null,
+          snippet,
+          stale: researchStale(note, plan.timeWindowDays),
+        });
+      });
+      plan.subQuestions.forEach((question, index) => {
+        question.localHits = perQuestion[index] ?? 0;
+      });
+      session.sources = sources;
+      session.status = 'collected';
+      researchStep(
+        session,
+        'collect',
+        `本地材料 ${sources.length} 条；外部检索${
+          state.ai.network === 'allowNetwork'
+            ? '尚未接入（阶段 D3），本次未发起任何请求'
+            : '未开启（联网档位为「仅本地」）'
+        }`,
+      );
+      auditResearch(
+        'research_collect',
+        'ok',
+        state.ai.network === 'allowNetwork' ? 'external_not_available' : 'local_only',
+      );
+      return researchSave(session);
+    }
+    case 'research_verify': {
+      requireWorkspace();
+      requireAi();
+      const session = researchRequire(String(payload.sessionId ?? ''));
+      researchRequireStatus(session, ['collected'], '验证');
+      const report = researchBuildReport(session, researchVerifyClaims(session));
+      session.report = report;
+      session.status = 'verified';
+      researchStep(
+        session,
+        'verify',
+        `按 ${session.plan?.subQuestions.length ?? 0} 个子问题汇总：交叉验证 ${report.keyFacts.length} 条，单一来源 ${report.pending.length} 条`,
+      );
+      auditResearch('research_verify', 'ok', null);
+      return researchSave(session);
+    }
+    case 'research_compose': {
+      requireWorkspace();
+      requireAi();
+      const session = researchRequire(String(payload.sessionId ?? ''));
+      researchRequireStatus(session, ['verified'], '生成报告');
+      const report = session.report;
+      if (!report) fail('INVALID_INPUT', '会话缺少验证结果。');
+      if (session.sources.length === 0) {
+        report.speculation = ['（模板草稿）本次没有可用材料，无法给出任何推测内容。'];
+      } else {
+        const speculation = [
+          '（模板草稿·未接模型）以下是按材料顺序罗列的待确认方向，**不构成结论**：',
+        ];
+        session.sources.slice(0, 5).forEach((source, index) => {
+          speculation.push(`${index + 1}. ${source.title} —— ${researchFirstSentence(source.snippet)}`);
+        });
+        speculation.push('下一步需要接入模型（或人工复核）才能把这些方向写成结论。');
+        report.speculation = speculation;
+      }
+      report.generatedAt = now();
+      report.markdown = researchRenderMarkdown(session, report);
+      session.status = 'composed';
+      researchStep(session, 'compose', '已生成报告（模板实现，未接模型）：template.draft');
+      auditResearch('research_compose', 'ok', 'template.draft');
+      return researchSave(session);
+    }
+    case 'research_proposal': {
+      requireWorkspace();
+      requireAi();
+      const session = researchRequire(String(payload.sessionId ?? ''));
+      researchRequireStatus(session, ['composed', 'proposed'], '生成写入提案');
+      if (!session.report) fail('INVALID_INPUT', '会话缺少报告。');
+      session.proposal = researchBuildProposal(session, session.report);
+      session.status = 'proposed';
+      researchStep(session, 'proposal', '已生成写入提案（等待用户确认后落库）');
+      auditResearch('research_proposal', 'ok', null);
+      return researchSave(session);
+    }
+    case 'research_write': {
+      requireWorkspace();
+      requireAi();
+      const input = (payload.input ?? {}) as ResearchWriteInput;
+      const session = researchRequire(String(input.sessionId ?? ''));
+      researchRequireStatus(session, ['proposed'], '写入');
+      const proposal = session.proposal;
+      if (!proposal) fail('INVALID_INPUT', '会话缺少写入提案。');
+      const mode = (input.mode ?? 'create') as ResearchWriteMode;
+      if (mode === 'abandon') {
+        researchStep(session, 'write', '用户选择放弃本次写入：未落库，材料仍保留为草稿');
+        auditResearch('research_write', 'ok', 'abandoned');
+        researchSave(session);
+        return {
+          sessionId: session.id,
+          outcome: 'abandoned',
+          noteId: null,
+          noteTitle: null,
+          sourceNoteId: null,
+          sourceReliability: proposal.sourceReliability,
+          validUntil: proposal.validUntil ?? null,
+          diffPreview: '',
+        } satisfies ResearchWriteResult;
+      }
+      if (mode !== 'create' && mode !== 'append') {
+        fail('INVALID_INPUT', `不支持的写入方式「${mode}」（可用 create / append / abandon）。`);
+      }
+      const title = (input.title ?? '').trim() || proposal.title;
+      let body = proposal.body;
+      if (input.includeSpeculation && (session.report?.speculation.length ?? 0) > 0) {
+        body += `\n\n## 附：模型推测（未验证）\n\n> 以下内容由模板实现生成（**未接入模型**），不是结论，仅供参考。\n\n${session.report?.speculation.join('\n') ?? ''}`;
+      }
+      let noteId: string;
+      let noteTitle: string;
+      let outcome: 'created' | 'appended';
+      let diffPreview: string;
+      if (mode === 'append') {
+        const target = input.targetNoteId ?? proposal.duplicates[0]?.noteId ?? null;
+        if (!target) {
+          fail(
+            'INVALID_INPUT',
+            '追加模式需要指定目标笔记（同标题笔记不存在时请改用「新建」）。',
+          );
+        }
+        const note = state.notes.find((item) => item.id === target && item.status !== 'deleted');
+        if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
+        const existing = state.contents[note.id] ?? '';
+        captureHistory(note.id, existing); // 写前留档 → 可回滚
+        const merged = `${existing.trimEnd()}\n\n---\n\n${body}`;
+        state.contents[note.id] = merged;
+        note.wordCount = plainText(merged).length;
+        note.updatedAt = now();
+        emit('notes://changed', { kind: 'modified', noteId: note.id });
+        noteId = note.id;
+        noteTitle = note.title;
+        outcome = 'appended';
+        diffPreview = [
+          ...existing
+            .split('\n')
+            .filter((line) => line.trim().length > 0)
+            .slice(-3)
+            .map((line) => ` ${line}`),
+          ...body.split('\n').map((line) => `+${line}`),
+        ].join('\n');
+      } else {
+        const created = createNote({
+          title,
+          categoryId: input.categoryId ?? proposal.categoryId ?? null,
+          initialContent: body,
+          tags: proposal.tags,
+          parentId: null,
+        });
+        noteId = created.note.id;
+        noteTitle = created.note.title;
+        outcome = 'created';
+        diffPreview = body
+          .split('\n')
+          .map((line) => `+${line}`)
+          .join('\n');
+      }
+      const written = state.notes.find((item) => item.id === noteId);
+      if (written) {
+        written.sourceType = proposal.sourceType;
+        written.sourceRef = proposal.sourceRef;
+        written.sourceReliability = proposal.sourceReliability;
+        written.validUntil = proposal.validUntil ?? null;
+        persist();
+      }
+      let sourceNoteId: string | null = null;
+      if (input.createSourceNote) {
+        const lines = session.sources.map(
+          (source) =>
+            `- [${source.reference}] ${source.title} · ${RESEARCH_LEVEL_LABEL[source.level]} · 获取 ${
+              source.fetchedAt
+            } · ${source.url ?? (source.noteId ? `note://${source.noteId}` : '本地')} · ${
+              source.gradeReason
+            }`,
+        );
+        const child = createNote({
+          title: `来源清单：${session.request.topic}`,
+          categoryId: null,
+          initialContent: [
+            '> 本清单由研究助手生成：每行是报告中引用过的一条来源，含分级依据与获取时间。',
+            '',
+            `> 资料截至 ${session.report?.dataCutoff ?? researchIsoDate()}。`,
+            '',
+            ...lines,
+          ].join('\n'),
+          tags: ['来源清单'],
+          parentId: noteId,
+        });
+        sourceNoteId = child.note.id;
+      }
+      session.writtenNoteId = noteId;
+      session.status = 'written';
+      researchStep(
+        session,
+        'write',
+        `已${outcome === 'appended' ? '追加' : '新建'}：${noteTitle}（来源等级 ${
+          proposal.sourceReliability
+        } · 复核 ${proposal.validUntil ?? '未设置'}）`,
+      );
+      auditResearch('research_write', 'ok', outcome);
+      researchSave(session);
+      return {
+        sessionId: session.id,
+        outcome,
+        noteId,
+        noteTitle,
+        sourceNoteId,
+        sourceReliability: proposal.sourceReliability,
+        validUntil: proposal.validUntil ?? null,
+        diffPreview,
+      } satisfies ResearchWriteResult;
+    }
+    case 'research_abort': {
+      requireWorkspace();
+      requireAi();
+      const session = researchRequire(String(payload.sessionId ?? ''));
+      if (session.status !== 'aborted') {
+        session.status = 'aborted';
+        session.abortReason = String(payload.reason ?? '用户中止').trim() || '用户中止';
+        researchStep(session, 'abort', '已中止：已有材料保留为草稿');
+        auditResearch('research_abort', 'ok', 'aborted');
+      }
+      return researchSave(session);
     }
     case 'note_clip_url': {
       const raw = String(payload.url ?? '').trim();

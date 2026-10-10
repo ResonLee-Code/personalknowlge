@@ -647,6 +647,203 @@ export interface KbHit {
   snippet: string;
 }
 
+/** 研究会话状态（与 Rust `ResearchStatus` 一致，只能单向推进） */
+export type ResearchStatus =
+  | 'planned'
+  | 'collected'
+  | 'verified'
+  | 'composed'
+  | 'proposed'
+  | 'written'
+  | 'aborted';
+
+/** 来源权威性级别 A–E（§9.3） */
+export type ResearchSourceLevel = 'A' | 'B' | 'C' | 'D' | 'E';
+
+/** 来源通道：本知识库笔记 / 外部网页（D3 起才有） */
+export type ResearchSourceOrigin = 'local' | 'web';
+
+/** 报告里的醒目警告类别 */
+export type ResearchWarningKind =
+  | 'unverifiedSources'
+  | 'singleSource'
+  | 'conflict'
+  | 'stale'
+  | 'externalNotAvailable'
+  | 'noLocalEvidence'
+  | 'templateGenerated';
+
+/** 研究请求（`research_start` 输入；只有课题必填） */
+export interface ResearchRequest {
+  topic: string;
+  scope?: string | null;
+  timeWindowDays?: number | null;
+  /** 用户是否明确表达「结果写入知识库」 */
+  writeBack?: boolean;
+  targetCategoryId?: string | null;
+}
+
+export interface ResearchSubQuestion {
+  id: string;
+  question: string;
+  keywords: string[];
+  localHits: number;
+}
+
+export interface ResearchKbBaseline {
+  noteId: string;
+  title: string;
+  snippet: string;
+}
+
+export interface ResearchPlan {
+  topic: string;
+  scope?: string | null;
+  subQuestions: ResearchSubQuestion[];
+  localBaseline: ResearchKbBaseline[];
+  timeWindowDays: number;
+  budget: AiResearchBudget;
+  /** 计划说明（含降级路径与局限） */
+  notes: string[];
+}
+
+export interface ResearchSource {
+  /** 会话内引用编号（报告里写作 [n]） */
+  reference: number;
+  title: string;
+  url?: string | null;
+  origin: ResearchSourceOrigin;
+  noteId?: string | null;
+  subQuestionId: string;
+  level: ResearchSourceLevel;
+  reliability: number;
+  /** 分级依据（可读、可复核） */
+  gradeReason: string;
+  publishedAt?: string | null;
+  fetchedAt: string;
+  applicableVersion?: string | null;
+  snippet: string;
+  stale: boolean;
+}
+
+export interface ResearchClaim {
+  subQuestionId: string;
+  text: string;
+  citations: number[];
+  bestLevel: ResearchSourceLevel;
+  /** ≥2 个独立来源才算交叉验证 */
+  crossVerified: boolean;
+  fresh: boolean;
+  relatedNotes: string[];
+}
+
+export interface ResearchWarning {
+  kind: ResearchWarningKind;
+  message: string;
+  references: number[];
+}
+
+export interface ResearchKbRelation {
+  noteId: string;
+  title: string;
+  relation: string;
+}
+
+export interface ResearchReport {
+  generatedAt: string;
+  /** 「资料截至 YYYY-MM-DD」 */
+  dataCutoff: string;
+  composer: string;
+  conclusions: ResearchClaim[];
+  keyFacts: ResearchClaim[];
+  conflicts: ResearchClaim[];
+  kbRelations: ResearchKbRelation[];
+  pending: ResearchClaim[];
+  references: ResearchSource[];
+  /** 模型推测段（默认折叠，写入时默认不含） */
+  speculation: string[];
+  warnings: ResearchWarning[];
+  sourceReliability: number;
+  validUntil?: string | null;
+  markdown: string;
+}
+
+export interface ResearchDuplicateNote {
+  noteId: string;
+  title: string;
+  updatedAt: string;
+}
+
+export interface ResearchProposal {
+  title: string;
+  categoryId?: string | null;
+  tags: string[];
+  sourceType: string;
+  sourceRef: string;
+  sourceReliability: number;
+  validUntil?: string | null;
+  body: string;
+  diffPreview: string;
+  duplicates: ResearchDuplicateNote[];
+  suggestSourceNote: boolean;
+}
+
+export interface ResearchStepLog {
+  step: string;
+  at: string;
+  detail: string;
+}
+
+export interface ResearchSession {
+  id: string;
+  request: ResearchRequest;
+  status: ResearchStatus;
+  createdAt: string;
+  updatedAt: string;
+  plan?: ResearchPlan | null;
+  sources: ResearchSource[];
+  report?: ResearchReport | null;
+  proposal?: ResearchProposal | null;
+  steps: ResearchStepLog[];
+  elapsedMs: number;
+  abortReason?: string | null;
+  writtenNoteId?: string | null;
+}
+
+export interface ResearchSessionSummary {
+  id: string;
+  topic: string;
+  status: ResearchStatus;
+  createdAt: string;
+  updatedAt: string;
+  sourceCount: number;
+  writtenNoteId?: string | null;
+}
+
+export type ResearchWriteMode = 'create' | 'append' | 'abandon';
+
+export interface ResearchWriteInput {
+  sessionId: string;
+  mode: ResearchWriteMode;
+  targetNoteId?: string | null;
+  /** 是否把「模型推测」段一并写入（默认 false） */
+  includeSpeculation?: boolean;
+  createSourceNote?: boolean;
+  title?: string | null;
+  categoryId?: string | null;
+}
+
+export interface ResearchWriteResult {
+  sessionId: string;
+  outcome: 'created' | 'appended' | 'abandoned';
+  noteId?: string | null;
+  noteTitle?: string | null;
+  sourceNoteId?: string | null;
+  sourceReliability: number;
+  validUntil?: string | null;
+  diffPreview: string;
+}
+
 /** 网页剪藏结果（V1.2.1 C1）：抓取 + 抽取后的网页正文 */
 export interface ClippedPage {
   url: string;

@@ -90,6 +90,7 @@ pub fn run() {
             commands::research_commands::research_compose,
             commands::research_commands::research_proposal,
             commands::research_commands::research_abort,
+            commands::research_commands::research_write,
             commands::batch_commands::notes_move_batch,
             commands::batch_commands::notes_tag_batch,
             commands::batch_commands::notes_delete_batch,

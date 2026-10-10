@@ -9,6 +9,7 @@ export const ROUTES = {
   tags: '/tags',
   favorites: '/favorites',
   graph: '/graph',
+  research: '/research',
   attachments: '/attachments',
   manage: '/manage',
   trash: '/trash',

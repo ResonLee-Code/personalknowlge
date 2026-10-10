@@ -24,6 +24,8 @@ pub enum ResearchStatus {
     Composed,
     /// 已产出写入提案（尚未落库）
     Proposed,
+    /// 已写入知识库（`written_note_id` 指向落库的笔记）
+    Written,
     /// 已中止（可保留已有材料作为草稿）
     Aborted,
 }
@@ -36,10 +38,18 @@ impl ResearchStatus {
             ResearchStatus::Verified => "verified",
             ResearchStatus::Composed => "composed",
             ResearchStatus::Proposed => "proposed",
+            ResearchStatus::Written => "written",
             ResearchStatus::Aborted => "aborted",
         }
     }
 }
+
+/// 写入方式（`research_write` 的 `mode`）。
+pub const WRITE_MODE_CREATE: &str = "create";
+/// 追加到已有笔记（带写前历史快照，可回滚）
+pub const WRITE_MODE_APPEND: &str = "append";
+/// 放弃本次写入（不落库）
+pub const WRITE_MODE_ABANDON: &str = "abandon";
 
 /// 来源权威性级别 A–E（§9.3；`A` 最权威，`E` 不可用）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -313,6 +323,60 @@ pub struct ResearchProposal {
     pub duplicates: Vec<DuplicateNote>,
     /// 是否建议同时创建「来源清单」子文档
     pub suggest_source_note: bool,
+}
+
+/// 写入知识库的输入（**必须由用户确认后**才调用；AI 不自行决定落库）。
+///
+/// 写入纪律（§9.3 已确认口径）：默认落 Inbox、同标题**不覆盖**（由用户选新建/追加/放弃）、
+/// 写前展示 diff、可回滚（追加走 `note_save`，自动留历史快照）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ResearchWriteInput {
+    pub session_id: String,
+    /// `create` / `append` / `abandon`
+    pub mode: String,
+    /// 追加模式的目标笔记（缺省时取提案里唯一的同标题笔记）
+    pub target_note_id: Option<String>,
+    /// 是否把「模型推测」段一并写入（**默认 false**：推测段默认不落库）
+    pub include_speculation: bool,
+    /// 是否同时创建「来源清单」子文档
+    pub create_source_note: bool,
+    /// 覆盖标题（缺省用提案标题）
+    pub title: Option<String>,
+    /// 覆盖目标分类（缺省用提案的分类，通常是 Inbox）
+    pub category_id: Option<String>,
+}
+
+impl Default for ResearchWriteInput {
+    fn default() -> Self {
+        Self {
+            session_id: String::new(),
+            mode: WRITE_MODE_CREATE.to_string(),
+            target_note_id: None,
+            include_speculation: false,
+            create_source_note: false,
+            title: None,
+            category_id: None,
+        }
+    }
+}
+
+/// 写入结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchWriteResult {
+    pub session_id: String,
+    /// `created` / `appended` / `abandoned`
+    pub outcome: String,
+    /// 落库的笔记 id（放弃时为空）
+    pub note_id: Option<String>,
+    pub note_title: Option<String>,
+    /// 来源清单子文档 id（未创建时为空）
+    pub source_note_id: Option<String>,
+    pub source_reliability: i64,
+    pub valid_until: Option<String>,
+    /// 写入前展示的 diff（新增行以 `+` 开头，追加时带 3 行上下文）
+    pub diff_preview: String,
 }
 
 /// 一步执行记录（进度与审计的最小单位）。

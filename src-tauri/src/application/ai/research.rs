@@ -29,12 +29,13 @@ use crate::core::ids::ulid;
 use crate::core::text::first_sentence;
 use crate::core::time::{date_offset_days, now_iso, today_date};
 use crate::domain::ai::NetworkMode;
-use crate::domain::note::NoteListQuery;
+use crate::domain::note::{CreateNoteInput, NoteListQuery, SaveNoteInput, SetSourceInput};
 use crate::domain::research::{
     DuplicateNote, KbBaseline, KbRelation, ResearchClaim, ResearchPlan, ResearchProposal,
     ResearchReport, ResearchRequest, ResearchSession, ResearchSessionSummary, ResearchSource,
     ResearchStatus, ResearchStepLog, ResearchWarning, SourceLevel, SourceOrigin, SubQuestion,
-    WarningKind,
+    WarningKind, ResearchWriteInput, ResearchWriteResult, WRITE_MODE_ABANDON, WRITE_MODE_APPEND,
+    WRITE_MODE_CREATE,
 };
 
 /// 每个子问题最多采纳的本地材料条数。
@@ -567,6 +568,171 @@ impl ResearchService {
 
     // ---------------------------------------------------------------- 其它
 
+    // ---------------------------------------------------------------- ⑤ 落库
+
+    /// 把报告写入知识库（**用户确认后**调用）。
+    ///
+    /// 纪律：默认落 Inbox；同标题不覆盖（`append` 必须显式指定目标，且走 `note_save`
+    /// 因此自动留历史快照、可回滚）；`abandon` 只记一步日志，不写任何文件。
+    pub fn write(&self, input: ResearchWriteInput) -> Result<ResearchWriteResult> {
+        let started = Instant::now();
+        self.policy().ensure_enabled("research_write")?;
+        let mut session = self.load(&input.session_id)?;
+        if session.status != ResearchStatus::Proposed {
+            return Err(AppError::invalid_input(format!(
+                "会话当前状态是 {}，只有「已提案」的会话可以写入（重复写入请重新生成提案）。",
+                session.status.as_str()
+            )));
+        }
+        let proposal = session
+            .proposal
+            .clone()
+            .ok_or_else(|| AppError::internal("会话缺少写入提案。"))?;
+        let mode = input.mode.trim().to_ascii_lowercase();
+        if mode == WRITE_MODE_ABANDON {
+            session.steps.push(ResearchStepLog {
+                step: "write".to_string(),
+                at: now_iso(),
+                detail: "用户选择放弃本次写入：未落库，材料仍保留为草稿".to_string(),
+            });
+            session.updated_at = now_iso();
+            self.save(&session)?;
+            self.policy()
+                .audit("research_write", false, "ok", started.elapsed().as_millis() as u64, Some("abandoned"));
+            return Ok(ResearchWriteResult {
+                session_id: session.id,
+                outcome: "abandoned".to_string(),
+                note_id: None,
+                note_title: None,
+                source_note_id: None,
+                source_reliability: proposal.source_reliability,
+                valid_until: proposal.valid_until,
+                diff_preview: String::new(),
+            });
+        }
+        if mode != WRITE_MODE_CREATE && mode != WRITE_MODE_APPEND {
+            return Err(AppError::invalid_input(format!(
+                "不支持的写入方式「{}」（可用 create / append / abandon）。",
+                input.mode
+            )));
+        }
+
+        let title = input
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| proposal.title.clone());
+        let body = write_body(&proposal, &session, input.include_speculation);
+        let notes = NoteService::new(Arc::clone(&self.ctx));
+
+        let (note_id, note_title, outcome, diff_preview) = if mode == WRITE_MODE_APPEND {
+            let target = input
+                .target_note_id
+                .clone()
+                .or_else(|| proposal.duplicates.first().map(|item| item.note_id.clone()))
+                .ok_or_else(|| {
+                    AppError::invalid_input(
+                        "追加模式需要指定目标笔记（同标题笔记不存在时请改用「新建」）。",
+                    )
+                })?;
+            let detail = notes.get(&target)?;
+            let merged = format!("{}\n\n---\n\n{}", detail.content.trim_end(), body);
+            // `note_save` 会先留历史快照 → 追加同样可回滚
+            let saved = notes.save(SaveNoteInput {
+                id: target,
+                content: merged.clone(),
+                base_content_hash: None,
+                title: None,
+                category_id: None,
+                tags: None,
+            })?;
+            (
+                saved.note.id,
+                saved.note.title,
+                "appended".to_string(),
+                append_diff(&detail.content, &body),
+            )
+        } else {
+            let created = notes.create(CreateNoteInput {
+                title: title.clone(),
+                category_id: input.category_id.clone().or_else(|| proposal.category_id.clone()),
+                initial_content: Some(body.clone()),
+                tags: Some(proposal.tags.clone()),
+                parent_id: None,
+            })?;
+            (
+                created.note.id,
+                created.note.title,
+                "created".to_string(),
+                create_diff(&body),
+            )
+        };
+
+        // N1 来源元数据：来源类型 / 引用 / 可靠性 / 复核时间
+        notes.set_source(SetSourceInput {
+            id: note_id.clone(),
+            source_type: Some(proposal.source_type.clone()),
+            source_ref: Some(proposal.source_ref.clone()),
+            source_reliability: Some(proposal.source_reliability),
+            valid_until: proposal.valid_until.clone(),
+        })?;
+
+        let source_note_id = if input.create_source_note {
+            let report = session.report.clone();
+            let content = report
+                .as_ref()
+                .map(source_note_markdown)
+                .unwrap_or_else(|| "_本次没有来源。_".to_string());
+            let child = notes.create(CreateNoteInput {
+                title: format!("来源清单：{}", session.request.topic),
+                category_id: None,
+                initial_content: Some(content),
+                tags: Some(vec!["来源清单".to_string()]),
+                parent_id: Some(note_id.clone()),
+            })?;
+            Some(child.note.id)
+        } else {
+            None
+        };
+
+        session.written_note_id = Some(note_id.clone());
+        session.status = ResearchStatus::Written;
+        session.updated_at = now_iso();
+        session.elapsed_ms += started.elapsed().as_millis() as u64;
+        session.steps.push(ResearchStepLog {
+            step: "write".to_string(),
+            at: now_iso(),
+            detail: format!(
+                "已{}：{}（来源等级 {} · 复核 {}）{}",
+                if outcome == "appended" { "追加" } else { "新建" },
+                note_title,
+                proposal.source_reliability,
+                proposal.valid_until.as_deref().unwrap_or("未设置"),
+                if input.include_speculation { " · 含推测段" } else { "" }
+            ),
+        });
+        self.save(&session)?;
+        self.policy().audit(
+            "research_write",
+            false,
+            "ok",
+            started.elapsed().as_millis() as u64,
+            Some(&outcome),
+        );
+        Ok(ResearchWriteResult {
+            session_id: session.id,
+            outcome,
+            note_id: Some(note_id),
+            note_title: Some(note_title),
+            source_note_id,
+            source_reliability: proposal.source_reliability,
+            valid_until: proposal.valid_until,
+            diff_preview,
+        })
+    }
+
     /// 中止会话（已得材料保留为草稿）。
     pub fn abort(&self, session_id: &str, reason: Option<String>) -> Result<ResearchSession> {
         self.policy().ensure_enabled("research_abort")?;
@@ -1055,6 +1221,82 @@ fn escape_table(value: &str) -> String {
 
 fn normalize_title_key(title: &str) -> String {
     title.split_whitespace().collect::<Vec<_>>().join("").to_lowercase()
+}
+
+/// 落库正文：提案正文 +（可选）附录形式的「模型推测」段。
+///
+/// 六段报告结构不变；推测段只在用户显式勾选时追加，且作为**附录**、明确标注未接模型。
+fn write_body(
+    proposal: &ResearchProposal,
+    session: &ResearchSession,
+    include_speculation: bool,
+) -> String {
+    let mut body = proposal.body.clone();
+    if !include_speculation {
+        return body;
+    }
+    let Some(report) = session.report.as_ref() else {
+        return body;
+    };
+    if report.speculation.is_empty() {
+        return body;
+    }
+    body.push_str(
+        "\n\n## 附：模型推测（未验证）\n\n> 以下内容由模板实现生成（**未接入模型**），不是结论，仅供参考。\n\n",
+    );
+    for line in &report.speculation {
+        body.push_str(line);
+        body.push('\n');
+    }
+    body
+}
+
+/// 新建模式的 diff 预览：全部是新增行。
+fn create_diff(body: &str) -> String {
+    body.lines().map(|line| format!("+{line}")).collect::<Vec<_>>().join("\n")
+}
+
+/// 追加模式的 diff 预览：最后 3 行上下文（空格前缀）+ 新增行。
+fn append_diff(existing: &str, body: &str) -> String {
+    let mut out: Vec<String> = existing
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .take(3)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(|line| format!(" {line}"))
+        .collect();
+    for line in body.lines() {
+        out.push(format!("+{line}"));
+    }
+    out.join("\n")
+}
+
+/// 「来源清单」子文档的正文：每行一条来源（级别 + 获取时间 + 定位 + 分级理由）。
+fn source_note_markdown(report: &ResearchReport) -> String {
+    let mut out = String::from(
+        "> 本清单由研究助手生成：每行是报告中引用过的一条来源，含分级依据与获取时间。\n\n",
+    );
+    out.push_str(&format!("> 资料截至 {}。\n\n", report.data_cutoff));
+    for source in &report.references {
+        let location = source
+            .url
+            .clone()
+            .or_else(|| source.note_id.clone().map(|id| format!("note://{id}")))
+            .unwrap_or_else(|| "本地".to_string());
+        out.push_str(&format!(
+            "- [{}] {} · {} · 获取 {} · {} · {}\n",
+            source.reference,
+            source.title,
+            source.level.label(),
+            source.fetched_at,
+            location,
+            source.grade_reason
+        ));
+    }
+    out
 }
 
 /// 把来源列表转成 frontmatter 用的引用串（写回时使用）。

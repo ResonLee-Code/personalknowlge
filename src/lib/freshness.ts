@@ -45,6 +45,7 @@ export const SOURCE_TYPE_LABELS: Record<string, string> = {
   conversation: '交流',
   web: '网页剪藏',
   ai: 'AI 生成',
+  research: '调研报告',
   unknown: '未标注',
 };
 

@@ -569,6 +569,54 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.getByTestId('ai-fetch-body').click();
   await expect(page.getByTestId('ai-fetch-body')).toBeChecked();
 
+  // 33. 研究助手（D2）：本地调研 → 六段报告 → 确认写入
+  // 先准备三篇本地材料（两条指向「方案」，一条指向「限制」→ 单一来源进待验证）
+  const materials: Array<[string, string]> = [
+    ['Rust 异步调度方案对比', '主流方案是对比 tokio 与 async-std 的调度实现。'],
+    ['Rust 异步调度实现要点', '实现要点在于任务唤醒与本地队列的批量窃取。'],
+    ['Rust 异步调度的限制', '限制条件：阻塞调用会拖垮运行时，注意别占用调度线程。'],
+  ];
+  for (const [title, content] of materials) {
+    await page.goto('/#/notes');
+    await page.getByRole('button', { name: '新建笔记' }).first().click();
+    await page.getByLabel('标题').fill(title);
+    await page.getByLabel('初始内容（可选）').fill(content);
+    await page.getByRole('button', { name: '创建笔记' }).click();
+    await expect(page.locator('.cm-content')).toBeVisible();
+  }
+
+  await page.goto('/#/research');
+  await expect(page.getByRole('heading', { name: '研究助手' })).toBeVisible();
+  await page.getByTestId('research-topic').fill('Rust 异步调度方案');
+  await page.getByTestId('research-start').click();
+  await expect(page.getByTestId('research-plan')).toContainText('核心概念与定义');
+  await page.screenshot({ path: path.join(SHOTS, '40-research-plan.png') });
+
+  await page.getByTestId('research-collect').click();
+  await expect(page.getByTestId('research-sources')).toBeVisible();
+  await page.getByTestId('research-verify').click();
+  await page.getByTestId('research-compose').click();
+  const report = page.getByTestId('research-report');
+  await expect(report).toContainText('资料截至');
+  await expect(report).toContainText('调研报告：Rust 异步调度方案');
+  await expect(page.getByTestId('research-warnings')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '41-research-report.png') });
+
+  await page.getByTestId('research-proposal').click();
+  await expect(page.getByTestId('research-proposal')).toContainText('Inbox');
+  await page.getByTestId('research-write-open').click();
+  await expect(page.getByTestId('research-write-diff')).toContainText('资料截至');
+  await page.screenshot({ path: path.join(SHOTS, '42-research-write.png') });
+  await page.getByTestId('research-write-mode-create').click();
+  await page.getByTestId('research-write-confirm').click();
+  await expect(page.getByTestId('research-written')).toContainText('已写入知识库');
+  await page.screenshot({ path: path.join(SHOTS, '43-research-written.png') });
+
+  // 写回的报告带上 N1 元数据（来源类型 / 可靠性 / 复核时间）
+  await page.getByTestId('research-written-open').click();
+  await expect(page.locator('.cm-content')).toContainText('资料截至');
+  await expect(page.getByText('调研报告', { exact: true }).first()).toBeVisible();
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 
