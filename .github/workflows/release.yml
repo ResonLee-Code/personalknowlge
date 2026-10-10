@@ -45,7 +45,7 @@ jobs:
             fi
           fi
 
-      - name: 校验三处版本号一致（package.json / Cargo.toml / tauri.conf.json）
+      - name: 校验四处版本号一致（package.json / Cargo.toml / Cargo.lock / tauri.conf.json）
         run: |
           node - <<'NODE'
           const fs = require('fs');
@@ -53,11 +53,22 @@ jobs:
           const tauri = require('./src-tauri/tauri.conf.json').version;
           const cargo = fs.readFileSync('./src-tauri/Cargo.toml', 'utf8')
             .match(/^version\s*=\s*"([^"]+)"/m)?.[1];
-          if (pkg !== tauri || pkg !== cargo) {
-            console.error(`版本号不一致：package.json=${pkg}, tauri.conf.json=${tauri}, Cargo.toml=${cargo}`);
+          // Cargo.lock 里本包的版本块：`name = "personal-knowledge-os"` 紧跟 `version = "..."`
+          const lock = fs.readFileSync('./src-tauri/Cargo.lock', 'utf8');
+          const lockVersion = lock
+            .split('\n')
+            .findIndex((line) => line.trim() === 'name = "personal-knowledge-os"');
+          const lockEntry = lockVersion >= 0
+            ? lock.split('\n').slice(lockVersion, lockVersion + 3).join('\n')
+            : '';
+          const locked = lockEntry.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+          const versions = { pkg, tauri, cargo, lock: locked };
+          const unique = new Set(Object.values(versions));
+          if (unique.size !== 1 || !locked) {
+            console.error(`版本号不一致：${JSON.stringify(versions)}`);
             process.exit(1);
           }
-          console.log(`版本号一致：${pkg}`);
+          console.log(`版本号一致（四处）：${pkg}`);
           NODE
 
       - name: Setup pnpm

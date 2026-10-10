@@ -153,6 +153,16 @@
 - 新命令：`ai_policy_get` / `ai_policy_set` / `ai_audit_tail` / `ai_kb_search` / `ai_web_fetch` / `ai_web_search`；
   错误码新增 `AI_DISABLED` / `NETWORK_DISABLED`（前后端一致）。
 
+### 打包前预检（版本校验四处 + release 档编译，2026-10-11）
+
+打包仍按你的指令暂停，但把「恢复打包时最容易翻车」的两件事先验掉：
+
+- 发布工作流的 preflight 从**校验三处**版本号改成**校验四处**
+  （`package.json` / `Cargo.toml` / **`Cargo.lock`** / `tauri.conf.json`），与计划里的版本身份不变式一致；
+- 本机跑了 release 档编译（不产生产物）：`cargo build --release` 通过，二进制
+  **9,792,448 bytes / arm64**（V1.2.0 是 7.79 MB，差值是剪藏与联网检索引入的依赖）；
+- 结论记在 [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) 的 F 节，恢复打包时直接按清单执行。
+
 ### 本地模型接入：Ollama HTTP（阶段 D5 收口，2026-10-11）
 
 把「模型接入层」按你确认的形态（**本地 Ollama HTTP**）落地，**默认关闭、只连本机、失败自动降级**：

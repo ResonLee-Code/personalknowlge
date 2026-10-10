@@ -115,6 +115,14 @@
 
 ## F. 产物完整性（⬜ 待恢复打包后执行）
 
+打包前的两项「不产生产物」的检查已经在 2026-10-11 做过，结果如下：
+
+| 预检项 | 结果 | 证据 |
+| --- | --- | --- |
+| release 档能否编译（新增 ureq / dom_query 之后） | ✅ | `cd src-tauri && cargo build --release --offline` → `Finished release profile in 1m 04s` |
+| release 二进制体积与架构 | ✅ | 9,792,448 bytes（9.79 MB），`Mach-O 64-bit executable arm64`（V1.2.0 为 7.79 MB，差值是剪藏 + 联网检索的依赖） |
+| 版本号四处一致（当前都是 1.2.0） | ✅ | 发布工作流的 preflight 现在会校验 `package.json` / `Cargo.toml` / `Cargo.lock` / `tauri.conf.json` 四处 |
+
 | 项目 | 命令 / 检查 |
 | --- | --- |
 | 版本号四处一致升到 `1.2.1` | `package.json` / `src-tauri/Cargo.toml` / `Cargo.lock` / `src-tauri/tauri.conf.json` |
