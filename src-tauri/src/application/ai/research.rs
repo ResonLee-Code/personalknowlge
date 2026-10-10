@@ -411,6 +411,8 @@ impl ResearchService {
             .ok_or_else(|| AppError::internal("会话缺少研究计划。"))?;
 
         let mut claims = Vec::new();
+        // 同一子问题下出现对立表述 → 并列呈现、不进结论段（D4 规则档）
+        let mut conflicting: Vec<String> = Vec::new();
         for question in &plan.sub_questions {
             let evidence: Vec<&ResearchSource> = session
                 .sources
@@ -446,9 +448,21 @@ impl ResearchService {
                 .map(|source| first_sentence(&source.snippet))
                 .filter(|value| !value.is_empty())
                 .collect();
+            let conflict = has_polarity_conflict(&evidence);
+            if conflict {
+                conflicting.push(question.id.clone());
+            }
             claims.push(ResearchClaim {
                 sub_question_id: question.id.clone(),
-                text: format!("关于「{}」：{}", question.question, quotes.join("；")),
+                text: if conflict {
+                    format!(
+                        "「{}」存在冲突：来源之间既有支持性表述、也有反对/限制性表述，本次不选边。{}",
+                        question.question,
+                        quotes.join("；")
+                    )
+                } else {
+                    format!("关于「{}」：{}", question.question, quotes.join("；"))
+                },
                 citations: evidence.iter().map(|source| source.reference).collect(),
                 best_level: evidence
                     .iter()
@@ -465,7 +479,7 @@ impl ResearchService {
         }
 
         // 验证阶段先落一份「半成品报告」：结论/事实/待验证已定，正文与警告留给 compose。
-        let draft = pending_report(&session, claims);
+        let draft = pending_report(&session, claims, &conflicting);
         session.report = Some(draft);
         session.status = ResearchStatus::Verified;
         session.updated_at = now_iso();
@@ -474,7 +488,7 @@ impl ResearchService {
             step: "verify".to_string(),
             at: now_iso(),
             detail: format!(
-                "按 {} 个子问题汇总：交叉验证 {} 条，单一来源 {} 条",
+                "按 {} 个子问题汇总：交叉验证 {} 条，单一来源 {} 条，存在冲突 {} 条",
                 plan.sub_questions.len(),
                 session
                     .report
@@ -485,6 +499,11 @@ impl ResearchService {
                     .report
                     .as_ref()
                     .map(|report| report.pending.len())
+                    .unwrap_or(0),
+                session
+                    .report
+                    .as_ref()
+                    .map(|report| report.conflicts.len())
                     .unwrap_or(0)
             ),
         });
@@ -969,6 +988,40 @@ fn decompose(topic: &str, max: usize) -> Vec<SubQuestion> {
         .collect()
 }
 
+/// 「冲突」判定的正/负面词表（D4 规则档；模型/Jev 接入后换成语义比对）。
+const POSITIVE_MARKERS: [&str; 9] = [
+    "支持", "可以", "推荐", "适用", "可行", "优势", "有效", "最佳", "建议使用",
+];
+const NEGATIVE_MARKERS: [&str; 11] = [
+    "不支持", "不能", "无法", "禁止", "避免", "不要", "风险", "缺陷", "失败", "限制", "问题",
+];
+
+/// 表述极性：>0 偏正面，<0 偏负面，0 中立。
+fn polarity(text: &str) -> i32 {
+    let lowered = text.to_lowercase();
+    let positive = POSITIVE_MARKERS
+        .iter()
+        .filter(|marker| lowered.contains(*marker))
+        .count() as i32;
+    let negative = NEGATIVE_MARKERS
+        .iter()
+        .filter(|marker| lowered.contains(*marker))
+        .count() as i32;
+    positive - negative
+}
+
+/// 同一子问题下的来源是否**互相矛盾**（既有正面表述、也有负面表述）。
+///
+/// 这是 D4 的规则档：只在「同一子问题」内比较，避免把不同角度的材料误判成冲突；
+/// 判定结果只影响**呈现方式**（并列进第 3 段 + 醒目警告），不影响来源本身的级别。
+fn has_polarity_conflict(sources: &[&ResearchSource]) -> bool {
+    let polarities: Vec<i32> = sources
+        .iter()
+        .map(|source| polarity(&format!("{} {}", source.title, source.snippet)))
+        .collect();
+    polarities.iter().any(|value| *value > 0) && polarities.iter().any(|value| *value < 0)
+}
+
 /// 规则归属：按「意图标记」命中数把材料分给某个子问题（全不命中 → 第一个）。
 fn assign_sub_question(title: &str, snippet: &str, questions: &[SubQuestion]) -> usize {
     if questions.is_empty() {
@@ -992,12 +1045,22 @@ fn assign_sub_question(title: &str, snippet: &str, questions: &[SubQuestion]) ->
 }
 
 /// 验证阶段的中间报告：结论/事实/待验证已定，报告文字与警告留给 `compose`。
-fn pending_report(session: &ResearchSession, claims: Vec<ResearchClaim>) -> ResearchReport {
+fn pending_report(
+    session: &ResearchSession,
+    claims: Vec<ResearchClaim>,
+    conflicting: &[String],
+) -> ResearchReport {
     let mut seen: Vec<Vec<usize>> = Vec::new();
     let mut conclusions = Vec::new();
     let mut key_facts = Vec::new();
     let mut pending = Vec::new();
+    let mut conflicts = Vec::new();
     for claim in claims {
+        // 有冲突的子问题只进第 3 段：并列呈现、不选边（§9.3）
+        if conflicting.contains(&claim.sub_question_id) {
+            conflicts.push(claim);
+            continue;
+        }
         if !claim.cross_verified {
             pending.push(claim);
             continue;
@@ -1019,7 +1082,7 @@ fn pending_report(session: &ResearchSession, claims: Vec<ResearchClaim>) -> Rese
         composer: TemplateGenerativeModel::new().id().to_string(),
         conclusions,
         key_facts,
-        conflicts: Vec::new(),
+        conflicts,
         kb_relations: kb_relations(session),
         pending,
         references: session.sources.clone(),
@@ -1101,6 +1164,20 @@ fn collect_warnings(
         .iter()
         .flat_map(|claim| claim.citations.clone())
         .collect();
+    if !report.conflicts.is_empty() {
+        warnings.push(ResearchWarning {
+            kind: WarningKind::Conflict,
+            message: format!(
+                "有 {} 个子问题的来源互相矛盾：已并列呈现在「争议与不确定性」段，本次不替你选边（规则判定：同一子问题下同时出现支持与反对/限制表述）。",
+                report.conflicts.len()
+            ),
+            references: report
+                .conflicts
+                .iter()
+                .flat_map(|claim| claim.citations.clone())
+                .collect(),
+        });
+    }
     if !single.is_empty() {
         warnings.push(ResearchWarning {
             kind: WarningKind::SingleSource,
@@ -1235,7 +1312,7 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
     out.push_str("## 3. 争议与不确定性\n\n");
     if report.conflicts.is_empty() {
         out.push_str(
-            "_本次未检出冲突：D1/D2 没有语义比对能力，冲突检测要等模型与 Jev 介入（D4）。_\n\n",
+            "_本次未检出冲突（规则档：只有同一子问题下同时出现支持与反对/限制表述才会判为冲突）。_\n\n",
         );
     } else {
         for claim in &report.conflicts {
@@ -1441,5 +1518,38 @@ mod tests {
     #[test]
     fn title_key_normalizes_case_and_whitespace() {
         assert_eq!(normalize_title_key(" 调研报告：Rust "), "调研报告：rust");
+    }
+
+    #[test]
+    fn polarity_and_conflict_detection_are_conservative() {
+        assert!(polarity("推荐使用 tokio 的实现") > 0);
+        assert!(polarity("不建议使用，存在风险与限制") < 0);
+        assert_eq!(polarity("本章介绍调度器的实现细节"), 0);
+
+        let positive = source("https://docs.rs/a", "调度方案推荐", "推荐使用工作窃取队列");
+        let negative = source("https://example.dev/b", "调度方案的风险", "存在风险，避免阻塞调用");
+        let neutral = source("https://example.dev/c", "调度器简介", "本章介绍实现细节");
+        assert!(has_polarity_conflict(&[&positive, &negative]), "正负对立要判为冲突");
+        assert!(!has_polarity_conflict(&[&positive, &neutral]), "只有一面不判冲突");
+        assert!(!has_polarity_conflict(&[&positive]), "单条来源不可能冲突");
+    }
+
+    fn source(url: &str, title: &str, snippet: &str) -> ResearchSource {
+        ResearchSource {
+            reference: 1,
+            title: title.to_string(),
+            url: Some(url.to_string()),
+            origin: SourceOrigin::Web,
+            note_id: None,
+            sub_question_id: "q1".to_string(),
+            level: SourceLevel::C,
+            reliability: 3,
+            grade_reason: "测试".to_string(),
+            published_at: None,
+            fetched_at: "2026-10-11T10:00:00+08:00".to_string(),
+            applicable_version: None,
+            snippet: snippet.to_string(),
+            stale: false,
+        }
     }
 }

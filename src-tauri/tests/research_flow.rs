@@ -504,3 +504,62 @@ fn abandon_mode_writes_nothing_and_is_recorded() {
         .iter()
         .any(|step| step.step == "write" && step.detail.contains("放弃")));
 }
+
+#[test]
+fn opposing_sources_are_presented_side_by_side_and_never_become_a_conclusion() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    // 同一子问题下的两条来源互相矛盾（一条偏支持、一条偏风险）
+    fixture.note(
+        "Rust 异步调度方案推荐实践",
+        "推荐使用工作窃取队列，这种方案适用于高并发场景。",
+        Some(4),
+    );
+    fixture.note(
+        "Rust 异步调度方案的风险",
+        "这种方案存在风险：误用会拖垮运行时，不建议在生产环境直接照搬。",
+        Some(4),
+    );
+
+    let session = run_until(
+        &fixture,
+        request("Rust 异步调度方案"),
+        &["collect", "verify", "compose"],
+    );
+    let report = session.report.as_ref().expect("报告");
+
+    assert!(
+        !report.conflicts.is_empty(),
+        "对立表述必须被识别成冲突：{:?}",
+        report.pending
+    );
+    let conflicted: Vec<String> = report
+        .conflicts
+        .iter()
+        .map(|claim| claim.sub_question_id.clone())
+        .collect();
+    assert!(
+        report
+            .conclusions
+            .iter()
+            .chain(report.key_facts.iter())
+            .all(|claim| !conflicted.contains(&claim.sub_question_id)),
+        "有冲突的子问题不得进入结论段与关键事实段（不选边）"
+    );
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.kind == WarningKind::Conflict),
+        "冲突必须在警告块里可见"
+    );
+    assert!(
+        report.markdown.contains("不选边") || report.markdown.contains("争议"),
+        "报告第 3 段必须并列呈现冲突：\n{}",
+        report.markdown
+    );
+    assert!(
+        !report.markdown.contains("本次未检出冲突"),
+        "有冲突时不能显示「未检出冲突」占位文案"
+    );
+}

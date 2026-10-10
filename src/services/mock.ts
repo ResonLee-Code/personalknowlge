@@ -408,6 +408,22 @@ const RESEARCH_HITS_PER_QUESTION = 6;
 const RESEARCH_MAX_SOURCES = 24;
 const RESEARCH_REVIEW_DAYS = 180;
 
+/** 冲突判定的正/负面词表（D4 规则档，与 Rust 端同表）。 */
+const RESEARCH_POSITIVE_MARKERS = ['支持', '可以', '推荐', '适用', '可行', '优势', '有效', '最佳', '建议使用'];
+const RESEARCH_NEGATIVE_MARKERS = [
+  '不支持',
+  '不能',
+  '无法',
+  '禁止',
+  '避免',
+  '不要',
+  '风险',
+  '缺陷',
+  '失败',
+  '限制',
+  '问题',
+];
+
 const RESEARCH_LEVEL_LABEL: Record<ResearchSourceLevel, string> = {
   A: 'A 权威',
   B: 'B 可信',
@@ -673,7 +689,33 @@ function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]):
   const conclusions: ResearchClaim[] = [];
   const keyFacts: ResearchClaim[] = [];
   const pending: ResearchClaim[] = [];
+  const conflicts: ResearchClaim[] = [];
+  // 同一子问题下同时出现支持与反对/限制表述 → 并列呈现、不选边（D4 规则档）
+  const conflicted: string[] = [];
+  (session.plan?.subQuestions ?? []).forEach((question) => {
+    const evidence = session.sources.filter((source) => source.subQuestionId === question.id);
+    if (evidence.length < 2) return;
+    const polarities = evidence.map((source) => {
+      const haystack = `${source.title} ${source.snippet}`.toLowerCase();
+      const positive = RESEARCH_POSITIVE_MARKERS.filter((marker) => haystack.includes(marker)).length;
+      const negative = RESEARCH_NEGATIVE_MARKERS.filter((marker) => haystack.includes(marker)).length;
+      return positive - negative;
+    });
+    if (polarities.some((value) => value > 0) && polarities.some((value) => value < 0)) {
+      conflicted.push(question.id);
+    }
+  });
   claims.forEach((claim) => {
+    if (conflicted.includes(claim.subQuestionId)) {
+      conflicts.push({
+        ...claim,
+        text: `「${
+          session.plan?.subQuestions.find((item) => item.id === claim.subQuestionId)?.question ??
+          claim.subQuestionId
+        }」存在冲突：来源之间既有支持性表述、也有反对/限制性表述，本次不选边。${claim.text}`,
+      });
+      return;
+    }
     if (!claim.crossVerified) {
       pending.push(claim);
       return;
@@ -717,6 +759,13 @@ function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]):
     });
   }
   const stale = session.sources.filter((source) => source.stale);
+  if (conflicts.length > 0) {
+    warnings.push({
+      kind: 'conflict',
+      message: `有 ${conflicts.length} 个子问题的来源互相矛盾：已并列呈现在「争议与不确定性」段，本次不替你选边。`,
+      references: conflicts.flatMap((claim) => claim.citations),
+    });
+  }
   if (stale.length > 0) {
     warnings.push({
       kind: 'stale',
@@ -751,7 +800,7 @@ function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]):
     composer: 'template.draft',
     conclusions,
     keyFacts,
-    conflicts: [],
+    conflicts,
     kbRelations: relations,
     pending,
     references: session.sources,
@@ -821,7 +870,10 @@ function researchRenderMarkdown(session: ResearchSession, report: ResearchReport
 
   out.push('## 3. 争议与不确定性', '');
   if (report.conflicts.length === 0) {
-    out.push('_本次未检出冲突：D1/D2 没有语义比对能力，冲突检测要等模型与 Jev 介入（D4）。_', '');
+    out.push(
+      '_本次未检出冲突（规则档：只有同一子问题下同时出现支持与反对/限制表述才会判为冲突）。_',
+      '',
+    );
   } else {
     report.conflicts.forEach((claim) => out.push(`- ${claim.text} ${researchCitations(claim)}`));
     out.push('');
