@@ -48,6 +48,7 @@ const emptyStats: WorkspaceStats = {
   updatedLast7d: 0,
   updatedLast30d: 0,
   pinnedCount: 0,
+  activity: [],
 };
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({

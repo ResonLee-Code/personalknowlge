@@ -22,6 +22,7 @@ import { Skeleton } from '@/components/ui/badge';
 import { UnresolvedLinksCard } from '@/components/notes/UnresolvedLinksCard';
 import { formatRelative } from '@/lib/format';
 import { ROUTES } from '@/lib/constants';
+import { cn } from '@/lib/utils';
 import { noteService } from '@/services/noteService';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
@@ -161,6 +162,40 @@ export function DashboardPage() {
           <p className="mt-3 text-[11px] text-[var(--ink-subtle)]">
             「近 7 / 30 天更新」按笔记的最后修改时间统计；置顶笔记在所有排序下都排在最前。
           </p>
+          {/* 写作活动：近 14 天每天有更新的笔记数（对标语雀统计页的写作活动） */}
+          <div className="mt-4" data-testid="writing-activity">
+            <div className="mb-1.5 flex items-center justify-between">
+              <h3 className="text-xs font-medium text-[var(--ink-muted)]">近 14 天写作活动</h3>
+              <span className="text-[11px] text-[var(--ink-subtle)]">
+                共 {stats.activity.reduce((sum, day) => sum + day.count, 0)} 次更新
+              </span>
+            </div>
+            <div className="flex h-14 items-end gap-1">
+              {stats.activity.length === 0 ? (
+                <span className="text-[11px] text-[var(--ink-subtle)]">还没有更新记录</span>
+              ) : (
+                stats.activity.map((day) => {
+                  const max = Math.max(1, ...stats.activity.map((item) => item.count));
+                  const height = day.count === 0 ? 4 : Math.max(8, Math.round((day.count / max) * 48));
+                  return (
+                    <div
+                      key={day.date}
+                      title={`${day.date}：${day.count} 篇更新`}
+                      className={cn(
+                        'flex-1 rounded-sm transition-colors',
+                        day.count === 0 ? 'bg-[var(--surface-muted)]' : 'bg-[var(--brand)]/70',
+                      )}
+                      style={{ height }}
+                    />
+                  );
+                })
+              )}
+            </div>
+            <div className="mt-1 flex justify-between text-[10px] text-[var(--ink-subtle)]">
+              <span>{stats.activity[0]?.date ?? ''}</span>
+              <span>{stats.activity.at(-1)?.date ?? ''}</span>
+            </div>
+          </div>
         </section>
 
         <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4">

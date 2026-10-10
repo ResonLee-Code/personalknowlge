@@ -13,6 +13,14 @@ pub trait WorkspaceRepository {
     fn delete(&self, conn: &Connection, id: &str) -> Result<()>;
     fn touch(&self, conn: &Connection, id: &str, updated_at: &str) -> Result<()>;
     fn stats(&self, conn: &Connection, workspace_id: &str) -> Result<WorkspaceStats>;
+
+    /// 近 N 天有更新的活跃笔记数（按本地日期聚合，只返回有记录的日子）
+    fn activity(
+        &self,
+        conn: &Connection,
+        workspace_id: &str,
+        days: i64,
+    ) -> Result<Vec<(String, i64)>>;
 }
 
 pub struct SqliteWorkspaceRepository;
@@ -28,6 +36,29 @@ fn map_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
 }
 
 impl WorkspaceRepository for SqliteWorkspaceRepository {
+    fn activity(
+        &self,
+        conn: &Connection,
+        workspace_id: &str,
+        days: i64,
+    ) -> Result<Vec<(String, i64)>> {
+        let mut statement = conn.prepare(
+            "SELECT date(updated_at, 'localtime') AS day, COUNT(*) AS total
+             FROM notes
+             WHERE workspace_id = ?1 AND status = 'active'
+               AND date(updated_at, 'localtime') >= date('now', 'localtime', ?2)
+             GROUP BY day ORDER BY day ASC",
+        )?;
+        let rows = statement.query_map(params![workspace_id, format!("-{} days", days - 1)], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
     fn upsert(&self, conn: &Connection, workspace: &Workspace) -> Result<()> {
         conn.execute(
             "INSERT INTO workspaces (id, name, root_path, created_at, updated_at)
@@ -146,6 +177,7 @@ impl WorkspaceRepository for SqliteWorkspaceRepository {
             updated_last_7d,
             updated_last_30d,
             pinned_count,
+            activity: Vec::new(),
         })
     }
 }

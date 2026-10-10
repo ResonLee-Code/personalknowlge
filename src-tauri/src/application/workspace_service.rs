@@ -14,7 +14,8 @@ use crate::core::time::now_iso;
 use crate::domain::note::CreateNoteInput;
 use crate::domain::search::IndexStatus;
 use crate::domain::settings::{AppSettings, UpdateSettingsInput};
-use crate::domain::workspace::{Workspace, WorkspaceStats, WorkspaceSummary};
+use crate::domain::workspace::{
+    ActivityDay,Workspace, WorkspaceStats, WorkspaceSummary};
 use crate::infrastructure::db::Db;
 use crate::infrastructure::markdown_storage::{MarkdownStorage, RecentWrites};
 use crate::infrastructure::watcher::{start_best_watcher, FileChangeBatch, WatchMode};
@@ -359,6 +360,12 @@ impl WorkspaceService {
         let mut stats = context
             .db
             .with_conn(|conn| SqliteWorkspaceRepository.stats(conn, &context.workspace.id))?;
+        stats.activity = context
+            .db
+            .with_conn(|conn| SqliteWorkspaceRepository.activity(conn, &context.workspace.id, 14))?
+            .into_iter()
+            .map(|(date, count)| ActivityDay { date, count })
+            .collect();
         stats.attachment_count = context
             .storage
             .list_attachments()

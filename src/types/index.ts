@@ -54,6 +54,8 @@ export interface WorkspaceStats {
   updatedLast30d: number;
   /** 置顶笔记数 */
   pinnedCount: number;
+  /** 近 14 天写作活跃度（只含有更新的日子） */
+  activity: { date: string; count: number }[];
 }
 
 export interface WorkspaceSummary {

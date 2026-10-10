@@ -37,6 +37,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByTestId('workspace-stats')).toBeVisible();
   await expect(page.getByTestId('workspace-stats')).toContainText('正文字数');
   await expect(page.getByTestId('workspace-stats')).toContainText('置顶笔记');
+  await expect(page.getByTestId('writing-activity')).toContainText('近 14 天写作活动');
   await page.screenshot({ path: path.join(SHOTS, '02-dashboard.png') });
 
   // 4. 新建笔记并进入编辑器

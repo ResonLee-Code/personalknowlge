@@ -344,6 +344,19 @@ function computeStats() {
     updatedLast7d: updatedSince(7),
     updatedLast30d: updatedSince(30),
     pinnedCount: active.filter((note) => note.pinned).length,
+    // 近 14 天写作活跃度：按本地日期聚合（与后端 SQL 的语义一致）
+    activity: (() => {
+      const buckets = new Map<string, number>();
+      for (let offset = 13; offset >= 0; offset -= 1) {
+        const day = new Date(Date.now() - offset * 24 * 60 * 60 * 1000);
+        buckets.set(day.toISOString().slice(0, 10), 0);
+      }
+      active.forEach((note) => {
+        const day = note.updatedAt.slice(0, 10);
+        if (buckets.has(day)) buckets.set(day, (buckets.get(day) ?? 0) + 1);
+      });
+      return [...buckets.entries()].map(([date, count]) => ({ date, count }));
+    })(),
   };
 }
 

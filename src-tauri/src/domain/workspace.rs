@@ -34,6 +34,18 @@ pub struct WorkspaceStats {
     /// 置顶笔记数
     #[serde(default)]
     pub pinned_count: i64,
+    /// 近 14 天的写作活跃度（按天统计有更新的活跃笔记数，稀疏：只含有更新的日子）
+    #[serde(default)]
+    pub activity: Vec<ActivityDay>,
+}
+
+/// 单日写作活跃度（对标语雀统计页的写作活动）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityDay {
+    /// `YYYY-MM-DD`（本地日期）
+    pub date: String,
+    pub count: i64,
 }
 
 /// 工作区列表项。

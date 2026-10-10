@@ -1170,4 +1170,10 @@ fn stats_report_words_recent_updates_and_pins() {
     assert_eq!(stats.updated_last_7d, stats.note_count);
     assert_eq!(stats.updated_last_30d, stats.note_count);
     assert_eq!(stats.pinned_count, 1);
+
+    // 写作活动（近 14 天）：刚创建的笔记应落在今天这一格
+    assert!(!stats.activity.is_empty(), "应有活跃度数据");
+    let today = &stats.activity[stats.activity.len() - 1];
+    assert!(today.count >= 3, "今天应有至少 3 篇更新：{today:?}");
+    assert!(stats.activity.iter().all(|day| day.count > 0), "只返回有更新的日子");
 }
