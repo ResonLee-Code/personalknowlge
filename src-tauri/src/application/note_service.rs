@@ -61,6 +61,25 @@ impl NoteService {
         self.history().read(note_id, entry_id)
     }
 
+    /// 把当前内容存成命名版本（对标语雀「保存为版本」）。
+    pub fn history_save_version(&self, note_id: &str, label: &str) -> Result<HistoryEntry> {
+        let note = self.note_or_err(note_id)?;
+        let raw = self.ctx.storage.read_raw(&note.file_path)?;
+        self.history().save_version(&note.id, &raw, label)
+    }
+
+    /// 给已有快照命名 / 清除命名，返回最新列表。
+    pub fn history_label(
+        &self,
+        note_id: &str,
+        entry_id: &str,
+        label: Option<&str>,
+    ) -> Result<Vec<HistoryEntry>> {
+        self.note_or_err(note_id)?;
+        self.history().label(note_id, entry_id, label)?;
+        self.history().list(note_id)
+    }
+
     pub fn history_remove(&self, note_id: &str, entry_id: &str) -> Result<usize> {
         self.note_or_err(note_id)?;
         self.history().remove(note_id, entry_id)?;

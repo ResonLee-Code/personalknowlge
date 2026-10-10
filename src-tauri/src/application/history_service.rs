@@ -9,6 +9,7 @@
 //! - 每篇最多保留 50 份，超出后按时间删最旧的；
 //! - 内容与最新快照完全相同时跳过。
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,7 +39,15 @@ pub struct HistoryEntry {
     pub title: String,
     /// 正文前 120 字预览
     pub preview: String,
+    /// 用户命名的版本名（对标语雀的「保存为版本」）；未命名时为 None
+    #[serde(default)]
+    pub label: Option<String>,
 }
+
+/// 版本名在同一目录下的存储文件（entryId → label）。
+const LABELS_FILE: &str = "labels.json";
+/// 版本名长度上限。
+const MAX_LABEL_CHARS: usize = 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,24 +72,65 @@ impl HistoryService {
     ///
     /// 返回是否真的写了快照（便于测试与日志）。
     pub fn capture(&self, note_id: &str, previous: &str) -> Result<bool> {
-        self.capture_inner(note_id, previous, false)
+        // 自动留档：遵守 60 秒节流，避免自动保存把历史刷爆
+        Ok(self.capture_inner(note_id, previous, false, false)?.is_some())
     }
 
     /// 强制留档（还原、显式保存版本时使用，忽略 60 秒节流）。
     pub fn capture_forced(&self, note_id: &str, previous: &str) -> Result<bool> {
-        self.capture_inner(note_id, previous, true)
+        Ok(self.capture_inner(note_id, previous, true, false)?.is_some())
     }
 
-    fn capture_inner(&self, note_id: &str, previous: &str, force: bool) -> Result<bool> {
+    /// 把当前内容存成**命名版本**（对标语雀的「保存为版本」）。
+    ///
+    /// 与自动留档的区别：忽略 60 秒节流，且**内容未变也会新建一份**（用户显式操作）。
+    pub fn save_version(&self, note_id: &str, content: &str, label: &str) -> Result<HistoryEntry> {
+        let trimmed = normalize_label(label)?;
+        let entry_id = self
+            .capture_inner(note_id, content, true, true)?
+            .ok_or_else(|| AppError::new(ErrorCode::InternalError, "保存版本失败：未能写入快照。"))?;
+        self.label(note_id, &entry_id, Some(&trimmed))?;
+        self.list(note_id)?
+            .into_iter()
+            .find(|entry| entry.entry_id == entry_id)
+            .ok_or_else(|| AppError::new(ErrorCode::InternalError, "保存版本失败：快照不可读。"))
+    }
+
+    /// 给已有快照命名；`label` 为空则清除命名。
+    pub fn label(&self, note_id: &str, entry_id: &str, label: Option<&str>) -> Result<()> {
+        let dir = self.note_dir(note_id)?;
+        // 校验快照存在（不存在直接报错，避免写出悬空命名）
+        let _ = self.entry_path(note_id, entry_id)?;
+        let mut labels = self.read_labels(&dir);
+        match label.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(value) => {
+                labels.insert(entry_id.to_string(), normalize_label(value)?);
+            }
+            None => {
+                labels.remove(entry_id);
+            }
+        }
+        self.write_labels(&dir, &labels)
+    }
+
+    fn capture_inner(
+        &self,
+        note_id: &str,
+        previous: &str,
+        force: bool,
+        force_new: bool,
+    ) -> Result<Option<String>> {
         let dir = self.note_dir(note_id)?;
         let hash = sha256_hex_str(previous);
         let entries = self.list(note_id)?;
 
         if let Some(newest) = entries.first() {
             let newest_path = dir.join(format!("{}.md", newest.entry_id));
-            if let Ok(text) = fs::read_to_string(&newest_path) {
-                if sha256_hex_str(&text) == hash {
-                    return Ok(false); // 内容没变，不必重复留档
+            if !force_new {
+                if let Ok(text) = fs::read_to_string(&newest_path) {
+                    if sha256_hex_str(&text) == hash {
+                        return Ok(None); // 内容没变，不必重复留档
+                    }
                 }
             }
             if !force {
@@ -91,7 +141,7 @@ impl HistoryService {
                     }) {
                         if elapsed.as_secs() < MIN_INTERVAL_SECS as u64 {
                             // 自动保存期间太密集：保留已有的那一份（它代表本次编辑开始前的状态）
-                            return Ok(false);
+                            return Ok(None);
                         }
                     }
                 }
@@ -100,12 +150,52 @@ impl HistoryService {
 
         fs::create_dir_all(&dir)?;
         let stamp = chrono::Local::now().format("%Y%m%dT%H%M%S%3f").to_string();
-        let entry_id = format!("{stamp}-{}", &hash[..8.min(hash.len())]);
+        let base_id = format!("{stamp}-{}", &hash[..8.min(hash.len())]);
+        // 同名文件已存在（同毫秒 + 同内容再存一次）时追加序号，保证不覆盖
+        let mut entry_id = base_id.clone();
+        let mut suffix = 1;
+        while dir.join(format!("{entry_id}.md")).exists() {
+            suffix += 1;
+            entry_id = format!("{base_id}-{suffix}");
+        }
         self.ctx
             .storage
             .write_atomic_absolute(&dir.join(format!("{entry_id}.md")), previous.as_bytes())?;
         self.prune(note_id, &dir)?;
-        Ok(true)
+        Ok(Some(entry_id))
+    }
+
+    /// 读取版本名（容忍缺失与损坏，坏文件按「没有命名」处理）。
+    fn read_labels(&self, dir: &Path) -> HashMap<String, String> {
+        let path = dir.join(LABELS_FILE);
+        let Ok(raw) = fs::read_to_string(&path) else {
+            return HashMap::new();
+        };
+        serde_json::from_str::<HashMap<String, String>>(&raw).unwrap_or_default()
+    }
+
+    fn write_labels(&self, dir: &Path, labels: &HashMap<String, String>) -> Result<()> {
+        let path = dir.join(LABELS_FILE);
+        if labels.is_empty() {
+            // 没有命名时不留空文件（保持目录干净）
+            if path.exists() {
+                fs::remove_file(&path)?;
+            }
+            return Ok(());
+        }
+        // 按 key 排序写出，保证文件内容稳定（便于人工查看与 diff）
+        let mut sorted: Vec<(&String, &String)> = labels.iter().collect();
+        sorted.sort();
+        let map: serde_json::Map<String, serde_json::Value> = sorted
+            .into_iter()
+            .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
+            .collect();
+        let json = serde_json::to_string_pretty(&serde_json::Value::Object(map))
+            .unwrap_or_else(|_| "{}".to_string());
+        self.ctx
+            .storage
+            .write_atomic_absolute(&path, format!("{json}\n").as_bytes())?;
+        Ok(())
     }
 
     /// 列出快照（新的在前）。
@@ -114,6 +204,7 @@ impl HistoryService {
         if !dir.is_dir() {
             return Ok(Vec::new());
         }
+        let labels = self.read_labels(&dir);
         let mut entries = Vec::new();
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;
@@ -121,6 +212,7 @@ impl HistoryService {
             if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md") {
                 continue;
             }
+
             let Some(entry_id) = path.file_stem().map(|stem| stem.to_string_lossy().to_string())
             else {
                 continue;
@@ -158,7 +250,8 @@ impl HistoryService {
                 }
                 Err(_) => (String::new(), String::new()),
             };
-            entries.push(HistoryEntry { entry_id, saved_at, bytes, title, preview });
+            let label = labels.get(&entry_id).cloned();
+            entries.push(HistoryEntry { entry_id, saved_at, bytes, title, preview, label });
         }
         // 文件名以时间戳开头，字典序倒排即「新的在前」
         entries.sort_by(|left, right| right.entry_id.cmp(&left.entry_id));
@@ -232,4 +325,19 @@ fn saved_at_from(metadata: &fs::Metadata) -> String {
         }
         Err(_) => String::new(),
     }
+}
+
+/// 版本名规范化：去空白、限长、拒绝控制字符。
+fn normalize_label(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::new(ErrorCode::InvalidInput, "版本名不能为空。"));
+    }
+    let cleaned: String = trimmed.chars().filter(|ch| !ch.is_control()).collect();
+    let limited: String = cleaned.chars().take(MAX_LABEL_CHARS).collect();
+    let limited = limited.trim().to_string();
+    if limited.is_empty() {
+        return Err(AppError::new(ErrorCode::InvalidInput, "版本名不合法。"));
+    }
+    Ok(limited)
 }

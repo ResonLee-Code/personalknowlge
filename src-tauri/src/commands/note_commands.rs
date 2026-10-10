@@ -112,6 +112,29 @@ pub async fn note_history_restore(
     run(move || NoteService::new(context).history_restore(&note_id, &entry_id)).await
 }
 
+/// 版本历史：把当前内容存成命名版本（对标语雀「保存为版本」）。
+#[tauri::command]
+pub async fn note_history_save_version(
+    state: State<'_, AppState>,
+    note_id: String,
+    label: String,
+) -> Result<HistoryEntry> {
+    let context = state.inner.context()?;
+    run(move || NoteService::new(context).history_save_version(&note_id, &label)).await
+}
+
+/// 版本历史：给某个快照命名（`label` 为空则清除命名），返回最新列表。
+#[tauri::command]
+pub async fn note_history_label(
+    state: State<'_, AppState>,
+    note_id: String,
+    entry_id: String,
+    label: Option<String>,
+) -> Result<Vec<HistoryEntry>> {
+    let context = state.inner.context()?;
+    run(move || NoteService::new(context).history_label(&note_id, &entry_id, label.as_deref())).await
+}
+
 /// 版本历史：删除某个快照（返回剩余数量）。
 #[tauri::command]
 pub async fn note_history_remove(

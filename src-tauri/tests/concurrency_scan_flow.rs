@@ -21,7 +21,6 @@ use personal_knowledge_os_lib::domain::note::CreateNoteInput;
 use personal_knowledge_os_lib::infrastructure::watcher::{
     FileChange, FileChangeBatch, FileChangeKind,
 };
-use personal_knowledge_os_lib::repositories::NoteRepository;
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 

@@ -334,8 +334,11 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 | `note_history_read` | `{ noteId, entryId }` | `HistoryContent`（content = 完整 Markdown，body = 纯正文） |
 | `note_history_restore` | `{ noteId, entryId }` | `NoteDetail` |
 | `note_history_remove` | `{ noteId, entryId }` | `usize`（剩余快照数） |
+| `note_history_save_version` | `{ noteId, label }` | `HistoryEntry`（把当前内容存成命名版本） |
+| `note_history_label` | `{ noteId, entryId, label }` | `HistoryEntry[]`（`label` 为 null / 空串 = 清除命名） |
 
-- 快照存 `.knowledge/history/<noteId>/<stamp>-<hash8>.md`（见 DATABASE_SCHEMA 第 4 节）；
+- 快照存 `.knowledge/history/<noteId>/<stamp>-<hash8>.md`，命名版本另存
+  `labels.json`（`entryId → label`，见 DATABASE_SCHEMA 第 4 节）；
 - 留档时机：`note_save` 覆盖写入前（正文确实变化时）；还原前会强制留档当前内容；
 - `note_history_restore` **只回滚正文**（标题 / 标签 / 分类 / 父文档保持当前值），
   写入路径仍走 `note_save`，因此索引、双链、关系都会照常刷新；

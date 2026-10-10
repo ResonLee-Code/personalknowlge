@@ -1,4 +1,4 @@
-import { Clock, History, Loader2, RotateCcw, Trash2 } from 'lucide-react';
+import { Clock, History, Loader2, RotateCcw, Tag, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { diffLines, diffStats } from '@/lib/diff';
 import { errorMessage, formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -44,6 +45,11 @@ export function HistoryDialog({
   const [rightId, setRightId] = useState<string>(CURRENT);
   const [contents, setContents] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  /** 「保存当前为版本」的版本名输入 */
+  const [versionName, setVersionName] = useState('');
+  /** 正在内联命名的快照 id 与其输入值 */
+  const [namingId, setNamingId] = useState<string | null>(null);
+  const [namingValue, setNamingValue] = useState('');
 
   /** 首次加载：直接内联在 effect 里（避免在 effect 中调用会同步 setState 的函数）。 */
   useEffect(() => {
@@ -142,6 +148,39 @@ export function HistoryDialog({
     }
   };
 
+  /** 把当前正文存成一个命名版本（对标语雀「保存为版本」）。 */
+  const saveVersion = async () => {
+    const label = versionName.trim();
+    if (!label) {
+      toast.error('请填写版本名');
+      return;
+    }
+    setBusy(true);
+    try {
+      await noteService.historySaveVersion(noteId, label);
+      toast.success(`已保存版本「${label}」`);
+      setVersionName('');
+      await reload();
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 命名已有快照（空值 = 清除命名）。 */
+  const renameVersion = async (entryId: string, label: string) => {
+    try {
+      const list = await noteService.historyLabel(noteId, entryId, label.trim() || null);
+      setEntries(list);
+      setNamingId(null);
+      setNamingValue('');
+      toast.success(label.trim() ? '已命名该版本' : '已清除版本名');
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    }
+  };
+
   const remove = async (entryId: string) => {
     try {
       const remaining = await noteService.historyRemove(noteId, entryId);
@@ -170,7 +209,30 @@ export function HistoryDialog({
         {error ? <p className="text-xs text-red-500">{error}</p> : null}
 
         <div className="grid min-h-0 gap-3 md:grid-cols-[240px_1fr]">
-          <div className="max-h-[46vh] min-h-[160px] space-y-1 overflow-auto rounded-md border border-[var(--border-subtle)] p-1.5">
+          <div className="flex min-h-0 flex-col gap-1.5">
+            {/* 对标语雀「保存为版本」：把当前正文显式存成一个命名版本 */}
+            <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] p-1.5">
+              <Input
+                value={versionName}
+                data-testid="history-version-name"
+                placeholder="版本名，例如 v1 交付版"
+                className="h-7 text-xs"
+                onChange={(event) => setVersionName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void saveVersion();
+                }}
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                data-testid="history-save-version"
+                disabled={busy}
+                onClick={() => void saveVersion()}
+              >
+                保存为版本
+              </Button>
+            </div>
+            <div className="max-h-[42vh] min-h-[140px] space-y-1 overflow-auto rounded-md border border-[var(--border-subtle)] p-1.5">
             {entries === null ? (
               <div className="space-y-1.5 p-1">
                 {[0, 1, 2].map((index) => (
@@ -213,6 +275,15 @@ export function HistoryDialog({
                       onClick={() => setLeftId(entry.entryId)}
                       className="block w-full text-left"
                     >
+                      {entry.label ? (
+                        <span
+                          data-testid="history-entry-label"
+                          className="mb-0.5 flex items-center gap-1 truncate font-medium text-[var(--brand)]"
+                        >
+                          <Tag className="h-3 w-3" />
+                          {entry.label}
+                        </span>
+                      ) : null}
                       <span className="flex items-center gap-1 text-[var(--ink)]">
                         <Clock className="h-3 w-3 text-[var(--ink-subtle)]" />
                         {formatDateTime(entry.savedAt)}
@@ -223,7 +294,42 @@ export function HistoryDialog({
                         </span>
                       ) : null}
                     </button>
+                    {namingId === entry.entryId ? (
+                      <div className="mt-1 flex items-center gap-1">
+                        <Input
+                          autoFocus
+                          value={namingValue}
+                          data-testid="history-label-input"
+                          placeholder="版本名（留空即清除）"
+                          className="h-6 text-[11px]"
+                          onChange={(event) => setNamingValue(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') void renameVersion(entry.entryId, namingValue);
+                            if (event.key === 'Escape') setNamingId(null);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          data-testid="history-label-save"
+                          className="shrink-0 text-[10px] text-[var(--brand)] underline decoration-dotted"
+                          onClick={() => void renameVersion(entry.entryId, namingValue)}
+                        >
+                          保存
+                        </button>
+                      </div>
+                    ) : (
                     <div className="mt-1 flex items-center gap-2 text-[10px]">
+                      <button
+                        type="button"
+                        data-testid="history-label-edit"
+                        onClick={() => {
+                          setNamingId(entry.entryId);
+                          setNamingValue(entry.label ?? '');
+                        }}
+                        className="underline decoration-dotted text-[var(--ink-subtle)] hover:text-[var(--brand)]"
+                      >
+                        {entry.label ? '改名' : '命名'}
+                      </button>
                       <button
                         type="button"
                         onClick={() => setRightId(entry.entryId)}
@@ -245,10 +351,12 @@ export function HistoryDialog({
                         删除
                       </button>
                     </div>
+                    )}
                   </div>
                 ))}
               </>
             )}
+            </div>
           </div>
 
           <div className="flex min-h-0 flex-col rounded-md border border-[var(--border-subtle)]">

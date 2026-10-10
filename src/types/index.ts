@@ -602,6 +602,8 @@ export interface HistoryEntry {
   title: string;
   /** 正文前 120 字预览 */
   preview: string;
+  /** 用户命名的版本名（对标语雀「保存为版本」）；未命名为 null */
+  label?: string | null;
 }
 
 export interface HistoryContent {

@@ -73,6 +73,8 @@ pub fn run() {
             commands::note_commands::note_history_read,
             commands::note_commands::note_history_restore,
             commands::note_commands::note_history_remove,
+            commands::note_commands::note_history_save_version,
+            commands::note_commands::note_history_label,
             commands::batch_commands::notes_move_batch,
             commands::batch_commands::notes_tag_batch,
             commands::batch_commands::notes_delete_batch,

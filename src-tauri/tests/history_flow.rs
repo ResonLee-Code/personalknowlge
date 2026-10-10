@@ -204,3 +204,73 @@ fn purging_a_note_removes_its_history_directory() {
     fixture.notes().purge(&note).expect("永久删除");
     assert!(!fixture.history_dir(&note).exists(), "历史目录应一并清理");
 }
+
+#[test]
+fn named_versions_can_be_saved_and_renamed() {
+    let fixture = Fixture::new();
+    let note = fixture
+        .notes()
+        .create(CreateNoteInput {
+            title: "命名版本笔记".into(),
+            category_id: None,
+            initial_content: Some("第一版".into()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("创建")
+        .note
+        .id;
+
+    // 保存当前内容为命名版本（对标语雀「保存为版本」）
+    let saved = fixture
+        .notes()
+        .history_save_version(&note, "v1 交付版")
+        .expect("保存版本");
+    assert_eq!(saved.label.as_deref(), Some("v1 交付版"));
+    assert!(saved.preview.contains("第一版"), "{}", saved.preview);
+
+    // 内容没变也能再存一版（显式操作，不做去重）
+    let second = fixture
+        .notes()
+        .history_save_version(&note, "v1 复核版")
+        .expect("再保存一版");
+    assert_ne!(second.entry_id, saved.entry_id, "两次显式保存应是两份快照");
+    let list = fixture.notes().history_list(&note).expect("列表");
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].label.as_deref(), Some("v1 复核版"), "新的在前");
+
+    // 重命名已有版本名；空串 = 清除命名
+    let renamed = fixture
+        .notes()
+        .history_label(&note, &saved.entry_id, Some("  v1 正式发布  "))
+        .expect("命名");
+    let target = renamed
+        .iter()
+        .find(|entry| entry.entry_id == saved.entry_id)
+        .expect("找到该快照");
+    assert_eq!(target.label.as_deref(), Some("v1 正式发布"), "命名应去掉首尾空白");
+
+    let cleared = fixture
+        .notes()
+        .history_label(&note, &saved.entry_id, Some("   "))
+        .expect("清除命名");
+    let target = cleared
+        .iter()
+        .find(|entry| entry.entry_id == saved.entry_id)
+        .expect("找到该快照");
+    assert!(target.label.is_none(), "空白命名视为清除");
+
+    // 命名文件是可读的 JSON，且不会把 labels.json 当快照读进列表
+    let dir = fixture.history_dir(&note);
+    let labels = std::fs::read_to_string(dir.join("labels.json")).expect("命名文件存在");
+    assert!(labels.contains("v1 复核版"), "{labels}");
+    assert_eq!(fixture.notes().history_list(&note).expect("列表").len(), 2);
+
+    // 给不存在的快照命名应报错（避免悬空命名）
+    assert!(fixture
+        .notes()
+        .history_label(&note, "20200101T000000000-deadbeef", Some("x"))
+        .is_err());
+    // 空版本名应被拒绝
+    assert!(fixture.notes().history_save_version(&note, "   ").is_err());
+}

@@ -458,20 +458,22 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   page.once('dialog', (dialog) => void dialog.accept());
   await page.getByTestId('history-restore').click();
   await expect(page.getByText(/已还原到该历史版本/)).toBeVisible({ timeout: 10_000 });
-  if (process.env.PKOS_DEBUG_HISTORY) {
-
-    const state = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem('pkos.mock.state.v1') ?? '{}'),
-    );
-    console.log('[DBG] contents:', JSON.stringify(state.contents));
-    console.log('[DBG] history keys:', JSON.stringify(Object.keys(state.history ?? {})));
-    console.log(
-      '[DBG] history newest:',
-      JSON.stringify((Object.values(state.history ?? {})[0] ?? []).slice(0, 3)),
-    );
-  }
   await page.screenshot({ path: path.join(SHOTS, '34-history-restored.png') });
   await expect(page.locator('.cm-content')).not.toContainText('历史版本测试行');
+
+  // 命名版本（对标语雀「保存为版本」）：给当前内容打版本名，再清除
+  await page.getByRole('button', { name: '更多操作' }).click();
+  await page.getByTestId('note-menu-history').click();
+  await page.getByTestId('history-version-name').fill('v1 验收版');
+  await page.getByTestId('history-save-version').click();
+  await expect(page.getByTestId('history-entry-label').first()).toContainText('v1 验收版');
+  await page.screenshot({ path: path.join(SHOTS, '34b-history-named-version.png') });
+
+  await page.getByTestId('history-label-edit').first().click();
+  await page.getByTestId('history-label-input').fill('');
+  await page.getByTestId('history-label-save').click();
+  await expect(page.getByTestId('history-entry-label')).toHaveCount(0);
+  await page.getByRole('button', { name: '关闭' }).last().click();
 
   // 29. 删除有子文档的笔记：默认保留子文档，可勾选一起删除（V1.2.1 P2）
   await page.goto('/#/notes');

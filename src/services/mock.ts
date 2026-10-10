@@ -55,6 +55,8 @@ interface MockHistoryEntry {
   entryId: string;
   savedAt: string;
   content: string;
+  /** 命名版本（对标语雀「保存为版本」） */
+  label?: string;
 }
 
 type Listener = (payload: unknown) => void;
@@ -1194,6 +1196,7 @@ export async function handleMockInvoke(
       return (state.history[noteId] ?? []).map((entry) => ({
         entryId: entry.entryId,
         savedAt: entry.savedAt,
+        label: entry.label ?? null,
         bytes: entry.content.length,
         title: entry.content.match(/^#\s+(.+)$/m)?.[1] ?? '',
         preview: entry.content
@@ -1226,6 +1229,60 @@ export async function handleMockInvoke(
       note.updatedAt = now();
       persist();
       return toDetail(note);
+    }
+    case 'note_history_save_version': {
+      requireWorkspace();
+      const noteId = String(payload.noteId);
+      const label = String(payload.label ?? '').trim();
+      if (!label) fail('INVALID_INPUT', '版本名不能为空。');
+      const content = state.contents[noteId];
+      if (content === undefined) fail('NOTE_NOT_FOUND', '笔记不存在。');
+      const entry = {
+        entryId: `${Date.now()}-v${Math.random().toString(36).slice(2, 8)}`,
+        savedAt: now(),
+        content,
+        label,
+      };
+      // 与后端一致：显式保存不去重，且每篇最多保留 50 份
+      state.history[noteId] = [entry, ...(state.history[noteId] ?? [])].slice(0, 50);
+      persist();
+      return {
+        entryId: entry.entryId,
+        savedAt: entry.savedAt,
+        label: entry.label,
+        bytes: entry.content.length,
+        title: entry.content.match(/^#\s+(.+)$/m)?.[1] ?? '',
+        preview: entry.content
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line && !line.startsWith('#'))
+          .join(' ')
+          .slice(0, 120),
+      };
+    }
+    case 'note_history_label': {
+      requireWorkspace();
+      const noteId = String(payload.noteId);
+      const raw = String(payload.label ?? '').trim().slice(0, 60);
+      const entries = state.history[noteId] ?? [];
+      const entry = entries.find((item) => item.entryId === payload.entryId);
+      if (!entry) fail('NOTE_NOT_FOUND', '该历史版本已不存在。');
+      if (raw) entry.label = raw;
+      else delete entry.label;
+      persist();
+      return entries.map((item) => ({
+        entryId: item.entryId,
+        savedAt: item.savedAt,
+        label: item.label ?? null,
+        bytes: item.content.length,
+        title: item.content.match(/^#\s+(.+)$/m)?.[1] ?? '',
+        preview: item.content
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line && !line.startsWith('#'))
+          .join(' ')
+          .slice(0, 120),
+      }));
     }
     case 'note_history_remove': {
       requireWorkspace();

@@ -77,3 +77,43 @@ describe('HistoryDialog', () => {
     expect(screen.getByTestId('history-restore')).toBeDisabled();
   });
 });
+
+describe('HistoryDialog 命名版本（对标语雀「保存为版本」）', () => {
+  it('可以把当前内容存成命名版本，并在列表里显示版本名', async () => {
+    mockApi();
+    const saveVersion = vi
+      .spyOn(noteService, 'historySaveVersion')
+      .mockResolvedValue({ ...entries[0]!, entryId: 'e3', label: 'v1 交付版' });
+    // 保存后重新拉取列表应带上新版本
+    vi.mocked(noteService.historyList)
+      .mockResolvedValueOnce(entries)
+      .mockResolvedValue([{ ...entries[0]!, entryId: 'e3', label: 'v1 交付版' }, ...entries]);
+
+    render(<HistoryDialog noteId="note_1" currentContent={'当前正文'} onClose={() => {}} />);
+    await screen.findAllByTestId('history-entry');
+
+    await userEvent.type(screen.getByTestId('history-version-name'), 'v1 交付版');
+    await userEvent.click(screen.getByTestId('history-save-version'));
+
+    await waitFor(() => expect(saveVersion).toHaveBeenCalledWith('note_1', 'v1 交付版'));
+    expect(await screen.findAllByTestId('history-entry-label')).toHaveLength(1);
+    expect(screen.getByTestId('history-entry-label')).toHaveTextContent('v1 交付版');
+  });
+
+  it('可以给已有快照命名与改名（留空即清除）', async () => {
+    mockApi();
+    const label = vi
+      .spyOn(noteService, 'historyLabel')
+      .mockResolvedValue([{ ...entries[0]!, label: '重要节点' }, entries[1]!]);
+
+    render(<HistoryDialog noteId="note_1" currentContent={''} onClose={() => {}} />);
+    const items = await screen.findAllByTestId('history-entry');
+
+    await userEvent.click(items[0]!.querySelector('[data-testid="history-label-edit"]') as HTMLElement);
+    await userEvent.type(screen.getByTestId('history-label-input'), '重要节点');
+    await userEvent.click(screen.getByTestId('history-label-save'));
+
+    await waitFor(() => expect(label).toHaveBeenCalledWith('note_1', 'e2', '重要节点'));
+    expect(await screen.findByTestId('history-entry-label')).toHaveTextContent('重要节点');
+  });
+});

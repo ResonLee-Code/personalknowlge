@@ -70,6 +70,14 @@ export const noteService = {
   historyRestore: (noteId: string, entryId: string) =>
     call<NoteDetail>('note_history_restore', { noteId, entryId }),
 
+  /** 版本历史：把当前内容存成命名版本（对标语雀「保存为版本」） */
+  historySaveVersion: (noteId: string, label: string) =>
+    call<HistoryEntry>('note_history_save_version', { noteId, label }),
+
+  /** 版本历史：命名 / 清除命名（label 传 null 或空串即清除），返回最新列表 */
+  historyLabel: (noteId: string, entryId: string, label: string | null) =>
+    call<HistoryEntry[]>('note_history_label', { noteId, entryId, label }),
+
   /** 版本历史：删除某个快照（返回剩余数量） */
   historyRemove: (noteId: string, entryId: string) =>
     call<number>('note_history_remove', { noteId, entryId }),
