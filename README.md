@@ -148,6 +148,7 @@ MyKnowledge/
 - [API 契约](./docs/API_CONTRACT.md)
 - [界面规范](./docs/UI_SPECIFICATION.md)
 - [开发规范](./docs/DEVELOPMENT_RULES.md)
+- [构建命令速查（只编译 / 出安装包 / 发版）](./docs/BUILD_COMMANDS.md)
 - [开发路线](./docs/ROADMAP.md)
 - [功能规划（对标语雀/飞书 + 知识图谱）](./docs/FEATURE_PLANNING.md)
 - [语雀官方公开手册归档（对标查阅用，1222 篇）](./docs/yuque-manuals/README.md)

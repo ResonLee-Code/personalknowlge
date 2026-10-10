@@ -161,6 +161,8 @@
   `/api/docs/{slug}?mode=markdown` 的 `data.sourcecode`），
   [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) 第 7 节改为逐条带出处的版本，
   原始摘录见 [research/YUQUE_FEATURE_NOTES.md](./research/YUQUE_FEATURE_NOTES.md)；
+- 新增 [BUILD_COMMANDS.md](./BUILD_COMMANDS.md)：按「只编译可执行文件 / 单平台出包 / 三平台发版」
+  整理构建命令，含产物路径、实测耗时与常见问题（命令与脚本逐一核对过仓库现状）；
 - [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) / [API_CONTRACT.md](./API_CONTRACT.md) /
   [UI_SPECIFICATION.md](./UI_SPECIFICATION.md) 同步 007 迁移、`note_set_parent` 与界面行为。
 
