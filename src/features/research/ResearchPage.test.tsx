@@ -69,6 +69,7 @@ function composed(): ResearchSession {
         fetchedAt: '2026-10-10T10:00:00+08:00',
         snippet: '实现要点在于任务唤醒。',
         stale: false,
+        credibility: 0.9,
       },
       {
         reference: 2,
@@ -88,6 +89,7 @@ function composed(): ResearchSession {
       generatedAt: '2026-10-11T10:05:00+08:00',
       dataCutoff: '2026-10-11',
       composer: 'template.draft',
+      decisionProvider: 'rule',
       conclusions: [],
       keyFacts: [],
       conflicts: [],
@@ -316,5 +318,39 @@ describe('ResearchPage（V1.2.1 D2）', () => {
 
     await waitFor(() => expect(collect).not.toHaveBeenCalled());
     expect(screen.queryByTestId('research-network-confirm')).not.toBeInTheDocument();
+  });
+
+  it('报告与来源展示决策层打分：置信度与可信度（D5 规则档）', async () => {
+    const withScores = composed();
+    withScores.report = {
+      ...withScores.report!,
+      keyFacts: [
+        {
+          subQuestionId: 'q2',
+          text: '关于「主流方案」：任务唤醒与批量窃取',
+          citations: [1, 2],
+          bestLevel: 'A',
+          crossVerified: true,
+          fresh: true,
+          relatedNotes: ['note_1'],
+          confidence: 0.85,
+        },
+      ],
+    };
+    vi.spyOn(researchService, 'start').mockResolvedValue(withScores);
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+
+    // 来源列表显示可信度（来自决策层，不是又一套前端规则）
+    const sources = await screen.findByTestId('research-sources');
+    expect(sources).toHaveTextContent('可信度 90%');
+
+    // 报告头显示打分来源；关键事实表带置信度列
+    const report = screen.getByTestId('research-report');
+    expect(report).toHaveTextContent('打分 rule');
+    // 平均置信度由后端分数汇总得到（0.85 → 高）
+    expect(screen.getByTestId('research-avg-confidence')).toHaveTextContent('平均置信度 高 0.85');
   });
 });

@@ -641,6 +641,30 @@ function researchStale(note: Note, windowDays: number): boolean {
   return ageDays > windowDays;
 }
 
+/**
+ * 决策层打分（§9.6）：规则档下的来源可信度 = 一半「关键词命中率」+ 一半「级别折算」，
+ * 与 Rust 端 `blended_credibility` 同口径；接 Jev / 本地模型时只换这一处。
+ */
+function researchBlendedCredibility(hitRatio: number | null, reliability: number): number {
+  const base = Math.min(5, Math.max(1, reliability)) / 5;
+  const score = hitRatio === null ? base : Math.min(1, Math.max(0, hitRatio));
+  return Math.min(1, Math.max(0, 0.5 * score + 0.5 * base));
+}
+
+/** 结论置信度：支持来源可信度的均值 × 交叉验证系数（单一来源打 6 折）。 */
+function researchClaimConfidence(credibilities: number[], independent: number): number {
+  if (credibilities.length === 0) return 0;
+  const mean = credibilities.reduce((sum, value) => sum + value, 0) / credibilities.length;
+  return Math.min(1, Math.max(0, mean * (independent >= 2 ? 1 : 0.6)));
+}
+
+/** 置信度人读标签（与 Rust `confidence_label` 同阈值）。 */
+function researchConfidenceLabel(value: number): '高' | '中' | '低' {
+  if (value >= 0.7) return '高';
+  if (value >= 0.45) return '中';
+  return '低';
+}
+
 /** 验证阶段：按子问题汇总（≥2 个独立来源才算交叉验证）。 */
 function researchVerifyClaims(session: ResearchSession): ResearchClaim[] {
   const questions = session.plan?.subQuestions ?? [];
@@ -655,10 +679,17 @@ function researchVerifyClaims(session: ResearchSession): ResearchClaim[] {
         crossVerified: false,
         fresh: true,
         relatedNotes: [],
+        confidence: 0,
       };
     }
     const independent = Array.from(
       new Set(evidence.map((source) => source.noteId ?? `ref${source.reference}`)),
+    );
+    const confidence = researchClaimConfidence(
+      evidence.map((source) =>
+        source.credibility ?? researchBlendedCredibility(null, source.reliability),
+      ),
+      independent.length,
     );
     const quotes = evidence
       .slice(0, 2)
@@ -679,6 +710,7 @@ function researchVerifyClaims(session: ResearchSession): ResearchClaim[] {
       relatedNotes: evidence
         .map((source) => source.noteId)
         .filter((value): value is string => Boolean(value)),
+      confidence,
     };
   });
 }
@@ -798,6 +830,7 @@ function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]):
     generatedAt: now(),
     dataCutoff: researchIsoDate(),
     composer: 'template.draft',
+    decisionProvider: 'rule',
     conclusions,
     keyFacts,
     conflicts,
@@ -824,7 +857,11 @@ function researchRenderMarkdown(session: ResearchSession, report: ResearchReport
   const plan = session.plan;
   const out: string[] = [];
   out.push(`# 调研报告：${plan?.topic ?? session.request.topic}`, '');
-  out.push(`> **资料截至 ${report.dataCutoff}** · 生成方式 \`${report.composer}\`（未接入模型）`);
+  out.push(
+    `> **资料截至 ${report.dataCutoff}** · 生成方式 \`${report.composer}\`（未接入模型） · 打分 \`${
+      report.decisionProvider ?? 'rule'
+    }\``,
+  );
   out.push(
     `> 会话 \`${session.id}\` · 子问题 ${plan?.subQuestions.length ?? 0} 个 · 来源 ${report.references.length} 条`,
     '',
@@ -843,7 +880,11 @@ function researchRenderMarkdown(session: ResearchSession, report: ResearchReport
     out.push('_本次没有达到「≥2 个独立来源」的结论。_', '');
   } else {
     report.conclusions.forEach((claim, index) => {
-      out.push(`${index + 1}. ${claim.text} ${researchCitations(claim)}`);
+      out.push(
+        `${index + 1}. ${claim.text} ${researchCitations(claim)} （置信度 ${researchConfidenceLabel(
+          claim.confidence ?? 0,
+        )}）`,
+      );
     });
     out.push('');
   }
@@ -852,8 +893,8 @@ function researchRenderMarkdown(session: ResearchSession, report: ResearchReport
   if (report.keyFacts.length === 0) {
     out.push('_没有交叉验证过的事实。_', '');
   } else {
-    out.push('| 结论 | 支持来源（级别） | 是否交叉验证 | 时效 |');
-    out.push('| --- | --- | --- | --- |');
+    out.push('| 结论 | 支持来源（级别） | 是否交叉验证 | 时效 | 置信度 |');
+    out.push('| --- | --- | --- | --- | --- |');
     report.keyFacts.forEach((claim) => {
       const levels = report.references
         .filter((source) => claim.citations.includes(source.reference))
@@ -862,7 +903,9 @@ function researchRenderMarkdown(session: ResearchSession, report: ResearchReport
       out.push(
         `| ${researchEscapeTable(claim.text)} | ${researchEscapeTable(levels)} | ${
           claim.crossVerified ? '是' : '否'
-        } | ${claim.fresh ? '时间内' : '可能已过时'} |`,
+        } | ${claim.fresh ? '时间内' : '可能已过时'} | ${researchConfidenceLabel(
+          claim.confidence ?? 0,
+        )}（${(claim.confidence ?? 0).toFixed(2)}） |`,
       );
     });
     out.push('');
@@ -2256,6 +2299,16 @@ export async function handleMockInvoke(
               : '联网检索没有返回可用来源';
         }
       }
+      // 决策层打分（§9.6）：规则档默认，接 Jev / 本地模型时只换 provider
+      const tokens = researchTokens(plan.topic);
+      sources.forEach((source) => {
+        const haystack = `${source.title} ${source.snippet}`.toLowerCase();
+        const hits = tokens.filter((token) => haystack.includes(token)).length;
+        source.credibility = researchBlendedCredibility(
+          tokens.length > 0 ? hits / tokens.length : null,
+          source.reliability,
+        );
+      });
       session.sources = sources;
       session.status = 'collected';
       researchStep(

@@ -750,6 +750,8 @@ export interface ResearchSource {
   applicableVersion?: string | null;
   snippet: string;
   stale: boolean;
+  /** 决策层给出的来源可信度 0–1（规则档或 Jev；旧会话可能缺省） */
+  credibility?: number;
 }
 
 export interface ResearchClaim {
@@ -761,6 +763,8 @@ export interface ResearchClaim {
   crossVerified: boolean;
   fresh: boolean;
   relatedNotes: string[];
+  /** 决策层给出的结论置信度 0–1（旧会话可能缺省） */
+  confidence?: number;
 }
 
 export interface ResearchWarning {
@@ -780,6 +784,8 @@ export interface ResearchReport {
   /** 「资料截至 YYYY-MM-DD」 */
   dataCutoff: string;
   composer: string;
+  /** 打分用的决策模型标识（规则档 `rule`；Jev 接入后可能变化） */
+  decisionProvider?: string;
   conclusions: ResearchClaim[];
   keyFacts: ResearchClaim[];
   conflicts: ResearchClaim[];

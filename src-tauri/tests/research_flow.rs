@@ -12,6 +12,9 @@ use std::sync::Arc;
 
 use personal_knowledge_os_lib::application::ai::policy::AiPolicyService;
 use personal_knowledge_os_lib::application::ai::research::ResearchService;
+use personal_knowledge_os_lib::application::ai::traits::{
+    DecisionKind, DecisionModel, DecisionResult, DecisionState,
+};
 use personal_knowledge_os_lib::application::note_service::NoteService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
@@ -85,6 +88,40 @@ impl Fixture {
                 .expect("标注来源");
         }
         detail.note.id
+    }
+}
+
+/// 桩决策模型：把每条候选的分数固定成 `score`，用于验证「换 provider 就换打分」这条 Jev 插槽。
+struct FixedScoreModel {
+    score: f32,
+}
+
+impl DecisionModel for FixedScoreModel {
+    fn id(&self) -> &'static str {
+        "test.fixed"
+    }
+
+    fn is_local(&self) -> bool {
+        true
+    }
+
+    fn decide(
+        &self,
+        kind: DecisionKind,
+        state: &DecisionState,
+    ) -> personal_knowledge_os_lib::core::error::Result<Vec<DecisionResult>> {
+        Ok(state
+            .candidates
+            .iter()
+            .map(|candidate| DecisionResult {
+                note_id: candidate.note_id.clone(),
+                choice: personal_knowledge_os_lib::application::ai::traits::DecisionChoice::Use,
+                score: self.score,
+                confidence: 1.0,
+                reason: format!("桩模型（{kind:?}）固定打分"),
+                kind,
+            })
+            .collect())
     }
 }
 
@@ -562,4 +599,112 @@ fn opposing_sources_are_presented_side_by_side_and_never_become_a_conclusion() {
         !report.markdown.contains("本次未检出冲突"),
         "有冲突时不能显示「未检出冲突」占位文案"
     );
+}
+
+#[test]
+fn decision_layer_scores_every_source_and_rewards_cross_verification() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    // 用「Rust 异步调度」做课题：三篇笔记都命中该短语，其中两篇落在同一子问题（可交叉验证）
+    fixture.note(
+        "Rust 异步调度方案对比",
+        "主流方案是对比 tokio 与 async-std 的调度实现。",
+        Some(4),
+    );
+    fixture.note(
+        "Rust 异步调度实现要点",
+        "实现要点在于任务唤醒与本地队列的批量窃取。",
+        Some(5),
+    );
+    fixture.note(
+        "Rust 异步调度的限制",
+        "限制条件：阻塞调用会拖垮运行时，注意别占用调度线程。",
+        Some(3),
+    );
+
+    let session = run_until(
+        &fixture,
+        request("Rust 异步调度"),
+        &["collect", "verify", "compose"],
+    );
+    let report = session.report.as_ref().expect("报告");
+
+    // 默认走规则档（§9.6 的降级路径），并如实写进报告
+    assert_eq!(report.decision_provider, "rule");
+
+    // 每条来源都要有 0–1 的可信度，且不低于「级别折算」的一半（级别是事实，模型分是参考）
+    for source in &session.sources {
+        assert!(
+            source.credibility > 0.0 && source.credibility <= 1.0,
+            "可信度必须落在 (0,1]：{} → {}",
+            source.title,
+            source.credibility
+        );
+        let floor = source.reliability as f32 / 10.0;
+        assert!(
+            source.credibility >= floor - 1e-6,
+            "可信度不应低于级别折算的一半：{}",
+            source.title
+        );
+    }
+
+    // 交叉验证过的结论置信度高于单一来源的待验证项
+    let cross = report
+        .key_facts
+        .iter()
+        .map(|claim| claim.confidence)
+        .fold(0.0_f32, f32::max);
+    let single = report
+        .pending
+        .iter()
+        .filter(|claim| claim.citations.len() == 1)
+        .map(|claim| claim.confidence)
+        .fold(0.0_f32, f32::max);
+    assert!(cross > 0.0, "交叉验证的结论必须有置信度");
+    assert!(single > 0.0, "单一来源也要给出置信度（低）");
+    assert!(cross > single, "交叉验证应当更可信：{cross} vs {single}");
+
+    // 报告里能读到置信度与打分来源
+    assert!(report.markdown.contains("打分 `rule`"), "{}", report.markdown);
+    assert!(report.markdown.contains("置信度"), "关键事实表要有置信度列");
+}
+
+#[test]
+fn swapping_the_decision_model_changes_scores_without_touching_the_pipeline() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    fixture.note(
+        "Rust 异步调度方案对比",
+        "主流方案是对比 tokio 与 async-std 的调度实现。",
+        Some(5),
+    );
+    fixture.note(
+        "Rust 异步调度实现要点",
+        "实现要点在于任务唤醒与本地队列的批量窃取。",
+        Some(5),
+    );
+
+    // A：规则档（默认）
+    let rule = run_until(&fixture, request("Rust 异步调度"), &["collect"]);
+    let rule_score = rule.sources.first().expect("规则档来源").credibility;
+
+    // B：注入桩模型（0 分）——同一条流水线，只换 provider
+    let stubbed = ResearchService::with_decision_model(
+        fixture.context(),
+        Arc::new(FixedScoreModel { score: 0.0 }),
+    );
+    let started = stubbed
+        .start(request("Rust 异步调度"))
+        .expect("立项");
+    let collected = stubbed
+        .collect(&started.id, false)
+        .expect("收集（桩模型）");
+    let stub_score = collected.sources.first().expect("桩模型来源").credibility;
+
+    assert_eq!(collected.sources.len(), rule.sources.len(), "换 provider 不影响收集结果");
+    assert!(
+        stub_score < rule_score,
+        "0 分的模型应当压低可信度：{stub_score} vs {rule_score}"
+    );
+    assert!(stub_score > 0.0, "级别折算的一半是下限，不会被模型拉到 0");
 }

@@ -423,6 +423,10 @@ interface ReviewDueNote {
 - 报告结构（顺序固定）：① 结论先行（只放交叉验证过的）② 关键事实 ③ 争议与不确定性
   ④ 与本知识库的关系（`[[标题]]`）⑤ 待验证清单 ⑥ 参考来源；推测段由模板 Provider 生成，
   默认不写入笔记，需要时在写入确认里勾选；
+- **决策层打分**（D5）：`ResearchSource.credibility`（0–1，模型分与级别折算各半）与
+  `ResearchClaim.confidence`（支持来源均值 × 交叉验证折扣：≥2 独立来源 ×1.0、单一来源 ×0.6）；
+  `ResearchReport.decisionProvider` 写明打分来源（规则档 `rule`）。后端默认用 `RuleDecisionProvider`，
+  `ResearchService::with_decision_model()` 可注入其他 `DecisionModel`（Jev / 本地模型接入点）；
 - 审计：每一步都写 `research_*` 记录（不含正文）；**默认口径下 `outbound` 恒为 `false`**。
 
 ### 24.1 写入纪律（`research_write`）

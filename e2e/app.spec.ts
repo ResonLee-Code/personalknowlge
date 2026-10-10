@@ -608,6 +608,9 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   const report = page.getByTestId('research-report');
   await expect(report).toContainText('资料截至');
   await expect(report).toContainText('调研报告：Rust 异步调度方案');
+  // D5：决策层打分（规则档）与来源可信度都要可见
+  await expect(report).toContainText('打分 rule');
+  await expect(page.getByTestId('research-sources')).toContainText('可信度');
   await expect(page.getByTestId('research-warnings')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '41-research-report.png') });
 

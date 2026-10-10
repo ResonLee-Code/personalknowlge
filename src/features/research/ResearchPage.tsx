@@ -25,6 +25,7 @@ import type {
   AiPolicy,
   ResearchSession,
   ResearchSessionSummary,
+  ResearchReport,
   ResearchSourceLevel,
   ResearchStatus,
   ResearchWriteMode,
@@ -61,6 +62,22 @@ const STATUS_LABEL: Record<ResearchStatus, string> = {
 function statusIndex(status: ResearchStatus): number {
   if (status === 'aborted') return -1;
   return STEPS.findIndex((step) => step.status === status);
+}
+
+/**
+ * 报告卡上的「平均置信度」：取结论段与关键事实段（有打分的那些）的均值。
+ *
+ * 与后端 `confidence_label` 同阈值（≥0.7 高 / ≥0.45 中 / 其余低），
+ * 只是把后端给的分数换成一个一眼能看到的总览。
+ */
+function averageConfidence(report: ResearchReport): { label: string; value: number } | null {
+  const scored = [...report.conclusions, ...report.keyFacts]
+    .map((claim) => claim.confidence)
+    .filter((value): value is number => typeof value === 'number');
+  if (scored.length === 0) return null;
+  const value = scored.reduce((sum, item) => sum + item, 0) / scored.length;
+  const label = value >= 0.7 ? '高' : value >= 0.45 ? '中' : '低';
+  return { label, value };
 }
 
 /**
@@ -511,6 +528,9 @@ export function ResearchPage() {
                           <span className="block text-xs text-[var(--ink-subtle)]">
                             {source.gradeReason}
                             {source.stale ? ' · 可能已过时' : ''}
+                            {typeof source.credibility === 'number'
+                              ? ` · 可信度 ${Math.round(source.credibility * 100)}%`
+                              : ''}
                           </span>
                         </span>
                       </li>
@@ -529,8 +549,17 @@ export function ResearchPage() {
                     <Badge>资料截至 {report.dataCutoff}</Badge>
                     <Badge>{report.conclusions.length} 条结论</Badge>
                     <Badge>{report.pending.length} 条待验证</Badge>
+                    {averageConfidence(report) ? (
+                      <Badge data-testid="research-avg-confidence">
+                        平均置信度 {averageConfidence(report)!.label}{' '}
+                        {averageConfidence(report)!.value.toFixed(2)}
+                      </Badge>
+                    ) : null}
                     <span className="text-xs text-[var(--ink-subtle)]">
                       生成方式 {report.composer}（未接入模型）
+                    </span>
+                    <span className="text-xs text-[var(--ink-subtle)]">
+                      打分 {report.decisionProvider ?? 'rule'}（规则档；Jev 接入后同口径替换）
                     </span>
                   </div>
 

@@ -19,6 +19,10 @@ use crate::application::ai::policy::AiPolicyService;
 use crate::application::ai::source_grade::{self, grade_local_note, Grade};
 use crate::application::ai::template_provider::TemplateGenerativeModel;
 use crate::application::ai::tools::AiTools;
+use crate::application::ai::rule_provider::RuleDecisionProvider;
+use crate::application::ai::traits::{
+    DecisionCandidate, DecisionKind, DecisionModel, DecisionState,
+};
 use super::web_search;
 use crate::application::ai::traits::{
     GenerationRequest, GenerativeModel, RetrievalOrigin, RetrievedChunk,
@@ -84,11 +88,21 @@ const BROAD_TOPICS: &[&str] = &[
 
 pub struct ResearchService {
     ctx: Arc<WorkspaceContext>,
+    /// 打分用的决策模型（§9.6：默认规则档；Jev / 本地模型接入时只换这一处）
+    decision: Arc<dyn DecisionModel>,
 }
 
 impl ResearchService {
     pub fn new(ctx: Arc<WorkspaceContext>) -> Self {
-        Self { ctx }
+        Self { ctx, decision: Arc::new(RuleDecisionProvider::default()) }
+    }
+
+    /// 注入自定义决策模型（用于 A/B：规则档 vs Jev / 本地模型）。
+    pub fn with_decision_model(
+        ctx: Arc<WorkspaceContext>,
+        decision: Arc<dyn DecisionModel>,
+    ) -> Self {
+        Self { ctx, decision }
     }
 
     fn policy(&self) -> AiPolicyService {
@@ -97,6 +111,45 @@ impl ResearchService {
 
     fn tools(&self) -> AiTools {
         AiTools::new(Arc::clone(&self.ctx))
+    }
+
+    /// 用决策层给来源打可信度分（一次调用，批量打分；失败时退回「级别折算」）。
+    fn score_sources(&self, topic: &str, sources: &mut [ResearchSource]) {
+        if sources.is_empty() {
+            return;
+        }
+        let key_of = |source: &ResearchSource| -> String {
+            source
+                .note_id
+                .clone()
+                .or_else(|| source.url.clone())
+                .unwrap_or_else(|| format!("ref{}", source.reference))
+        };
+        let state = DecisionState {
+            query: topic.to_string(),
+            candidates: sources
+                .iter()
+                .map(|source| DecisionCandidate {
+                    note_id: key_of(source),
+                    title: source.title.clone(),
+                    snippet: source.snippet.clone(),
+                    updated_at: source.fetched_at.clone(),
+                    source_reliability: Some(source.reliability),
+                    valid_until: None,
+                })
+                .collect(),
+        };
+        let scores = self.decision.decide(DecisionKind::Relevance, &state).ok();
+        for source in sources.iter_mut() {
+            let key = key_of(source);
+            let model_score = scores.as_ref().and_then(|results| {
+                results
+                    .iter()
+                    .find(|result| result.note_id == key)
+                    .map(|result| result.score)
+            });
+            source.credibility = blended_credibility(model_score, source.reliability);
+        }
     }
 
     // ---------------------------------------------------------------- ① 立项
@@ -272,6 +325,8 @@ impl ResearchService {
                 applicable_version: None,
                 snippet,
                 stale,
+                // 真正入库前由 `score_sources` 用决策层统一打分
+                credibility: grade.level.reliability() as f32 / 5.0,
             });
         }
 
@@ -343,6 +398,7 @@ impl ResearchService {
                             applicable_version: None,
                             snippet,
                             stale,
+                            credibility: grade.level.reliability() as f32 / 5.0,
                         });
                     }
                     if web_collected == 0 {
@@ -367,6 +423,8 @@ impl ResearchService {
                 question.local_hits = per_question.get(index).copied().unwrap_or(0);
             }
         }
+        // 决策层打分（§9.6）：规则档默认，Jev / 本地模型接入后只换注入的 provider
+        self.score_sources(&plan.topic, &mut sources);
         session.sources = sources;
         session.status = ResearchStatus::Collected;
         session.updated_at = now_iso();
@@ -428,6 +486,7 @@ impl ResearchService {
                     cross_verified: false,
                     fresh: true,
                     related_notes: Vec::new(),
+                    confidence: 0.0,
                 });
                 continue;
             }
@@ -452,6 +511,10 @@ impl ResearchService {
             if conflict {
                 conflicting.push(question.id.clone());
             }
+            let confidence = claim_confidence(
+                &evidence.iter().map(|source| source.credibility).collect::<Vec<f32>>(),
+                independent.len(),
+            );
             claims.push(ResearchClaim {
                 sub_question_id: question.id.clone(),
                 text: if conflict {
@@ -475,11 +538,12 @@ impl ResearchService {
                     .iter()
                     .filter_map(|source| source.note_id.clone())
                     .collect(),
+                confidence,
             });
         }
 
         // 验证阶段先落一份「半成品报告」：结论/事实/待验证已定，正文与警告留给 compose。
-        let draft = pending_report(&session, claims, &conflicting);
+        let draft = pending_report(&session, claims, &conflicting, self.decision.id());
         session.report = Some(draft);
         session.status = ResearchStatus::Verified;
         session.updated_at = now_iso();
@@ -942,6 +1006,38 @@ impl ResearchService {
     }
 }
 
+/// 用决策层给每条来源打「可信度」分（0–1，§9.6）。
+///
+/// 规则档下分数来自 `RuleDecisionProvider`（关键词命中 + 来源可靠性）；接入 Jev / 本地模型后
+/// 由模型给出**类型化置信度**，上层不改动——只换 `ResearchService::with_decision_model` 的注入。
+/// 这里把「模型分」与「级别折算分」各取一半：级别是用户/规则标注的事实，模型分反映与课题的相关度。
+fn blended_credibility(model_score: Option<f32>, reliability: i64) -> f32 {
+    let base = (reliability.clamp(1, 5) as f32) / 5.0;
+    let score = model_score.unwrap_or(base).clamp(0.0, 1.0);
+    (0.5 * score + 0.5 * base).clamp(0.0, 1.0)
+}
+
+/// 结论置信度：支持来源可信度的均值 × 交叉验证系数（单一来源打折）。
+fn claim_confidence(credibilities: &[f32], independent: usize) -> f32 {
+    if credibilities.is_empty() {
+        return 0.0;
+    }
+    let mean = credibilities.iter().sum::<f32>() / credibilities.len() as f32;
+    let support = if independent >= 2 { 1.0 } else { 0.6 };
+    (mean * support).clamp(0.0, 1.0)
+}
+
+/// 置信度的人读标签（报告与界面共用口径）。
+pub fn confidence_label(value: f32) -> &'static str {
+    if value >= 0.7 {
+        "高"
+    } else if value >= 0.45 {
+        "中"
+    } else {
+        "低"
+    }
+}
+
 fn report_composer_note() -> &'static str {
     "template.draft"
 }
@@ -1049,6 +1145,7 @@ fn pending_report(
     session: &ResearchSession,
     claims: Vec<ResearchClaim>,
     conflicting: &[String],
+    decision_provider: &str,
 ) -> ResearchReport {
     let mut seen: Vec<Vec<usize>> = Vec::new();
     let mut conclusions = Vec::new();
@@ -1080,6 +1177,7 @@ fn pending_report(
         generated_at: now_iso(),
         data_cutoff: today_date(),
         composer: TemplateGenerativeModel::new().id().to_string(),
+        decision_provider: decision_provider.to_string(),
         conclusions,
         key_facts,
         conflicts,
@@ -1239,8 +1337,8 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
     let mut out = String::new();
     out.push_str(&format!("# 调研报告：{}\n\n", plan.topic));
     out.push_str(&format!(
-        "> **资料截至 {}** · 生成方式 `{}`（未接入模型）\n",
-        report.data_cutoff, report.composer
+        "> **资料截至 {}** · 生成方式 `{}`（未接入模型） · 打分 `{}`\n",
+        report.data_cutoff, report.composer, report.decision_provider
     ));
     out.push_str(&format!(
         "> 会话 `{}` · 子问题 {} 个 · 来源 {} 条\n\n",
@@ -1276,10 +1374,11 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
     } else {
         for (index, claim) in report.conclusions.iter().enumerate() {
             out.push_str(&format!(
-                "{}. {} {}\n",
+                "{}. {} {} （置信度 {}）\n",
                 index + 1,
                 claim.text,
-                citations_of(claim)
+                citations_of(claim),
+                confidence_label(claim.confidence)
             ));
         }
         out.push('\n');
@@ -1289,7 +1388,9 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
     if report.key_facts.is_empty() {
         out.push_str("_没有交叉验证过的事实。_\n\n");
     } else {
-        out.push_str("| 结论 | 支持来源（级别） | 是否交叉验证 | 时效 |\n| --- | --- | --- | --- |\n");
+        out.push_str(
+            "| 结论 | 支持来源（级别） | 是否交叉验证 | 时效 | 置信度 |\n| --- | --- | --- | --- | --- |\n",
+        );
         for claim in &report.key_facts {
             let levels = report
                 .references
@@ -1299,11 +1400,13 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
                 .collect::<Vec<_>>()
                 .join("、");
             out.push_str(&format!(
-                "| {} | {} | {} | {} |\n",
+                "| {} | {} | {} | {} | {}（{:.2}） |\n",
                 escape_table(&claim.text),
                 escape_table(&levels),
                 if claim.cross_verified { "是" } else { "否" },
-                if claim.fresh { "时间内" } else { "可能已过时" }
+                if claim.fresh { "时间内" } else { "可能已过时" },
+                confidence_label(claim.confidence),
+                claim.confidence
             ));
         }
         out.push('\n');
@@ -1550,6 +1653,31 @@ mod tests {
             applicable_version: None,
             snippet: snippet.to_string(),
             stale: false,
+            credibility: 0.6,
         }
+    }
+
+    #[test]
+    fn credibility_blends_model_score_with_graded_level() {
+        // 模型分与级别分各取一半：级别 5/5 → 1.0，模型 0 分也保底 0.5
+        assert!((blended_credibility(Some(0.0), 5) - 0.5).abs() < 1e-6);
+        assert!((blended_credibility(Some(1.0), 5) - 1.0).abs() < 1e-6);
+        assert!((blended_credibility(None, 1) - 0.2).abs() < 1e-6, "无模型分时按级别折算");
+        // 越界输入夹取到 0–1
+        assert!((blended_credibility(Some(9.0), 5) - 1.0).abs() < 1e-6);
+        assert!((blended_credibility(Some(-3.0), 1) - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn claim_confidence_rewards_independent_sources() {
+        let single = claim_confidence(&[0.9], 1);
+        let cross = claim_confidence(&[0.9, 0.9], 2);
+        assert!(cross > single, "交叉验证应当提高置信度：{single} vs {cross}");
+        assert!((single - 0.54).abs() < 1e-6, "单一来源打 6 折");
+        assert!((cross - 0.9).abs() < 1e-6);
+        assert_eq!(claim_confidence(&[], 0), 0.0, "没有来源就没有置信度");
+        assert_eq!(confidence_label(0.75), "高");
+        assert_eq!(confidence_label(0.5), "中");
+        assert_eq!(confidence_label(0.1), "低");
     }
 }

@@ -200,6 +200,9 @@ pub struct ResearchSource {
     pub snippet: String,
     /// 是否可能已过时（发布时间早于时间窗且无更新版本）
     pub stale: bool,
+    /// 决策层给出的「来源可信度」0–1（§9.6：Jev 或规则档；写入时与级别一起看）
+    #[serde(default)]
+    pub credibility: f32,
 }
 
 /// 一条结论/事实（以子问题为单位汇总）。
@@ -218,6 +221,9 @@ pub struct ResearchClaim {
     pub fresh: bool,
     /// 与本知识库已有笔记的关联（`[[标题]]`）
     pub related_notes: Vec<String>,
+    /// 决策层给出的「结论置信度」0–1（交叉验证与来源可信度的合成）
+    #[serde(default)]
+    pub confidence: f32,
 }
 
 /// 警告类别（报告里必须是**醒目块**，不是脚注）。
@@ -270,6 +276,9 @@ pub struct ResearchReport {
     pub data_cutoff: String,
     /// 生成者标识（D1/D2 为模板实现，接模型后换成 provider id）
     pub composer: String,
+    /// 打分用的决策模型标识（规则档 `rule`；Jev 接入后变成 `jev` / `local.*`）
+    #[serde(default)]
+    pub decision_provider: String,
     /// 第 1 段：结论先行（**只放交叉验证过的**）
     pub conclusions: Vec<ResearchClaim>,
     /// 第 2 段：关键事实（**只放交叉验证过的**）

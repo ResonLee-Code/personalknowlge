@@ -14,7 +14,9 @@
 > **D2** 已落地写入闭环与 `/research` 界面（模板假 Provider，仍**不联网、不接模型**），
 > **D3** 已落地 `web_search` 与外部来源分级（检索源由用户配置，应用不预置第三方服务），
 > **D4** 已落地冲突并列（规则档，不选边）；剩下的「`valid_until` 到期复核提醒」属 N3 生命周期，
-> 见 [CHANGELOG.md](./CHANGELOG.md) 的「研究助手」四节；D5（Jev 打分）待决策层骨架与模型接入。
+> **D5** 已落地决策层打分与置信度（规则档）：来源 `credibility` / 结论 `confidence` 进入报告，
+> `DecisionModel` 注入点就绪（`with_decision_model`）——**Jev 接入只替换 provider**，
+> 需要先定模型访问方式（倾向 Ollama HTTP）。见 [CHANGELOG.md](./CHANGELOG.md) 的「研究助手」五节。
 
 ## 1. 目标与不做的事
 
