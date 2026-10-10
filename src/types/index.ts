@@ -615,6 +615,8 @@ export interface AiPolicy {
   allowFetchBody: boolean;
   domainAllowlist: string[];
   domainDenylist: string[];
+  /** 联网检索源地址模板（必须含 `{query}`，可选 `{limit}`）；默认不预置 */
+  searchEndpoint?: string | null;
   budget: AiResearchBudget;
   auditMaxEntries: number;
 }
@@ -627,7 +629,18 @@ export interface UpdateAiPolicyInput {
   allowFetchBody?: boolean;
   domainAllowlist?: string[];
   domainDenylist?: string[];
+  /** 检索源地址模板；传空字符串表示清除 */
+  searchEndpoint?: string | null;
   budget?: AiResearchBudget;
+}
+
+/** 联网检索候选（D3）：尚未抓正文 */
+export interface WebSearchHit {
+  title: string;
+  url: string;
+  snippet: string;
+  publishedAt?: string | null;
+  host: string;
 }
 
 /** AI 行为审计（不含正文） */

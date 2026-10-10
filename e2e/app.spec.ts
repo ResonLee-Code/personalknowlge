@@ -568,6 +568,10 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByTestId('ai-network')).toHaveValue('allowNetwork');
   await page.getByTestId('ai-fetch-body').click();
   await expect(page.getByTestId('ai-fetch-body')).toBeChecked();
+  // 检索源地址（D3）：应用不预置第三方服务，这里填一个返回 JSON 的地址模板
+  await page.getByTestId('ai-search-endpoint').fill('https://searx.example/search?q={query}&format=json');
+  await page.getByTestId('ai-search-endpoint').blur();
+  await expect(page.getByTestId('ai-search-endpoint')).toHaveValue(/searx\.example/);
 
   // 33. 研究助手（D2）：本地调研 → 六段报告 → 确认写入
   // 先准备三篇本地材料（两条指向「方案」，一条指向「限制」→ 单一来源进待验证）
@@ -593,7 +597,12 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.screenshot({ path: path.join(SHOTS, '40-research-plan.png') });
 
   await page.getByTestId('research-collect').click();
+  // 联网档位已打开：收集前必须出现一次说明（§9.7「首次发起研究」）
+  await expect(page.getByTestId('research-network-confirm')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '40b-research-network.png') });
+  await page.getByTestId('research-network-ok').click();
   await expect(page.getByTestId('research-sources')).toBeVisible();
+  await expect(page.getByTestId('research-sources')).toContainText('docs.rs');
   await page.getByTestId('research-verify').click();
   await page.getByTestId('research-compose').click();
   const report = page.getByTestId('research-report');

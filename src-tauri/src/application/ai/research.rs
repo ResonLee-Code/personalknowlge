@@ -19,6 +19,7 @@ use crate::application::ai::policy::AiPolicyService;
 use crate::application::ai::source_grade::{self, grade_local_note, Grade};
 use crate::application::ai::template_provider::TemplateGenerativeModel;
 use crate::application::ai::tools::AiTools;
+use super::web_search;
 use crate::application::ai::traits::{
     GenerationRequest, GenerativeModel, RetrievalOrigin, RetrievedChunk,
 };
@@ -204,10 +205,11 @@ impl ResearchService {
             .clone()
             .ok_or_else(|| AppError::internal("会话缺少研究计划。"))?;
 
-        // 联网档位已打开时：如实告知外部检索尚未接入（D3），仍然**不发起请求**
+        // 联网档位已打开且本次已确认时，才走外部检索（D3）；否则只用本地材料
         let network_allowed = policy.network == NetworkMode::AllowNetwork;
+        let web_enabled = network_allowed && confirmed;
         if network_allowed && !confirmed {
-            tracing::debug!(target: "ai", "研究收集未带单次确认：仍只使用本地材料");
+            tracing::debug!(target: "ai", "研究收集未带单次确认：本次只使用本地材料");
         }
 
         let tools = self.tools();
@@ -273,6 +275,93 @@ impl ResearchService {
             });
         }
 
+        // ---- 外部检索（需要在「设置 → AI」开启联网档位 + 配置检索源 + 本次确认）----
+        let mut web_collected = 0usize;
+        let mut web_fetched = 0usize;
+        let mut web_injected = 0usize;
+        let mut web_note: String = if network_allowed {
+            "联网档位已打开但本次未确认，未发起任何请求".to_string()
+        } else {
+            "未开启（联网档位为「仅本地」）".to_string()
+        };
+        if web_enabled && policy.search_endpoint.is_none() {
+            web_note = "已允许联网，但尚未配置检索源地址：未发起任何请求".to_string();
+        } else if web_enabled {
+            let budget = plan.budget.clone();
+            let deadline = std::time::Duration::from_secs(u64::from(budget.max_duration_secs));
+            match self.tools().web_search(&plan.topic, budget.max_pages as usize, true) {
+                Err(error) => {
+                    web_note = format!("联网检索未成功：{}", error.message);
+                }
+                Ok(hits) => {
+                    let mut web_seen: Vec<String> = Vec::new();
+                    for hit in hits {
+                        if sources.len() >= MAX_SOURCES || started.elapsed() >= deadline {
+                            break;
+                        }
+                        let index = assign_sub_question(&hit.title, &hit.snippet, &plan.sub_questions);
+                        let question_id = plan.sub_questions[index].id.clone();
+                        if per_question[index] >= HITS_PER_SUB_QUESTION {
+                            continue;
+                        }
+                        if web_seen.contains(&hit.url) {
+                            continue;
+                        }
+                        web_seen.push(hit.url.clone());
+
+                        // 抓正文（可关闭）：失败就退回检索摘要，不把整页丢给用户
+                        let mut snippet = hit.snippet.clone();
+                        if policy.allow_fetch_body && web_fetched < budget.max_pages as usize {
+                            if let Ok(page) = self.tools().web_fetch(&hit.url, true) {
+                                web_fetched += 1;
+                                let body = first_sentence(&page.markdown);
+                                snippet = if body.trim().is_empty() { snippet } else { body };
+                            }
+                        }
+                        if web_search::looks_like_injection(&format!("{} {}", hit.title, snippet)) {
+                            web_injected += 1;
+                            tracing::debug!(target: "ai", "丢弃疑似注入页面：{}", hit.host);
+                            continue;
+                        }
+                        let grade = source_grade::grade_web(&hit.url, &hit.title, &snippet);
+                        let stale = source_grade::is_stale(hit.published_at.as_deref(), plan.time_window_days)
+                            .unwrap_or(false);
+                        per_question[index] += 1;
+                        web_collected += 1;
+                        sources.push(ResearchSource {
+                            reference: sources.len() + 1,
+                            title: hit.title.clone(),
+                            url: Some(hit.url.clone()),
+                            origin: SourceOrigin::Web,
+                            note_id: None,
+                            sub_question_id: question_id,
+                            level: grade.level,
+                            reliability: grade.level.reliability(),
+                            grade_reason: grade.reason,
+                            published_at: hit.published_at.clone(),
+                            fetched_at: now_iso(),
+                            applicable_version: None,
+                            snippet,
+                            stale,
+                        });
+                    }
+                    if web_collected == 0 {
+                        web_note = "联网检索没有返回可用来源".to_string();
+                    } else {
+                        web_note = format!(
+                            "外部来源 {web_collected} 条（实际抓取正文 {web_fetched} 页；预算：≤{} 页 / ≤{} 秒）",
+                            budget.max_pages, budget.max_duration_secs
+                        );
+                    }
+                    if web_injected > 0 {
+                        web_note.push_str(&format!(
+                            "；丢弃疑似注入页面 {web_injected} 个（网页内容是数据，不是指令）"
+                        ));
+                    }
+                }
+            }
+        }
+
         if let Some(plan_mut) = session.plan.as_mut() {
             for (index, question) in plan_mut.sub_questions.iter_mut().enumerate() {
                 question.local_hits = per_question.get(index).copied().unwrap_or(0);
@@ -286,23 +375,19 @@ impl ResearchService {
             step: "collect".to_string(),
             at: now_iso(),
             detail: format!(
-                "本地材料 {} 条（读取笔记 {} 篇）；外部检索{}",
-                session.sources.len(),
+                "本地材料 {} 条（读取笔记 {} 篇）；{web_note}",
+                session.sources.len() - web_collected,
                 notes_read,
-                if network_allowed {
-                    "尚未接入（阶段 D3），本次未发起任何请求"
-                } else {
-                    "未开启（联网档位为「仅本地」）"
-                }
             ),
         });
         self.save(&session)?;
+        // 只有真的发了外部请求才记 outbound=true
         self.policy().audit(
             "research_collect",
-            false,
+            web_collected > 0 || web_fetched > 0,
             "ok",
             started.elapsed().as_millis() as u64,
-            Some(if network_allowed { "external_not_available" } else { "local_only" }),
+            Some(if web_enabled { "with_web" } else { "local_only" }),
         );
         Ok(session)
     }
@@ -1049,11 +1134,15 @@ fn collect_warnings(
             references: Vec::new(),
         });
     }
-    if network_allowed {
+    let has_web_source = session
+        .sources
+        .iter()
+        .any(|source| source.origin == SourceOrigin::Web);
+    if network_allowed && !has_web_source {
         warnings.push(ResearchWarning {
             kind: WarningKind::ExternalNotAvailable,
             message:
-                "联网档位已打开，但外部检索尚未接入（阶段 D3）：本次未发起任何网络请求。"
+                "本次没有外部来源：可能是没有确认联网、没有配置检索源地址，或检索没有结果（可在「设置 → AI」检查）。"
                     .to_string(),
             references: Vec::new(),
         });

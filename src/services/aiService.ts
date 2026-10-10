@@ -4,6 +4,7 @@ import type {
   ClippedPage,
   KbHit,
   UpdateAiPolicyInput,
+  WebSearchHit,
 } from '@/types';
 
 import { call } from './api';
@@ -31,7 +32,7 @@ export const aiService = {
   webFetch: (url: string, confirmed: boolean) =>
     call<ClippedPage>('ai_web_fetch', { url, confirmed }),
 
-  /** 联网搜索（D3 接入前如实返回未接入） */
-  webSearch: (keyword: string, limit = 8) =>
-    call<KbHit[]>('ai_web_search', { keyword, limit }),
+  /** 联网检索（需已开启联网档位 + 本次确认 + 配置好检索源地址） */
+  webSearch: (keyword: string, limit = 8, confirmed = false) =>
+    call<WebSearchHit[]>('ai_web_search', { keyword, limit, confirmed }),
 };

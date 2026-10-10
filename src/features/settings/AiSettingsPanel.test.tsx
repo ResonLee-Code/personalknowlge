@@ -114,4 +114,28 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     expect(list).toHaveTextContent('被拒绝');
     expect(list).toHaveTextContent('NETWORK_DISABLED');
   });
+
+  it('检索源地址在失焦时保存（D3：应用不预置第三方检索服务）', async () => {
+    const setPolicy = vi
+      .spyOn(aiService, 'setPolicy')
+      .mockResolvedValue({
+        ...conservative,
+        searchEndpoint: 'https://searx.example/search?q={query}&format=json',
+      });
+    render(<AiSettingsPanel />);
+
+    const field = await screen.findByTestId('ai-search-endpoint');
+    expect(field).toHaveValue('');
+    // userEvent.type 会把 {query} 当成按键描述符，这里用 paste 传字面量
+    await userEvent.click(field);
+    await userEvent.paste('https://searx.example/search?q={query}&format=json');
+    expect(field).toHaveValue('https://searx.example/search?q={query}&format=json');
+    await userEvent.tab();
+
+    await waitFor(() =>
+      expect(setPolicy).toHaveBeenCalledWith({
+        searchEndpoint: 'https://searx.example/search?q={query}&format=json',
+      }),
+    );
+  });
 });

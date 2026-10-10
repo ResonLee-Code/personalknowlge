@@ -268,4 +268,53 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     await waitFor(() => expect(abort).toHaveBeenCalledWith('research_1', '用户中止'));
     expect(await screen.findByTestId('research-history')).toBeInTheDocument();
   });
+
+  it('联网档位打开时，收集前先弹一次说明并在确认后带 confirmed 调用（§9.7）', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...enabledPolicy,
+      network: 'allowNetwork',
+      networkConfirmedAt: '2026-10-11T09:00:00+08:00',
+      searchEndpoint: 'https://searx.example/search?q={query}',
+    });
+    vi.spyOn(researchService, 'start').mockResolvedValue(planned());
+    const collect = vi
+      .spyOn(researchService, 'collect')
+      .mockResolvedValue({ ...planned(), status: 'collected' });
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+    await userEvent.click(await screen.findByTestId('research-collect'));
+
+    // 先确认，再联网：此时**还没有**调用后端
+    const dialog = await screen.findByTestId('research-network-confirm');
+    expect(dialog).toHaveTextContent('本次将联网检索');
+    expect(dialog).toHaveTextContent('searx.example');
+    expect(collect).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId('research-network-ok'));
+    await waitFor(() => expect(collect).toHaveBeenCalledWith('research_1', true));
+  });
+
+  it('联网说明里选「暂不联网」时只用本地材料', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...enabledPolicy,
+      network: 'allowNetwork',
+      networkConfirmedAt: '2026-10-11T09:00:00+08:00',
+      searchEndpoint: 'https://searx.example/search?q={query}',
+    });
+    vi.spyOn(researchService, 'start').mockResolvedValue(planned());
+    const collect = vi
+      .spyOn(researchService, 'collect')
+      .mockResolvedValue({ ...planned(), status: 'collected' });
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+    await userEvent.click(await screen.findByTestId('research-collect'));
+    await userEvent.click(await screen.findByTestId('research-network-cancel'));
+
+    await waitFor(() => expect(collect).not.toHaveBeenCalled());
+    expect(screen.queryByTestId('research-network-confirm')).not.toBeInTheDocument();
+  });
 });

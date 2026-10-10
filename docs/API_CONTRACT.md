@@ -365,10 +365,14 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 | `ai_audit_tail` | `{ limit }` | `AiAuditEntry[]`（新的在前，不含正文） |
 | `ai_kb_search` | `{ keyword, limit }` | `KbHit[]`（复用 FTS5，不联网） |
 | `ai_web_fetch` | `{ url, confirmed }` | `ClippedPage` |
-| `ai_web_search` | `{ keyword, limit }` | `KbHit[]`（阶段 D3 接入前返回「未接入」） |
+| `ai_web_search` | `{ keyword, limit, confirmed }` | `WebSearchHit[]`（需联网档位 + 本次确认 + 已配置检索源） |
 
 - 闸门顺序：总开关 → 联网档位 → 单次确认 → 抓取正文开关 → 域名黑名单 → 域名白名单；
   任一不满足即返回 `AI_DISABLED` / `NETWORK_DISABLED`，且**不发起任何请求**；
+- `AiPolicy.searchEndpoint`（D3）：联网检索源地址模板，必须含 `{query}`（可选 `{limit}`），
+  **默认为空**——应用不预置任何第三方检索服务；不合法（非 http(s) 或缺 `{query}`）视为未配置。
+  `ai_web_search` / 研究收集都先过域名黑白名单（检索源本身也算外发目标），
+  未配置检索源返回 `INVALID_INPUT` 且不发请求；
 - 切换联网档位会清空既有的确认时间戳（切回「仅本地」后再切到联网需重新确认一次）；
 - 审计写在 `.knowledge/logs/ai-audit.jsonl`，仅记录行为元数据（时间 / 能力 / 是否外发 / 结果 / 耗时 / 备注）。
 
@@ -382,7 +386,7 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 | `research_start` | `{ input: ResearchRequest }` | `ResearchSession` | 立项：课题 → 3–5 个子问题 + 本地「已知基线」；课题过于宽泛返回 `INVALID_INPUT` 并要求补充范围 |
 | `research_get` | `{ sessionId }` | `ResearchSession` | 读取会话（刷新页面后恢复现场） |
 | `research_list` | `{ limit }` | `ResearchSessionSummary[]` | 最近的会话（新的在前） |
-| `research_collect` | `{ sessionId, confirmed }` | `ResearchSession` | 收集材料：本地 FTS5；**外部检索未接入（D3），`confirmed` 不影响本地路径** |
+| `research_collect` | `{ sessionId, confirmed }` | `ResearchSession` | 收集材料：本地 FTS5 +（D3）外部检索；`confirmed` 表示本次联网已获用户确认 |
 | `research_verify` | `{ sessionId }` | `ResearchSession` | 按子问题汇总，≥2 个独立来源才算交叉验证 |
 | `research_compose` | `{ sessionId }` | `ResearchSession` | 渲染固定六段报告（顶部「资料截至 YYYY-MM-DD」） |
 | `research_proposal` | `{ sessionId }` | `ResearchSession` | 写入提案（默认 Inbox、写前 diff、同标题提示）；**不落库** |

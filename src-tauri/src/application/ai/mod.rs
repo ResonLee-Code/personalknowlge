@@ -15,6 +15,7 @@ pub mod source_grade;
 pub mod template_provider;
 pub mod tools;
 pub mod traits;
+pub mod web_search;
 
 pub use policy::AiPolicyService;
 pub use research::ResearchService;

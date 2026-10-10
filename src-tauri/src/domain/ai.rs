@@ -80,6 +80,11 @@ pub struct AiPolicy {
     pub domain_allowlist: Vec<String>,
     /// 强制丢弃的域名黑名单
     pub domain_denylist: Vec<String>,
+    /// 联网检索源地址（URL 模板，必须含 `{query}`；可选含 `{limit}`）
+    ///
+    /// 约定：返回 JSON（SearxNG `format=json` 或 `{ "results": [...] }` / 裸数组）。
+    /// **默认为空**——应用不预置任何第三方检索服务，由用户自行配置。
+    pub search_endpoint: Option<String>,
     /// 研究预算
     pub budget: ResearchBudget,
     /// 审计日志条数上限（超出后截断最旧的记录）
@@ -95,6 +100,7 @@ impl Default for AiPolicy {
             allow_fetch_body: false,
             domain_allowlist: Vec::new(),
             domain_denylist: Vec::new(),
+            search_endpoint: None,
             budget: ResearchBudget::default(),
             audit_max_entries: 500,
         }
@@ -112,6 +118,8 @@ pub struct UpdateAiPolicyInput {
     pub allow_fetch_body: Option<bool>,
     pub domain_allowlist: Option<Vec<String>>,
     pub domain_denylist: Option<Vec<String>>,
+    /// 检索源地址模板；传空字符串表示清除
+    pub search_endpoint: Option<String>,
     pub budget: Option<ResearchBudget>,
 }
 

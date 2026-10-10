@@ -214,9 +214,28 @@ pub fn apply_policy(policy: &mut AiPolicy, input: &UpdateAiPolicyInput) {
     if let Some(list) = &input.domain_denylist {
         policy.domain_denylist = normalize_domains(list);
     }
+    if let Some(endpoint) = &input.search_endpoint {
+        policy.search_endpoint = normalize_search_endpoint(endpoint);
+    }
     if let Some(budget) = &input.budget {
         policy.budget = budget.clamped();
     }
+}
+
+/// 检索源地址规范化：只接受 http(s) 且必须含 `{query}`；不合法一律视为「未配置」。
+pub fn normalize_search_endpoint(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    if !(lowered.starts_with("http://") || lowered.starts_with("https://")) {
+        return None;
+    }
+    if !trimmed.contains("{query}") {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 /// 域名列表规范化：去空白、小写、去重、去掉协议与路径。

@@ -83,6 +83,9 @@ export function ResearchPage() {
   const [writeMode, setWriteMode] = useState<ResearchWriteMode>('create');
   const [includeSpeculation, setIncludeSpeculation] = useState(false);
   const [createSourceNote, setCreateSourceNote] = useState(false);
+  /** 本次页面生命周期内是否已经为「联网收集」做过单次确认（§9.7） */
+  const [networkConfirmed, setNetworkConfirmed] = useState(false);
+  const [networkAskOpen, setNetworkAskOpen] = useState(false);
 
   const refreshHistory = useCallback(async () => {
     try {
@@ -182,6 +185,27 @@ export function ResearchPage() {
     setIncludeSpeculation(false);
     setCreateSourceNote(proposal.suggestSourceNote);
     setWriteOpen(true);
+  };
+
+  /**
+   * 收集材料：联网档位打开且本次还没确认过时，先弹一次说明（§9.7「首次发起研究」）。
+   * 本地口径（默认）不会看到这个对话框。
+   */
+  const startCollect = () => {
+    if (!session) return;
+    const needsConfirm = policy?.network === 'allowNetwork' && !networkConfirmed;
+    if (needsConfirm) {
+      setNetworkAskOpen(true);
+      return;
+    }
+    void run('research-collect', () => researchService.collect(session.id, networkConfirmed));
+  };
+
+  const confirmNetworkCollect = () => {
+    setNetworkAskOpen(false);
+    setNetworkConfirmed(true);
+    if (!session) return;
+    void run('research-collect', () => researchService.collect(session.id, true));
   };
 
   const confirmWrite = async () => {
@@ -381,9 +405,7 @@ export function ResearchPage() {
                     disabled={busy !== null}
                     onClick={() => {
                       if (nextAction.key === 'research-collect') {
-                        void run('research-collect', () =>
-                          researchService.collect(session.id, false),
-                        );
+                        startCollect();
                       } else if (nextAction.key === 'research-verify') {
                         void run('research-verify', () => researchService.verify(session.id));
                       } else if (nextAction.key === 'research-compose') {
@@ -584,6 +606,47 @@ export function ResearchPage() {
           )}
         </main>
       </div>
+
+      {networkAskOpen ? (
+        <div
+          data-testid="research-network-confirm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        >
+          <div className="w-full max-w-lg rounded-xl bg-[var(--surface-raised)] p-5 shadow-xl">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--ink)]">
+              <TriangleAlert className="h-4 w-4 text-amber-500" />
+              本次将联网检索
+            </h2>
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-[var(--ink-muted)]">
+              <li>
+                会访问你配置的检索源：
+                <code className="ml-1 text-xs">
+                  {policy?.searchEndpoint ?? '（未配置，将不会发出请求）'}
+                </code>
+              </li>
+              <li>会上传检索关键词（不包含你的笔记正文与会话内容）。</li>
+              <li>
+                预计最多抓取 {policy?.budget.maxPages ?? 12} 页；命中黑名单的域名强制丢弃，
+                网页内容按「数据」处理（疑似注入的页面直接丢弃）。
+              </li>
+              <li>结果只是提案：是否写入知识库由你在下一步另行确认。</li>
+              <li>可随时在「设置 → AI」切回「仅本地」。</li>
+            </ul>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                data-testid="research-network-cancel"
+                onClick={() => setNetworkAskOpen(false)}
+              >
+                暂不联网（只用本地）
+              </Button>
+              <Button data-testid="research-network-ok" onClick={confirmNetworkCollect}>
+                仅此一次，继续
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {writeOpen && proposal ? (
         <div

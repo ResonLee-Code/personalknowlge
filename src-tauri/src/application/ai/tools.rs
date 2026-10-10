@@ -110,14 +110,49 @@ impl AiTools {
         result
     }
 
-    /// `web_search`：联网搜索（D3 才接入具体检索源）。
+    /// `web_search`：联网检索（D3）。
     ///
-    /// DTO 先冻结：这里如实返回「未接入」，而不是伪造结果——避免把假数据当成研究依据。
-    pub fn web_search(&self, _keyword: &str, _limit: usize) -> Result<Vec<KbHit>> {
-        self.policy().ensure_enabled("web_search")?;
-        Err(AppError::new(
-            ErrorCode::InvalidInput,
-            "联网搜索尚未接入（阶段 D3）：当前可先用「网页剪藏」按已知地址抓取。",
-        ))
+    /// 顺序：总开关 → 联网档位 + 单次确认 → **检索源地址**（在「设置 → AI」配置，
+    /// 应用不预置任何第三方服务）→ 发一次请求并把结果解析成候选来源。
+    /// 未配置检索源时**不发起任何请求**，如实报错。
+    pub fn web_search(
+        &self,
+        keyword: &str,
+        limit: usize,
+        confirmed: bool,
+    ) -> Result<Vec<super::web_search::WebSearchHit>> {
+        let started = Instant::now();
+        let service = self.policy();
+        let endpoint = service.policy().search_endpoint.clone();
+        service.ensure_network_allowed(
+            "web_search",
+            endpoint.as_deref().unwrap_or(""),
+            confirmed,
+        )?;
+        let Some(endpoint) = endpoint else {
+            service.audit("web_search", false, "error", 0, Some("SEARCH_ENDPOINT_MISSING"));
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                "还没有配置联网检索源：请在「设置 → AI → 检索源地址」填入一个返回 JSON 的检索地址（含 {query} 占位符）。应用不预置任何第三方检索服务。",
+            ));
+        };
+        let result = super::web_search::search(&endpoint, keyword, limit);
+        match &result {
+            Ok(_) => service.audit(
+                "web_search",
+                true,
+                "ok",
+                started.elapsed().as_millis() as u64,
+                None,
+            ),
+            Err(error) => service.audit(
+                "web_search",
+                true,
+                "error",
+                started.elapsed().as_millis() as u64,
+                Some(error.code.as_str()),
+            ),
+        }
+        result
     }
 }

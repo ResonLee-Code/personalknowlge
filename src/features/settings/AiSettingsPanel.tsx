@@ -126,6 +126,21 @@ export function AiSettingsPanel() {
 
       <div className="space-y-2 px-3 py-2.5">
         <div className="space-y-1">
+          <Label htmlFor="ai-search-endpoint">检索源地址（联网检索用，必须含 {'{query}'}）</Label>
+          <Input
+            id="ai-search-endpoint"
+            data-testid="ai-search-endpoint"
+            defaultValue={policy.searchEndpoint ?? ''}
+            placeholder="https://your-searx.example/search?q={query}&format=json&count={limit}"
+            onBlur={(event) => void apply({ searchEndpoint: event.target.value }, '已保存检索源')}
+          />
+          <p className="text-[11px] text-[var(--ink-subtle)]">
+            应用不预置任何第三方检索服务：这里填你自己可用的检索接口（返回 JSON，
+            支持 SearxNG 的 {'{ "results": [ … ] }'} 形状）。留空表示不联网检索；
+            地址不合法或缺少 {'{query}'} 会被清空。
+          </p>
+        </div>
+        <div className="space-y-1">
           <Label htmlFor="ai-allowlist">域名白名单（一行一个，留空 = 不预置白名单）</Label>
           <textarea
             id="ai-allowlist"

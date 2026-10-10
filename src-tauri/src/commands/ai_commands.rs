@@ -65,7 +65,8 @@ pub async fn ai_web_search(
     state: State<'_, AppState>,
     keyword: String,
     limit: usize,
-) -> Result<Vec<KbHit>> {
+    confirmed: bool,
+) -> Result<Vec<super::super::application::ai::web_search::WebSearchHit>> {
     let context = state.inner.context()?;
-    run(move || AiTools::new(context).web_search(&keyword, limit)).await
+    run(move || AiTools::new(context).web_search(&keyword, limit, confirmed)).await
 }
