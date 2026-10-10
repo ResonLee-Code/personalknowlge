@@ -3,8 +3,11 @@
 本地优先的个人知识管理桌面应用。笔记正文以 Markdown 文件保存在用户自己的目录中，
 SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeScript。
 
-**当前版本：V1.0.1**（2026-10-07）—— 在 V1.0.0 基础上补齐导入 / 导出 / 分栏布局并修复若干缺陷，
-变更明细见 [docs/CHANGELOG.md](./docs/CHANGELOG.md)；下一阶段安排见 [docs/PLAN_V1.1.md](./docs/PLAN_V1.1.md)。
+**代码状态：V1.2.1 的功能内容已全部落地**（2026-10-11）；四处的版本号仍写 `1.2.0`
+——按约定「打包与发版等确认后再统一升版」，安装包也仍是 V1.2.0、**落后于代码**。
+变更明细见 [docs/CHANGELOG.md](./docs/CHANGELOG.md)；阶段计划见
+[docs/PLAN_V1.2.1.md](./docs/PLAN_V1.2.1.md)；验收证据见
+[docs/ACCEPTANCE_V1.2.1.md](./docs/ACCEPTANCE_V1.2.1.md)。
 
 本仓库是 [Personal-Knowledge-OS-Engineering-Design-V1.0.md](./Personal-Knowledge-OS-Engineering-Design-V1.0.md)
 工程设计的实现：第一阶段只做好**记录、分类、搜索**，同时保证数据自主、可备份、可扩展。
@@ -29,14 +32,26 @@ SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeSc
 | 界面 | 三栏工作台、全局搜索面板（⌘/Ctrl + K）、快速切换（⌘/Ctrl + P）、编辑/分屏/预览 + 大纲、深浅主题、空状态、状态栏 |
 | 编辑 | 双向链接 `[[标题]]`（`[[` 自动补全、预览 chip 跳转）+ 反向链接面板、未解析链接一键建笔记、图片粘贴落盘到 `attachments/`、四种格式导出 |
 | 视图模式 | 编辑 / 分屏 / 预览切换后立即记住；分屏比例可拖拽调整（0.3–0.7） |
+| 文档层级 | 子文档（拖拽成为子文档 / 同层排序，`parent` / `order` 写进 frontmatter）、置顶、大纲预览（固定 / 贴边 / 隐藏三态） |
+| 目录管理 | `/manage` 跨状态宽表（活跃 / 回收站 / 缺失）、搜索、「不在目录中」筛选、批量移动 / 打标签 / 删除 / 复制 |
+| 版本历史 | 保存前自动留档（60 秒节流、每篇 50 份）、任意两版对比、命名版本（「保存为版本」）、还原正文 |
+| 导入增强 | Word（`.docx` 标题 / 列表 / 实体）与 CSV（RFC 4180 → Markdown 表格）；Obsidian 库 / Notion 导出识别 |
+| 统计与复核 | 首页统计明细（字数 / 近 7·30 天更新 / 置顶数 / 近 14 天写作活跃度）与 **待复核卡片**（`valid_until` 到期或 14 天内到期） |
+| 网页剪藏 | 粘贴 URL → 抓取公开网页转 Markdown，写 `source_type: web` 与来源地址 |
+| AI（第二代预留） | 设置页「AI」区块：总开关 / 联网档位（默认「仅本地」+ 首次确认）/ 抓取正文 / 域名黑白名单 / 研究预算 / 本地模型；四道闸门 + 行为审计（`.knowledge/logs/ai-audit.jsonl`，不含正文） |
+| 研究助手 | `/research` 五步调研：立项 → 收集（本地 FTS5，可选联网检索）→ 验证（≥2 个独立来源才叫交叉验证）→ 汇总（固定六段报告 + 置信度）→ 写入提案（默认 Inbox、同标题不覆盖、写前 diff、可回滚） |
+| 数据规模 | 3 万篇：图谱全量查询 811.7 ms；1 万篇：首次导入约 4.5 s、检索均值 18 ms、召回 100%（基准见验收清单） |
 
 ## 技术栈
 
 Tauri 2 · Rust · React 19 · TypeScript(strict) · Vite 8 · Tailwind CSS 4 · CodeMirror 6 ·
-SQLite(bundled) + FTS5 · pulldown-cmark · notify · zip · serde · tracing
+SQLite(bundled) + FTS5 · pulldown-cmark · notify · zip · serde · tracing ·
+ureq(rustls) + dom_query（网页剪藏与联网检索，复用 tauri-utils 的 html5ever）
 
-图谱视图为自研 Canvas 力导向布局（不引入可视化依赖）；AI 能力的框架规划见
-[`docs/AI_ARCHITECTURE_PLAN.md`](./docs/AI_ARCHITECTURE_PLAN.md)（V1.1 不含模型调用）。
+图谱视图为自研 Canvas 力导向布局（不引入可视化依赖）。AI 能力的边界与接口见
+[`docs/AI_ARCHITECTURE_PLAN.md`](./docs/AI_ARCHITECTURE_PLAN.md)：**默认不联网、不接模型**——
+联网是独立闸门（默认「仅本地」+ 首次确认，检索源由你自己配置，应用不预置第三方服务）；
+本地模型（Ollama HTTP）也要显式打开开关才会调用，失败自动降级到规则档 / 模板实现。
 
 ## 环境要求
 
@@ -82,10 +97,15 @@ cargo build                  # 构建桌面二进制
 
 ## 下载与安装
 
-| 平台 | 状态 |
-| --- | --- |
-| macOS（V1.0.1） | ✅ 已构建：`src-tauri/target/release/bundle/{macos,dmg}/` |
-| Windows（V1.0.0） | ⏸ 待确认后同步：`dist-windows/` 现有安装包与便携版仍为 2026-09-24 构建，不含 V1.0.1 改动 |
+| 平台 | 产物版本 | 状态 |
+| --- | --- | --- |
+| macOS（arm64） | V1.2.0 | ✅ 已构建：`src-tauri/target/release/bundle/{macos,dmg}/`（dmg sha256 见 CHANGELOG） |
+| Windows（x64） | V1.2.0 | ✅ 已构建（交叉编译、未签名）：`dist-windows/`，**待真机验收** |
+| Linux（x64） | — | ⏳ 未产出：Tauri 不支持从 macOS 交叉编译，需在 Linux 上构建（CI 已备好） |
+
+> ⚠️ **产物落后于代码**：V1.2.1 的内容（子文档层级、目录管理页、网页剪藏、
+> AI 闸门与研究助手、待复核提醒等）**都还没进安装包**；按约定「打包与发版等确认后再统一升版」。
+> 恢复打包时按 [ACCEPTANCE_V1.2.1.md](./docs/ACCEPTANCE_V1.2.1.md) 的 F 节执行即可。
 
 ### Windows（x64）
 
@@ -93,8 +113,10 @@ cargo build                  # 构建桌面二进制
 
 | 文件 | 说明 |
 | --- | --- |
-| `Personal Knowledge OS_1.0.0_x64-setup.exe` | NSIS 安装包（默认按当前用户安装，无需管理员权限） |
-| `Personal Knowledge OS_1.0.0_x64-portable.zip` | 便携版：解压后直接运行，含 `WebView2Loader.dll` 与使用说明 |
+| `Personal Knowledge OS_1.2.0_x64-setup.exe` | NSIS 安装包（默认按当前用户安装，无需管理员权限） |
+| `Personal Knowledge OS_1.2.0_x64-portable.zip` | 便携版：解压后直接运行，含 `WebView2Loader.dll` 与使用说明 |
+
+> `dist-windows/` 里同时保留了 V1.0.0 / V1.1.1 的历史产物，便于回退对比。
 
 安装步骤、静默安装参数、快捷方式、卸载、常见问题与验证清单见
 [docs/WINDOWS_INSTALL_GUIDE.md](./docs/WINDOWS_INSTALL_GUIDE.md)。
@@ -131,7 +153,11 @@ MyKnowledge/
 │   ├── database.sqlite      # 元数据 + FTS5 索引 + 设置
 │   ├── config.json          # 工作区配置（版本、路径、目录约定）
 │   ├── backups/             # 备份包
+│   ├── templates/           # 「另存为模板」的本地模板
+│   ├── history/<笔记 id>/    # 版本历史快照（命名版本存 labels.json）
+│   ├── research/            # 研究助手会话（可丢弃的中间产物）
 │   ├── logs/app.log         # 运行日志
+│   ├── logs/ai-audit.jsonl  # AI 行为审计（时间/能力/是否外发/结果，不含正文）
 │   └── index/               # 预留索引目录
 ├── .trash/                  # 回收站（保留原相对路径）
 ├── 00_Inbox/ 01_技术/ … 99_Archive/
@@ -153,5 +179,8 @@ MyKnowledge/
 - [功能规划（对标语雀/飞书 + 知识图谱）](./docs/FEATURE_PLANNING.md)
 - [语雀官方公开手册归档（对标查阅用，1222 篇）](./docs/yuque-manuals/README.md)
 - [变更记录](./docs/CHANGELOG.md)
+- [V1.2.1 验收清单（回归矩阵 / 性能实测 / 真机人工项）](./docs/ACCEPTANCE_V1.2.1.md)
+- [AI 能力框架（闸门 / 工具层 / 研究助手规格）](./docs/AI_ARCHITECTURE_PLAN.md)
+- [下一代技术储备与差距分析](./docs/NEXT_GEN_ANALYSIS.md)
 - [下一阶段计划（V1.1，历史）](./docs/PLAN_V1.1.md)
 - [下一阶段计划（V1.2.1：收口与稳定性）](./docs/PLAN_V1.2.1.md)

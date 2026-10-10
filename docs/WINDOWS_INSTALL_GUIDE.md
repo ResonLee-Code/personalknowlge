@@ -6,9 +6,12 @@
 
 | 项目 | 现状 |
 | --- | --- |
-| 应用代码 | **V1.2.0**（来源与时效、类型化关系、附件管理、Obsidian/Notion 导入、批量操作、拖拽、搜索历史、图谱导出、1 万篇导入 4 秒） |
+| 应用代码 | **V1.2.1 的内容**（另有子文档层级、置顶与手排、命名版本、目录管理页、Word/CSV 导入、网页剪藏、AI 闸门与研究助手、待复核提醒；版本号字段仍是 1.2.0，按约定等打包确认后再统一升版） |
 | Windows 安装包 | ✅ 已构建 V1.2.0（2026-10-10，NSIS + 便携版）；⚠️ **由 macOS 交叉编译产出、未签名，尚未在真实 Windows 上验收** |
 | macOS 安装包 | ✅ V1.2.0 已构建（dmg sha256 79dbc9b0…，见 CHANGELOG「当前构建」） |
+
+> ⚠️ **安装包落后于代码**：V1.2.1 的功能还没进安装包（打包按指令暂停）。
+> 恢复打包后按 [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) 的 F 节执行，再按下文清单做真机验收。
 
 本地（macOS）重新打包的命令：
 
@@ -24,7 +27,7 @@ CI=true ./node_modules/.bin/tauri build \
 
 > 官方标注跨平台编译为 **experimental**（不支持全部特性）。要发布给真实用户，
 > 建议在 Windows 机器上执行 `.\scripts\windows\build-windows.ps1`
-> 或触发 `.github/workflows/windows-release.yml`（在 Windows 运行器上构建并跑测试），
+> 或触发 `.github/workflows/release.yml`（三平台统一流水线，Windows job 在 Windows 运行器上构建），
 > 然后按本文「五、验收清单」逐项确认。
 
 ## 一、安装前准备
@@ -216,9 +219,10 @@ ea25ed29e5e7e33692cd2c16ab5956d9a4e96aad6ceaa3aa1b86c3187ed47392  Personal Knowl
 ```
 
 > 注意：交叉编译只能验证产物结构（架构、GUI 子系统、资源节、内部文件清单）
-> 与业务逻辑测试（59 个 Rust 测试 + 前端 E2E），**无法在 Windows 上做启动冒烟测试**。
+> 与业务逻辑测试（Rust 29 个测试目标 + 前端 217 个用例 + E2E），
+> **无法在 Windows 上做启动冒烟测试**。
 > 正式发布前建议在 Windows 机器上按第八节清单验收一次，或直接使用
-> `.github/workflows/windows-release.yml` 在 Windows 运行器上构建。
+> `.github/workflows/release.yml` 在 Windows 运行器上构建。
 
 ### 在 Windows 上构建（推荐，可产出并验证安装包）
 
@@ -291,8 +295,11 @@ NSIS_PATH=/tmp/nsis scripts/windows/build-installer.sh
 
 ### 用 GitHub Actions 自动发布（推荐用于持续交付）
 
-仓库内置 `.github/workflows/windows-release.yml`：在 Windows 运行器上构建
-NSIS 安装包并上传为构建产物；推送 `v*` 标签时自动创建 Release。
+仓库内置统一的 `.github/workflows/release.yml`：**一次 `v*` 标签或手动运行**
+就在三个平台分别构建（macOS `.dmg` / Windows NSIS `.exe` + 便携 `.zip` /
+Linux `.deb`+`.rpm`+`.AppImage`）并附上各自的 `SHA256SUMS-*`；
+推送 `v*` 标签时在校验通过后自动创建 Release。细节见
+[RELEASE_PROCESS.md](./RELEASE_PROCESS.md)。
 
 ## 八、验证清单（安装后建议逐项确认）
 

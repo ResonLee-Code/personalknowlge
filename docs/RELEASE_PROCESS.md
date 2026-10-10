@@ -15,7 +15,7 @@
 ```text
 preflight（ubuntu-22.04）
   ├─ 标签 vX.Y.Z 与 package.json 版本一致？
-  ├─ package.json / Cargo.toml / tauri.conf.json 三处版本一致？
+  ├─ package.json / Cargo.toml / Cargo.lock / tauri.conf.json 四处版本一致？
   └─ pnpm test + cargo test（全部通过才继续）
         │
         ├── macos（macos-14 / arm64）→ .dmg              → SHA256SUMS-macos.txt
@@ -53,11 +53,14 @@ git tag vX.Y.Z && git push origin main --tags
 
 每个平台各自的 `SHA256SUMS-<platform>.txt` 会一并附在 Release 上，另有汇总的
 `SHA256SUMS-all.txt`。验收清单见：
-[macOS](./ACCEPTANCE_V1.2.0.md) · [Windows](./WINDOWS_INSTALL_GUIDE.md) · [Linux](./LINUX_INSTALL_GUIDE.md)。
+[当前版本（V1.2.1）](./ACCEPTANCE_V1.2.1.md) ·
+[上一版产物（V1.2.0）](./ACCEPTANCE_V1.2.0.md) ·
+[Windows 安装说明](./WINDOWS_INSTALL_GUIDE.md) · [Linux 安装说明](./LINUX_INSTALL_GUIDE.md)。
 
 ## 5. 注意事项
 
-1. **版本号必须三处一致**（preflight 会拦截不一致的标签）；
+1. **版本号必须四处一致**（`package.json` / `Cargo.toml` / `Cargo.lock` / `tauri.conf.json`，
+   preflight 会拦截不一致的标签）；
 2. macOS 目前只构建 **arm64**（`macos-14`）。如需 Intel 包，在 `macos` job 上加矩阵
    （`macos-13`，若 GitHub 仍提供）即可，产物名会带架构后缀不会冲突；
 3. Windows / Linux 产物均未签名；需要签名时在各自 job 增加证书步骤；

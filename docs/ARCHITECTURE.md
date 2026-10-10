@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 表现层 | 界面与交互，不直接访问 SQLite 与文件系统 | `src/` |
 | 命令层 | Tauri 命令，参数校验与线程调度 | `src-tauri/src/commands/` |
-| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件、模板、图谱；AI 决策层为规划中） | `src-tauri/src/application/` |
+| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件、模板、图谱、剪藏、关系、历史；**AI 策略闸门 / 只读工具 / 研究助手 / 本地模型**） | `src-tauri/src/application/` |
 | 领域层 | 数据结构与不变量，不依赖框架 | `src-tauri/src/domain/` |
 | 仓储层 | 隔离 SQL 细节（trait + SQLite 实现） | `src-tauri/src/repositories/` |
 | 基础设施层 | SQLite、Markdown 存储、FTS5、文件监听、备份、frontmatter、docx 生成 | `src-tauri/src/infrastructure/` |
@@ -20,11 +20,17 @@ React UI (src/)
    ▼
 commands/            ← 只做转发；阻塞任务交给 async_runtime::spawn_blocking
    ▼
-application/         ← NoteService / CategoryService / TagService / SearchService / BackupService / LinkService / AttachmentService / TemplateService / GraphService / IndexService / WorkspaceService
+application/         ← NoteService / CategoryService / TagService / SearchService / BackupService /
+                       LinkService / AttachmentService / TemplateService / GraphService / IndexService /
+                       WorkspaceService / ClipService / RelationService / HistoryService / ImportService / ExportService
+  application/ai/    ← AiPolicyService（四道闸门 + 审计）/ AiTools（只读工具）/ ResearchService（五步调研）
+                       RuleDecisionProvider（规则档打分）/ OllamaModel（本地模型）/ source_grade /
+                       web_search（联网检索）/ template_provider（无模型时的报告模板）
    ▼
 domain/  +  repositories/  +  infrastructure/
    ▼
 Markdown 文件 + SQLite（WAL）+ FTS5 索引 + 回收站
+   + `.knowledge/`：history（版本快照）/ research（研究会话）/ templates / logs/ai-audit.jsonl
 ```
 
 ## 2. 关键运行时对象
@@ -91,6 +97,24 @@ Markdown 文件 + SQLite（WAL）+ FTS5 索引 + 回收站
 
 `VACUUM INTO` 生成数据库一致性快照 → 流式写入 ZIP（边写边算 SHA-256）→ 写入 `manifest.json` →
 `backup_validate` 复算哈希与数量 → `backup_restore` 只允许恢复到空目录。
+
+### 3.5 研究助手（V1.2.1 阶段 D）
+
+```text
+research_start  → 校验课题（过于宽泛要追问范围）→ 拆 3–5 个子问题（模板）→ 本地基线（kb_search）→ 会话落盘
+research_collect→ 本地 FTS5 检索 → 按「意图标记」把材料归属到子问题 → 逐条分级（A–E）
+                  └ 联网档位开启 + 本次确认 + 已配置检索源时才走外部检索（失败/未配置都只警告）
+research_verify → 按子问题汇总：≥2 个独立来源才算交叉验证；正负表述对立判为「冲突」（不选边）
+research_compose→ 六段报告（结论先行 / 关键事实 / 争议 / 与本库关系 / 待验证 / 参考来源）
+                  └ 生成侧：本地模型（开启且可用）否则模板实现；失败自动降级并写警告
+research_proposal→ 标题 / 分类 / diff / 同标题提示（不覆盖）
+research_write  → 用户确认后 note_create 或 note_save（追加留历史快照）→ 补 N1 元数据
+```
+
+- 会话存 `.knowledge/research/<sessionId>.json`（可丢弃的中间产物，删掉不影响笔记）；
+- 每一步都写 `research_*` 审计（`capability / outbound / outcome / durationMs / note`，**不含正文**）；
+- 打分由决策层给出：`credibility`（模型分与级别折算各半）、`confidence`（交叉验证折扣），
+  provider 标识写进报告（`rule` / `local.ollama:<模型>`）。
 
 ## 4. 可替换性设计
 
@@ -204,3 +228,34 @@ graph_get
 
 图谱**不落库**，与反链面板同源（都由 `note_links` 派生），因此 `links_rebuild` 即可整体修复。
 前端不引入第三方可视化依赖，布局收敛后停止 `requestAnimationFrame`，避免大库常驻耗电。
+
+### 5.5 AI 决策层与研究助手（V1.2.1 阶段 D）
+
+```text
+命令层 commands/{ai,research}_commands.rs        ← 只转发
+   ▼
+application/ai/policy.rs      AiPolicyService    ← ★ 唯一的闸门判定点 + 审计
+   │   ① 总开关（默认关）② 联网档位（默认「仅本地」）+ 本次确认 ③ 抓取正文开关
+   │   ④ 域名黑名单（强制丢弃）/ 白名单（非空才生效）
+   ▼
+application/ai/tools.rs       AiTools            ← 只读：kb_search / note_read / web_fetch / web_search
+   ▼
+application/ai/research.rs    ResearchService    ← 五步流程 + 会话落盘 + 报告渲染
+   ├─ source_grade.rs         A–E 分级（纯函数：域名内置表 → 内容自证 → 兜底「弱」）
+   ├─ web_search.rs           检索源模板 {query}/{limit} + 三种 JSON 形状 + 注入判定
+   ├─ template_provider.rs    无模型时的报告模板（文本自带「未接模型」标注）
+   └─ local_model.rs          OllamaModel：GenerativeModel（生成）+ DecisionModel（打分）
+                              ← 只连本机；开关默认关；失败自动降级
+   ▼
+application/ai/traits.rs      DecisionModel / GenerativeModel / Retriever  ← 接口预留（Jev 的插入点）
+```
+
+边界与不变量（与 [AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md) §9.7 一致）：
+
+1. **工具只读**：任何写库都必须回到「建议 + 用户确认」再走常规业务命令，AI 不直接写；
+2. **默认不外发**：没开总开关 / 没开联网档位 / 没确认时，外部工具返回 `AI_DISABLED` / `NETWORK_DISABLED`
+   且**不发起任何请求**（测试用「指向不可达地址仍只返回闸门错误」来证明）；
+3. **网页内容是数据不是指令**：抓取结果剥 HTML、限长，命中明显的提示词注入特征即**丢弃**该页；
+4. **审计不含正文**：只记时间 / 能力 / 是否外发 / 结果 / 耗时 / 备注；
+5. **可降级**：没有 Jev 用规则表（`RuleDecisionProvider`），没有模型用模板实现，
+   因此「调研 → 报告 → 写回」在完全离线的机器上也能跑通。

@@ -74,7 +74,11 @@ AI 编程工具必须：
 5. 输出变更摘要与未解决问题。
 
 禁止：绕过仓储直接写 SQL、为通过编译删除测试、未经确认引入新框架、
-修改数据库结构却不提供迁移、自动引入云服务或 AI 依赖。
+修改数据库结构却不提供迁移、自动引入云服务或远程模型。
+
+关于 AI 依赖的边界（2026-10-11 按已确认口径更新）：允许本地形态的模型依赖
+（Ollama HTTP，默认**关闭**、只允许本机地址、失败自动降级）；**不允许**在未获确认时
+引入任何云端模型或第三方检索服务（检索源地址由用户在设置里自行配置，应用不预置）。
 
 ## 7. 提交前检查清单
 
@@ -96,11 +100,15 @@ pnpm build && pnpm test:e2e      # 端到端 UI 验证，截图输出到 docs/sc
 | 新增或修改命令、DTO、错误码 | `docs/API_CONTRACT.md` |
 | 界面布局、交互、快捷键变化 | `docs/UI_SPECIFICATION.md`（必要时重跑 E2E 更新 `docs/screenshots/`） |
 | 模块划分、数据流、与设计文档的差异 | `docs/ARCHITECTURE.md` |
+| 新增 AI 能力 / 闸门 / 工具 / 研究对象 | `docs/AI_ARCHITECTURE_PLAN.md`（接口与边界）+ `docs/ARCHITECTURE.md` 的 AI 层 |
 | 表结构或迁移 | `docs/DATABASE_SCHEMA.md` + 新增迁移文件 |
 | 阶段完成 / 排期调整 | `docs/ROADMAP.md`、`docs/PLAN_V1.1.md` |
 
-版本号在 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`
-与 `docs/CHANGELOG.md` 四处必须一致。
+版本号必须一致的地方：
+
+- **可机检的四处**：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、
+  `src-tauri/tauri.conf.json`（发布工作流的 preflight 会拦截不一致的标签）；
+- 另外 `docs/CHANGELOG.md` 的版本小节也要同步，否则用户看到的「当前构建」会对不上。
 
 ## 9. 跨平台产物更新规则
 

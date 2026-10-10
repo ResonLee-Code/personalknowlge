@@ -7,10 +7,14 @@ Debian 12+、Fedora 38+、Arch 等，需 WebKitGTK 4.1）。
 
 | 项目 | 现状 |
 | --- | --- |
-| 应用代码 | **V1.2.0**（与 macOS / Windows 同一份代码与数据库 schema 6） |
+| 应用代码 | **V1.2.1 的内容**（与 macOS / Windows 同一份代码；数据库 schema 9） |
 | Linux 安装包 | ⏳ **尚未产出**：Tauri 不支持从 macOS 交叉编译到 Linux，必须在 Linux 上构建（本仓库已备好脚本与 CI） |
 | macOS 安装包 | ✅ V1.2.0（dmg sha256 79dbc9b0…） |
 | Windows 安装包 | ✅ V1.2.0（交叉编译未签名，待真机验收） |
+
+> ⚠️ **安装包落后于代码**：V1.2.1 的功能（子文档层级、目录管理页、网页剪藏、AI 闸门与研究助手等）
+> 还没进任何安装包；打包按指令暂停。恢复打包时按
+> [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) 的 F 节执行。
 
 ## 一、产出安装包（二选一）
 
@@ -104,6 +108,8 @@ sudo dnf install webkit2gtk4.1 libappindicator-gtk3 librsvg2
 | L8 | 导入导出 | Obsidian / Notion 目录导入、md/docx/pdf 导出、ZIP 备份与恢复 |
 | L9 | 卸载 | 删除应用（或 `apt remove`）后知识库目录与笔记完整保留 |
 
-> 已在本机（macOS）自动化验证的公共部分（数据库 schema 6 迁移、索引自动重建、
-> 1 万篇导入 4 秒、三类检索召回 100%）见 [ACCEPTANCE_V1.2.0.md](./ACCEPTANCE_V1.2.0.md)；
+> 已在本机（macOS）自动化验证的公共部分（schema 5 → 9 的前向迁移、索引自动重建、
+> 3 万篇图谱 811.7 ms、1 万篇导入 4.5 s、四类检索召回 100%）见
+> [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md)；上一版产物验收见
+> [ACCEPTANCE_V1.2.0.md](./ACCEPTANCE_V1.2.0.md)。
 > Linux 侧差异主要是 WebKitGTK 版本与打包格式，需按上表逐项确认。

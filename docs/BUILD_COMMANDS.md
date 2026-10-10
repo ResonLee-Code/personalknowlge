@@ -55,9 +55,9 @@ pnpm tauri build --no-bundle
 `tauri.conf.json → build.beforeBuildCommand`（即 `pnpm build` = `tsc --noEmit && vite build` → `dist/`），
 再执行 `cargo build --release`。
 
-| 平台 | 可执行文件路径 | 当前 1.2.0 体积 |
+| 平台 | 可执行文件路径 | 体积（2026-10-11 实测） |
 | --- | --- | --- |
-| macOS arm64 | `src-tauri/target/release/personal-knowledge-os` | V1.2.0 为 7,787,328 B；含 P1/P2 新功能后为 7,936,368 B |
+| macOS arm64 | `src-tauri/target/release/personal-knowledge-os` | **9,792,448 B（9.79 MB）**；V1.2.0 为 7,787,328 B，差值是网页剪藏与联网检索引入的 `ureq` / `dom_query` |
 | Windows x64（交叉编译） | `src-tauri/target/x86_64-pc-windows-gnu/release/personal-knowledge-os.exe` | 约 8.5 MB |
 | Linux x64 | `src-tauri/target/release/personal-knowledge-os` | 与平台/链接方式有关 |
 
@@ -97,7 +97,7 @@ pnpm tauri build --bundles app dmg
 - `src-tauri/target/release/bundle/macos/Personal Knowledge OS.app`
 - `src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.2.0_aarch64.dmg`
 
-未签名，首次打开需右键 →「打开」（见 [ACCEPTANCE_V1.2.0.md](./ACCEPTANCE_V1.2.0.md) 的签名说明）。
+未签名，首次打开需右键 →「打开」（见 [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) 的已知限制）。
 目前只出 arm64；要 Intel 包需 `--target x86_64-apple-darwin` 并提前 `rustup target add`。
 
 > 建议**始终显式写 `--bundles`**：`tauri.conf.json` 的 `bundle.targets` 为了跨平台发版同时列了
@@ -206,4 +206,5 @@ dist-windows/                           # Windows 安装包与便携版（NSIS �
 - [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)：发版流程与 CI 流水线细节
 - [DEVELOPMENT_RULES.md](./DEVELOPMENT_RULES.md)：本地回归命令与文档同步规则
 - [WINDOWS_INSTALL_GUIDE.md](./WINDOWS_INSTALL_GUIDE.md) / [LINUX_INSTALL_GUIDE.md](./LINUX_INSTALL_GUIDE.md)：安装与放行说明
-- [ACCEPTANCE_V1.2.0.md](./ACCEPTANCE_V1.2.0.md)：产物完整性与验收清单
+- [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md)：当前版本的验收清单（回归矩阵 / 性能实测 / 待打包与真机项）
+- [ACCEPTANCE_V1.2.0.md](./ACCEPTANCE_V1.2.0.md)：上一版产物完整性（安装包仍对应该版本）

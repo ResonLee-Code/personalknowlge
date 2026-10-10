@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 功能计划 | P1 6 项 + P2 7 项 **全部完成** | [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) §7.4 逐条 ✅；命令/迁移/组件均在仓库中 |
 | 质量门 | 前端 187 用例、Rust 22 组测试、E2E 主流程 30 步全绿 | 最近一次全量回归（2026-10-10） |
-| 版本号 | 代码已是 V1.2.1 的内容，但四处版本号仍是 **1.2.0** | `package.json` / `Cargo.toml` / `tauri.conf.json` |
+| 版本号 | 代码已是 V1.2.1 的内容，但四处版本号仍是 **1.2.0** | `package.json` / `Cargo.toml` / `Cargo.lock` / `tauri.conf.json` |
 | 安装包 | macOS V1.2.0 已出；Windows V1.2.0 已同步；**均未包含 V1.2.1 的功能** | `src-tauri/target/release/bundle/`、`dist-windows/` |
 | 文档 | 功能文档已同步；**路线图与旧对标表此前有漂移，本次已校正** | 本文件 + ROADMAP 更新 |
 
