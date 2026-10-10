@@ -315,6 +315,9 @@ impl IndexService {
             > BULK_ADOPT_THRESHOLD;
 
         let mut to_adopt: Vec<String> = Vec::new();
+        // 单文件路径采纳时收集「frontmatter 声明了父文档」的笔记，扫描末尾统一解析
+        // （父文档可能排在子文档后面才被采纳）。
+        let mut declared_parents: Vec<(String, String)> = Vec::new();
         for relative in files {
             match by_path.remove(&relative) {
                 Some(note) => {
@@ -329,7 +332,13 @@ impl IndexService {
                         // 批量导入：先收集，循环结束后按批事务写入
                         to_adopt.push(relative);
                     } else {
-                        self.adopt_file(&relative, &lookup, &mut report, false)?;
+                        self.adopt_file(
+                            &relative,
+                            &lookup,
+                            &mut report,
+                            false,
+                            &mut declared_parents,
+                        )?;
                     }
                 }
             }
@@ -337,6 +346,7 @@ impl IndexService {
         if !to_adopt.is_empty() {
             self.adopt_files_batched(&to_adopt, &lookup, &mut report)?;
         }
+        self.resolve_declared_parents(&declared_parents)?;
 
         // 剩余记录对应的文件已消失
         for note in by_path.values() {
@@ -646,40 +656,49 @@ impl IndexService {
                 Ok(())
             })?;
         }
-        // 3) 解析子文档层级：frontmatter 的 parent 可能是 id，也可能是标题；
-        //    放在所有批次之后统一处理，保证跨批次的父子引用也能解析。
+        // 3) 解析子文档层级：放在所有批次之后统一处理，保证跨批次的父子引用也能解析。
         let pending: Vec<(String, String)> = prepared
             .iter()
             .filter_map(|item| item.declared_parent.clone().map(|parent| (item.note.id.clone(), parent)))
             .collect();
-        if !pending.is_empty() {
-            let titles: HashMap<String, String> = self
-                .ctx
-                .db
-                .with_conn(|conn| {
-                    SqliteNoteRepository.list_by_status(conn, &workspace_id, NoteStatus::Active)
-                })?
-                .into_iter()
-                .map(|note| (note.title.to_lowercase(), note.id))
-                .collect();
-            self.ctx.db.with_transaction(|tx| {
-                for (note_id, declared) in &pending {
-                    if SqliteNoteRepository.get(tx, declared)?.is_some() {
-                        if declared != note_id {
-                            SqliteNoteRepository.set_parent(tx, note_id, Some(declared))?;
-                        }
-                        continue;
+        self.resolve_declared_parents(&pending)?;
+        Ok(())
+    }
+
+    /// 统一解析 frontmatter 里声明的父文档（`parent` 可能是**笔记 id**，也可能是**标题**）。
+    ///
+    /// 必须等「本轮所有文件都入库」之后再跑：单文件路径是按文件名顺序采纳的，
+    /// 子文档可能先于父文档被读到（例如删库后重扫、或一次拖入多篇）。
+    fn resolve_declared_parents(&self, pending: &[(String, String)]) -> Result<()> {
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let workspace_id = self.workspace_id().to_string();
+        let titles: HashMap<String, String> = self
+            .ctx
+            .db
+            .with_conn(|conn| {
+                SqliteNoteRepository.list_by_status(conn, &workspace_id, NoteStatus::Active)
+            })?
+            .into_iter()
+            .map(|note| (note.title.to_lowercase(), note.id))
+            .collect();
+        self.ctx.db.with_transaction(|tx| {
+            for (note_id, declared) in pending {
+                if SqliteNoteRepository.get(tx, declared)?.is_some() {
+                    if declared != note_id {
+                        SqliteNoteRepository.set_parent(tx, note_id, Some(declared))?;
                     }
-                    if let Some(parent_id) = titles.get(&declared.to_lowercase()) {
-                        if parent_id != note_id {
-                            SqliteNoteRepository.set_parent(tx, note_id, Some(parent_id))?;
-                        }
+                    continue;
+                }
+                if let Some(parent_id) = titles.get(&declared.to_lowercase()) {
+                    if parent_id != note_id {
+                        SqliteNoteRepository.set_parent(tx, note_id, Some(parent_id))?;
                     }
                 }
-                Ok(())
-            })?;
-        }
-        Ok(())
+            }
+            Ok(())
+        })
     }
 
     /// 采纳磁盘上的新文件。
@@ -689,6 +708,7 @@ impl IndexService {
         lookup: &super::lookup::CategoryLookup,
         report: &mut ScanReport,
         defer_derived: bool,
+        declared_parents: &mut Vec<(String, String)>,
     ) -> Result<()> {
         let stored = match self.ctx.storage.read_note(relative) {
             Ok(stored) => stored,
@@ -815,6 +835,18 @@ impl IndexService {
             }
             if let Err(error) = RelationService::new(Arc::clone(&self.ctx)).refresh_note(&note) {
                 tracing::debug!(target: "relations", "采纳文件时刷新关系失败：{}", error.message);
+            }
+            // 子文档层级：frontmatter 的 `parent` 可能是 id 或标题。
+            // 单文件路径（监听回调、零散新增、小库重扫）先记下来，
+            // 等整轮扫描结束再统一解析——父文档可能排在子文档后面才被采纳。
+            let declares_parent = stored
+                .frontmatter
+                .parent
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty());
+            if declares_parent {
+                declared_parents.push((note.id.clone(), stored.frontmatter.parent.clone().unwrap_or_default()));
             }
         }
         Ok(())

@@ -1,7 +1,8 @@
-//! 升级路径验收（V1.2.0）：旧版本工作区打开后应完成迁移并自动重建搜索索引。
+//! 升级路径验收：旧版本工作区打开后应完成迁移并自动重建搜索索引。
 //!
 //! 场景：库停留在迁移 005（没有 FTS rowid 映射表，索引里是旧格式记录），
-//! 用当前版本打开，期望：schema → 6、映射表建立、FTS 自动重建（已索引 == 总数）、检索可用。
+//! 用当前版本打开，期望：schema → **9**（006 映射表 / 007 层级 / 008 手动排序 / 009 置顶）、
+//! 映射表建立、FTS 自动重建（已索引 == 总数）、检索可用。
 
 use std::sync::Arc;
 
@@ -24,7 +25,7 @@ fn opening_a_v1_1_workspace_migrates_and_rebuilds_search_index() {
         .create("升级测试库", &root.to_string_lossy())
         .expect("创建工作区");
 
-    // 造两篇笔记（当前版本，schema 6）
+    // 造两篇笔记（先按当前版本建库，再把迁移记录回退成旧版本来模拟旧库）
     let notes = NoteService::new(app.context().unwrap());
     let first = notes
         .create(CreateNoteInput {
