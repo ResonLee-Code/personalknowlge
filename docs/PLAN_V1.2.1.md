@@ -21,7 +21,7 @@
 | A1 | 版本号四处升到 `1.2.1`（`package.json` / `Cargo.toml` / `Cargo.lock` / `tauri.conf.json`），CHANGELOG 去掉「未发布」 | 四处一致；`pnpm tauri build --no-bundle` 产物版本信息为 1.2.1 |
 | A2 | 全量回归：`cargo test --offline`、`pnpm test`、`pnpm lint`、`pnpm build`、`pnpm test:e2e` | 全绿，无跳过 |
 | A3 | 三平台产物：推 `v1.2.1` 标签走 [release.yml](../.github/workflows/release.yml)，或本机 macOS + 交叉 Windows + Linux 脚本 | Release 附 `.dmg` / `.exe`+portable `.zip` / `.deb`+`.rpm`+`.AppImage` 与 `SHA256SUMS-*` |
-| A4 | 新建 `ACCEPTANCE_V1.2.1.md`（沿用 1.2.0 结构：产物完整性 / 升级迁移 / 性能 / 真机人工项 / Windows 对照 / 已知限制 / 自动化实测） | 自动化项有证据；人工项列成可勾选清单 |
+| A4 | ~~新建 `ACCEPTANCE_V1.2.1.md`~~ ✅ **已完成（2026-10-11）**：`docs/ACCEPTANCE_V1.2.1.md`（回归矩阵 / 3 万图谱与 1 万检索实测 / 迁移 / 逐功能验收证据 / 真机人工项 10 条 / 产物待打包清单 / 已知限制） | 自动化项均有命令与数字；产物与真机项列成可勾选清单 |
 | A5 | 真机人工验收（需你操作）：编辑器输入与 `[[` 补全、原生下拉/日期、导入导出对话框、备份恢复 | 逐条勾选；未通过项登记为缺陷 |
 
 **为什么放在最前**：V1.2.1 的功能量已经够一个版本（子文档层级、拖拽排序、置顶、历史版本、
