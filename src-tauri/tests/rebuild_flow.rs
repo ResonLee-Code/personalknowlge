@@ -235,3 +235,129 @@ fn externally_added_child_file_is_nested_even_when_the_parent_is_declared_by_tit
         "按标题声明的父文档也要在这一轮扫描里解析出来（不能等下次外部编辑）"
     );
 }
+
+#[test]
+fn bulk_adoption_projects_hierarchy_order_pinned_metadata_links_and_relations() {
+    let fixture = Fixture::new();
+    let parent_id = "note_bulk_parent_0001";
+    let parent_title = "批量层级父文档";
+    let root = fixture.workspace.path().join("00_Inbox");
+
+    // 父文档：带置顶 + 手动顺序 + 标签 + 来源元数据
+    std::fs::write(
+        root.join("bulk_父文档.md"),
+        format!(
+            "---\nid: {parent_id}\ntitle: {parent_title}\ntype: note\nstatus: active\n\
+             tags:\n  - 批量\npinned: true\norder: 2\nsource_type: official\n\
+             source_ref: https://example.com/bulk\nsource_reliability: 5\nvalid_until: 2027-01-31\n\
+             ---\n\n父文档正文\n"
+        ),
+    )
+    .expect("写父文档");
+
+    // 60 篇子文档（> 50 → 走批量采纳路径）：奇数篇按 id 声明父文档，偶数篇按标题
+    let mut child_ids = Vec::new();
+    for index in 1..=60 {
+        let child_id = format!("note_bulk_child_{index:04}");
+        let declared = if index % 2 == 1 {
+            parent_id.to_string()
+        } else {
+            parent_title.to_string()
+        };
+        let extra = match index {
+            1 => "relations:\n  - type: RELATED_TO\n    target: 批量层级父文档\n".to_string(),
+            2 => "source_type: book\nsource_reliability: 3\n".to_string(),
+            3 => "order: 5\n".to_string(),
+            _ => String::new(),
+        };
+        let body = if index == 3 {
+            format!("子文档正文见 [[{parent_title}]]")
+        } else {
+            "子文档正文".to_string()
+        };
+        std::fs::write(
+            root.join(format!("bulk_子文档_{index:04}.md")),
+            format!(
+                "---\nid: {child_id}\ntitle: 批量子文档 {index:04}\ntype: note\nstatus: active\nparent: {declared}\n{extra}---\n\n{body}\n"
+            ),
+        )
+        .expect("写子文档");
+        child_ids.push(child_id);
+    }
+
+    let report =
+        personal_knowledge_os_lib::application::index_service::IndexService::new(fixture.context())
+            .scan_workspace()
+            .expect("扫描");
+    assert!(
+        report.added >= 61,
+        "一次采纳 61 篇应走批量路径（added = {}）",
+        report.added
+    );
+
+    let notes = fixture.notes();
+    let parent = notes.get(parent_id).expect("父文档");
+    assert!(parent.note.pinned, "批量路径要投影 pinned");
+    assert_eq!(parent.note.sort_order, 2, "批量路径要投影 order");
+    assert_eq!(parent.note.source_type.as_deref(), Some("official"));
+    assert_eq!(parent.note.source_reliability, Some(5));
+    assert_eq!(parent.note.valid_until.as_deref(), Some("2027-01-31"));
+
+    // 每一篇子文档（无论按 id 还是按标题声明）都要挂上去
+    for child_id in &child_ids {
+        let child = notes.get(child_id).expect("子文档");
+        assert_eq!(
+            child.note.parent_id.as_deref(),
+            Some(parent_id),
+            "{} 的父文档未被解析",
+            child.note.title
+        );
+    }
+    assert_eq!(
+        notes.get(&child_ids[2]).expect("第 3 篇").note.sort_order,
+        5,
+        "子文档的 order 也要投影"
+    );
+    assert_eq!(
+        notes.get(&child_ids[1]).expect("第 2 篇").note.source_type.as_deref(),
+        Some("book")
+    );
+
+    // 标签（批量路径在事务里写 note_tags）
+    let tags = TagService::new(fixture.context()).list().expect("标签");
+    assert!(tags.iter().any(|tag| tag.name == "批量"), "标签要建立");
+
+    // 双向链接（批处理结束后统一重建）
+    let backlinks = LinkService::new(fixture.context())
+        .backlinks(parent_id)
+        .expect("反链");
+    assert!(
+        backlinks.iter().any(|link| link.note_id == child_ids[2]),
+        "第 3 篇指向父文档的 [[链接]] 要在批量重建后生效：{backlinks:?}"
+    );
+
+    // 类型化关系（frontmatter `relations:`）
+    let relations = personal_knowledge_os_lib::application::relation_service::RelationService::new(
+        fixture.context(),
+    )
+    .list(&child_ids[0])
+    .expect("关系列表");
+    assert!(
+        relations
+            .outgoing
+            .iter()
+            .any(|view| view.relation_type == "RELATED_TO" && view.target_title == parent_title),
+        "frontmatter 里的 RELATED_TO 关系要建立：{relations:?}"
+    );
+
+    // FTS（批量路径在同一事务里写索引）
+    let hits = SearchService::new(fixture.context())
+        .search(SearchQuery {
+            keyword: "批量层级父文档".to_string(),
+            page: Some(1),
+            page_size: Some(20),
+            ..Default::default()
+        })
+        .expect("检索");
+    assert!(hits.hits.iter().any(|hit| hit.note.id == parent_id), "批量导入后立即可检索");
+}
