@@ -34,6 +34,10 @@ pub enum ErrorCode {
     ExportFailed,
     IoError,
     InternalError,
+    /// AI 能力总开关关闭（AI_ARCHITECTURE_PLAN §6）
+    AiDisabled,
+    /// 联网档位为「仅本地」，或本次外发未获确认
+    NetworkDisabled,
 }
 
 impl ErrorCode {
@@ -59,6 +63,8 @@ impl ErrorCode {
             ErrorCode::ExportFailed => "EXPORT_FAILED",
             ErrorCode::IoError => "IO_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
+            ErrorCode::AiDisabled => "AI_DISABLED",
+            ErrorCode::NetworkDisabled => "NETWORK_DISABLED",
         }
     }
 }

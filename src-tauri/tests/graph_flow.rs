@@ -191,7 +191,7 @@ fn samples_large_graph_with_category_quotas_and_connectivity() {
     let fixture = Fixture::new();
     let context = fixture.app.context().expect("工作区已打开");
     let categories = CategoryService::new(Arc::clone(&context));
-    let mut make_category = |name: &str| {
+    let make_category = |name: &str| {
         categories
             .create(CreateCategoryInput {
                 name: name.to_string(),

@@ -8,9 +8,12 @@
 //! - 差距盘点与技术选型：`docs/NEXT_GEN_ANALYSIS.md`
 //! - 唯一已实现的是离线兜底 `RuleDecisionProvider`（无网络、无新依赖）
 
+pub mod policy;
 pub mod rule_provider;
+pub mod tools;
 pub mod traits;
 
+pub use policy::AiPolicyService;
 pub use rule_provider::RuleDecisionProvider;
 pub use traits::{
     DecisionCandidate, DecisionChoice, DecisionKind, DecisionModel, DecisionResult, DecisionState,

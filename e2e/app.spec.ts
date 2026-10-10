@@ -552,6 +552,23 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByText('网页剪藏')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '38-web-clip-note.png') });
 
+  // 32. 设置 → AI（D1）：默认最保守口径；联网档位需先确认说明
+  await page.goto('/#/settings');
+  await expect(page.getByTestId('settings-ai-section')).toBeVisible();
+  await expect(page.getByTestId('ai-network')).toHaveValue('localOnly');
+  await expect(page.getByTestId('ai-enabled')).not.toBeChecked();
+
+  await page.getByTestId('ai-enabled').click();
+  await expect(page.getByTestId('ai-enabled')).toBeChecked();
+  await page.getByTestId('ai-network').selectOption('allowNetwork');
+  await expect(page.getByTestId('ai-network-confirm')).toBeVisible();
+  await expect(page.getByTestId('ai-network-confirm')).toContainText('不会上传整篇知识库');
+  await page.screenshot({ path: path.join(SHOTS, '39-ai-policy.png') });
+  await page.getByTestId('ai-network-confirm-ok').click();
+  await expect(page.getByTestId('ai-network')).toHaveValue('allowNetwork');
+  await page.getByTestId('ai-fetch-body').click();
+  await expect(page.getByTestId('ai-fetch-body')).toBeChecked();
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

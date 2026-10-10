@@ -73,6 +73,8 @@ pub struct AppSettings {
     pub last_opened_note_id: Option<String>,
     /// 最近一次使用的分类
     pub last_category_id: Option<String>,
+    /// AI 策略（默认最保守：总开关关闭、联网仅本地；见 AI_ARCHITECTURE_PLAN §6 / §9.7）
+    pub ai: crate::domain::ai::AiPolicy,
 }
 
 impl Default for AppSettings {
@@ -91,6 +93,7 @@ impl Default for AppSettings {
             list_sort: "updatedDesc".to_string(),
             last_opened_note_id: None,
             last_category_id: None,
+            ai: crate::domain::ai::AiPolicy::default(),
         }
     }
 }

@@ -3,6 +3,7 @@
 //! 命令只做参数转发：把阻塞的业务逻辑放到后台线程执行，
 //! 避免阻塞 UI 线程（设计文档 6.1：索引更新不阻塞编辑器）。
 
+pub mod ai_commands;
 pub mod attachment_commands;
 pub mod app_commands;
 pub mod backup_commands;

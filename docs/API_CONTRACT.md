@@ -356,7 +356,23 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 单页读取上限 3 MB、整体超时 20 秒、正文 Markdown 上限 12 万字符（超出截断并注明）；
 - 抽取失败（如需要登录）返回 `INVALID_INPUT` 并提示原因。
 
-## 23. 前端服务层
+## 23. AI 策略与工具（V1.2.1 阶段 D1 / AI_ARCHITECTURE_PLAN §6、§9.5）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `ai_policy_get` | — | `AiPolicy`（默认 `enabled=false` / `network=localOnly` / `allowFetchBody=false`） |
+| `ai_policy_set` | `{ input: UpdateAiPolicyInput }` | `AiPolicy` |
+| `ai_audit_tail` | `{ limit }` | `AiAuditEntry[]`（新的在前，不含正文） |
+| `ai_kb_search` | `{ keyword, limit }` | `KbHit[]`（复用 FTS5，不联网） |
+| `ai_web_fetch` | `{ url, confirmed }` | `ClippedPage` |
+| `ai_web_search` | `{ keyword, limit }` | `KbHit[]`（阶段 D3 接入前返回「未接入」） |
+
+- 闸门顺序：总开关 → 联网档位 → 单次确认 → 抓取正文开关 → 域名黑名单 → 域名白名单；
+  任一不满足即返回 `AI_DISABLED` / `NETWORK_DISABLED`，且**不发起任何请求**；
+- 切换联网档位会清空既有的确认时间戳（切回「仅本地」后再切到联网需重新确认一次）；
+- 审计写在 `.knowledge/logs/ai-audit.jsonl`，仅记录行为元数据（时间 / 能力 / 是否外发 / 结果 / 耗时 / 备注）。
+
+## 24. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 

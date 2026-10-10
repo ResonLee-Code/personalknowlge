@@ -8,12 +8,15 @@
 
 import { parseWikilinks, type WikiLinkToken } from '@/lib/wikilink';
 import type {
+  AiAuditEntry,
+  AiPolicy,
   AppError,
   AppSettings,
   Backlink,
   BackupInfo,
   Category,
   CategoryNode,
+  ClippedPage,
   CreateNoteInput,
   GraphData,
   GraphNode,
@@ -33,6 +36,7 @@ import type {
   SetSourceInput,
   TextSegment,
   UnresolvedLink,
+  UpdateAiPolicyInput,
   Workspace,
   WorkspaceOpenResult,
 } from '@/types';
@@ -50,6 +54,9 @@ interface MockState {
   backups: BackupInfo[];
   /** 版本历史（内存实现，供浏览器预览与 E2E 验证「历史版本」交互） */
   history: Record<string, MockHistoryEntry[]>;
+  /** AI 策略与审计（默认最保守，与 Rust 端一致） */
+  ai: AiPolicy;
+  aiAudit: AiAuditEntry[];
 }
 
 interface MockHistoryEntry {
@@ -97,6 +104,17 @@ const emptySettings: AppSettings = {
   lastCategoryId: null,
 };
 
+const defaultAiPolicy: AiPolicy = {
+  enabled: false,
+  network: 'localOnly',
+  networkConfirmedAt: null,
+  allowFetchBody: false,
+  domainAllowlist: [],
+  domainDenylist: [],
+  budget: { maxSubquestions: 5, maxPages: 12, maxDurationSecs: 480 },
+  auditMaxEntries: 500,
+};
+
 let state: MockState = load();
 
 function load(): MockState {
@@ -119,6 +137,8 @@ function load(): MockState {
     settings: { ...emptySettings },
     backups: [],
     history: {},
+    ai: { ...defaultAiPolicy },
+    aiAudit: [],
   };
 }
 
@@ -220,6 +240,106 @@ function toDetail(note: Note): NoteDetail {
       createdAt: note.createdAt,
       noteCount: 1,
     })),
+  };
+}
+
+/** 域名规范化（与 Rust 端 `normalize_domains` 一致）。 */
+function normalizeDomains(list: string[]): string[] {
+  const seen: string[] = [];
+  list.forEach((item) => {
+    const host = item
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .split(/[/?#]/)[0]!
+      .split('@')
+      .pop()!
+      .split(':')[0]!
+      .replace(/^www\./i, '')
+      .toLowerCase();
+    if (host && !seen.includes(host)) seen.push(host);
+  });
+  return seen;
+}
+
+function domainMatches(rule: string, host: string): boolean {
+  const normalized = rule.replace(/^www\./i, '').toLowerCase();
+  return normalized.length > 0 && (host === normalized || host.endsWith(`.${normalized}`));
+}
+
+function hostOf(url: string): string {
+  return url
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .split(/[/?#]/)[0]!
+    .split('@')
+    .pop()!
+    .split(':')[0]!
+    .replace(/^www\./i, '')
+    .toLowerCase();
+}
+
+/** AI 联网闸门（与后端 policy 的判定顺序一致）；返回非空表示应返回该错误。 */
+function checkAiNetworkGate(url: string, confirmed: boolean): ClippedPage | null {
+  const audit = (outcome: AiAuditEntry['outcome'], note: string) => {
+    state.aiAudit = pushAudit(state.aiAudit, 'web_fetch', false, outcome, note);
+  };
+  if (!state.ai.enabled) {
+    audit('denied', 'AI_DISABLED');
+    fail('AI_DISABLED', 'AI 能力未开启：请到「设置 → AI」打开总开关（默认关闭，且不会自动联网）。');
+  }
+  if (state.ai.network !== 'allowNetwork') {
+    audit('denied', 'NETWORK_DISABLED');
+    fail('NETWORK_DISABLED', '联网检索当前是「仅本地」：需要到「设置 → AI」切到「允许联网检索」。');
+  }
+  if (!state.ai.networkConfirmedAt || !confirmed) {
+    audit('denied', 'NETWORK_UNCONFIRMED');
+    fail('NETWORK_DISABLED', '本次联网尚未确认：请先确认，本次不会发起任何请求。');
+  }
+  if (!state.ai.allowFetchBody) {
+    audit('denied', 'FETCH_BODY_DISABLED');
+    fail('NETWORK_DISABLED', '抓取网页正文未开启：请在「设置 → AI」打开。');
+  }
+  const host = hostOf(url);
+  if (state.ai.domainDenylist.some((rule) => domainMatches(rule, host))) {
+    audit('denied', 'DOMAIN_DENIED');
+    fail('NETWORK_DISABLED', `域名 ${host} 在黑名单里，已拒绝抓取。`);
+  }
+  if (
+    state.ai.domainAllowlist.length > 0 &&
+    !state.ai.domainAllowlist.some((rule) => domainMatches(rule, host))
+  ) {
+    audit('denied', 'DOMAIN_NOT_ALLOWED');
+    fail('NETWORK_DISABLED', `域名 ${host} 不在白名单里，已拒绝抓取。`);
+  }
+  return null;
+}
+
+function pushAudit(
+  entries: AiAuditEntry[],
+  capability: string,
+  outbound: boolean,
+  outcome: AiAuditEntry['outcome'],
+  note: string | null,
+): AiAuditEntry[] {
+  const next = [...entries, { at: now(), capability, outbound, outcome, durationMs: 0, note }];
+  const limit = Math.max(50, state.ai.auditMaxEntries);
+  return next.slice(-limit);
+}
+
+/** 浏览器预览端的剪藏结果（不联网）。 */
+function mockClip(url: string): ClippedPage {
+  const normalized = url.startsWith('http') ? url : `https://${url}`;
+  const host = hostOf(normalized);
+  const markdown = `# 剪藏示例：${host}\n\n这是浏览器预览模式下的模拟抓取结果。`;
+  return {
+    url,
+    finalUrl: normalized,
+    title: `剪藏示例 · ${host}`,
+    site: host,
+    markdown,
+    wordCount: markdown.replace(/\s/g, '').length,
+    fetchedAt: now(),
+    bytes: markdown.length,
   };
 }
 
@@ -908,7 +1028,9 @@ export async function handleMockInvoke(
         noteTags: {},
         settings: { ...emptySettings },
         backups: [],
-    history: {},
+        history: {},
+        ai: { ...defaultAiPolicy },
+        aiAudit: [],
       };
       persist();
       return null;
@@ -1211,6 +1333,65 @@ export async function handleMockInvoke(
       persist();
       emit('notes://changed', { kind: 'modified', noteId: note.id });
       return toDetail(note);
+    }
+    case 'ai_policy_get':
+      requireWorkspace();
+      return state.ai;
+    case 'ai_policy_set': {
+      requireWorkspace();
+      const input = (payload.input ?? {}) as UpdateAiPolicyInput;
+      const next: AiPolicy = { ...state.ai };
+      if (typeof input.enabled === 'boolean') next.enabled = input.enabled;
+      if (input.network && input.network !== next.network) {
+        next.network = input.network;
+        next.networkConfirmedAt = null; // 切档位要重新确认（与后端一致）
+      }
+      if (input.confirmNetwork && next.network === 'allowNetwork') {
+        next.networkConfirmedAt = now();
+      }
+      if (typeof input.allowFetchBody === 'boolean') next.allowFetchBody = input.allowFetchBody;
+      if (input.domainAllowlist) next.domainAllowlist = normalizeDomains(input.domainAllowlist);
+      if (input.domainDenylist) next.domainDenylist = normalizeDomains(input.domainDenylist);
+      if (input.budget) {
+        next.budget = {
+          maxSubquestions: Math.min(10, Math.max(1, Math.round(input.budget.maxSubquestions))),
+          maxPages: Math.min(50, Math.max(1, Math.round(input.budget.maxPages))),
+          maxDurationSecs: Math.min(1800, Math.max(30, Math.round(input.budget.maxDurationSecs))),
+        };
+      }
+      state.ai = next;
+      persist();
+      return state.ai;
+    }
+    case 'ai_audit_tail':
+      requireWorkspace();
+      return [...state.aiAudit].reverse().slice(0, Math.max(1, Number(payload.limit ?? 20)));
+    case 'ai_kb_search': {
+      requireWorkspace();
+      const keyword = String(payload.keyword ?? '').trim();
+      if (!keyword) fail('INVALID_INPUT', '检索关键词不能为空。');
+      const limit = Math.max(1, Math.min(50, Number(payload.limit ?? 8)));
+      const result = listNotes({ keyword, pageSize: limit });
+      return result.items.map((item) => ({
+        noteId: item.id,
+        title: item.title,
+        snippet: (item.snippet ?? []).map((segment) => segment.text).join(''),
+      }));
+    }
+    case 'ai_web_fetch': {
+      requireWorkspace();
+      const gate = checkAiNetworkGate(String(payload.url ?? ''), Boolean(payload.confirmed));
+      if (gate) return gate;
+      const clipped = mockClip(String(payload.url));
+      state.aiAudit = pushAudit(state.aiAudit, 'web_fetch', true, 'ok', null);
+      persist();
+      return clipped;
+    }
+    case 'ai_web_search': {
+      requireWorkspace();
+      if (!state.ai.enabled) fail('AI_DISABLED', 'AI 能力未开启：请到「设置 → AI」打开总开关。');
+      fail('INVALID_INPUT', '联网搜索尚未接入（阶段 D3）：当前可先用「网页剪藏」按已知地址抓取。');
+      break;
     }
     case 'note_clip_url': {
       const raw = String(payload.url ?? '').trim();

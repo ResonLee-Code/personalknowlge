@@ -6,6 +6,7 @@ pub mod backup;
 pub mod category;
 pub mod graph;
 pub mod link;
+pub mod ai;
 pub mod note;
 pub mod search;
 pub mod settings;

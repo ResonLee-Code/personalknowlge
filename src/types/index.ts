@@ -23,7 +23,11 @@ export type ErrorCode =
   | 'BACKUP_FAILED'
   | 'EXPORT_FAILED'
   | 'IO_ERROR'
-  | 'INTERNAL_ERROR';
+  | 'INTERNAL_ERROR'
+  /** AI 能力总开关关闭 */
+  | 'AI_DISABLED'
+  /** 联网档位为「仅本地」或本次外发未确认 */
+  | 'NETWORK_DISABLED';
 
 export interface AppError {
   code: ErrorCode;
@@ -590,6 +594,57 @@ export interface TemplateSummary {
 export interface RenderTemplateInput {
   name: string;
   title?: string | null;
+}
+
+/** AI 联网档位（AI_ARCHITECTURE_PLAN §9.7：默认仅本地） */
+export type AiNetworkMode = 'localOnly' | 'allowNetwork';
+
+/** 研究预算上限 */
+export interface AiResearchBudget {
+  maxSubquestions: number;
+  maxPages: number;
+  maxDurationSecs: number;
+}
+
+/** AI 策略（持久化在工作区设置里，默认最保守） */
+export interface AiPolicy {
+  enabled: boolean;
+  network: AiNetworkMode;
+  /** 联网档位已被用户确认过的时间（首次使用再确认） */
+  networkConfirmedAt?: string | null;
+  allowFetchBody: boolean;
+  domainAllowlist: string[];
+  domainDenylist: string[];
+  budget: AiResearchBudget;
+  auditMaxEntries: number;
+}
+
+export interface UpdateAiPolicyInput {
+  enabled?: boolean;
+  network?: AiNetworkMode;
+  /** 置 true 表示用户确认了联网档位（写入时间戳） */
+  confirmNetwork?: boolean;
+  allowFetchBody?: boolean;
+  domainAllowlist?: string[];
+  domainDenylist?: string[];
+  budget?: AiResearchBudget;
+}
+
+/** AI 行为审计（不含正文） */
+export interface AiAuditEntry {
+  at: string;
+  capability: string;
+  outbound: boolean;
+  outcome: 'ok' | 'denied' | 'error';
+  durationMs: number;
+  note?: string | null;
+}
+
+/** 本地检索命中 */
+export interface KbHit {
+  noteId: string;
+  title: string;
+  snippet: string;
 }
 
 /** 网页剪藏结果（V1.2.1 C1）：抓取 + 抽取后的网页正文 */

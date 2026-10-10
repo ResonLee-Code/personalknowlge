@@ -1,4 +1,4 @@
-import { Database, FolderOpen, HardDrive, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Database, FolderOpen, HardDrive, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { AiSettingsPanel } from '@/features/settings/AiSettingsPanel';
 import { AUTOSAVE_DELAY_OPTIONS, FONT_SIZE_OPTIONS, ROUTES, THEME_OPTIONS } from '@/lib/constants';
 import { errorMessage, formatBytes, formatDateTime } from '@/lib/format';
 import { backupService } from '@/services/backupService';
@@ -295,6 +296,10 @@ export function SettingsPage() {
           </div>
         </Section>
 
+        <Section title="AI（第二代预留）" icon={Sparkles} testId="settings-ai-section">
+          <AiSettingsPanel />
+        </Section>
+
         <Section title="关于" icon={ShieldCheck}>
           <Row label="版本与运行信息" hint="包含应用版本、数据库版本与日志位置">
             <Button asChild size="sm" variant="secondary">
@@ -318,13 +323,19 @@ function Section({
   title,
   icon: Icon,
   children,
+  testId,
 }: {
   title: string;
   icon: typeof Database;
   children: ReactNode;
+  /** 供组件测试 / E2E 定位该区块 */
+  testId?: string;
 }) {
   return (
-    <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)]">
+    <section
+      data-testid={testId}
+      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)]"
+    >
       <header className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
         <Icon className="h-4 w-4 text-[var(--brand)]" />
         <h2 className="text-sm font-semibold text-[var(--ink)]">{title}</h2>
