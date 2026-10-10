@@ -55,6 +55,25 @@ pub fn file_timestamp(dt: DateTime<Local>) -> String {
     dt.format("%Y%m%d-%H%M%S").to_string()
 }
 
+/// 今天的日期：`YYYY-MM-DD`（报告抬头「资料截至 YYYY-MM-DD」用）。
+pub fn today_date() -> String {
+    Local::now().date_naive().format("%Y-%m-%d").to_string()
+}
+
+/// 从今天起偏移若干天的日期：`YYYY-MM-DD`（负数为过去）。
+pub fn date_offset_days(days: i64) -> String {
+    (Local::now().date_naive() + chrono::Duration::days(days))
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
+/// 两个 ISO/日期字符串之间的天数差（`later - earlier`）；任一无法解析时为 `None`。
+pub fn days_between(earlier: &str, later: &str) -> Option<i64> {
+    let start = parse_iso(earlier)?.date_naive();
+    let end = parse_iso(later)?.date_naive();
+    Some((end - start).num_days())
+}
+
 /// 当前本地时间，用于拼接文件名。
 pub fn now_file_timestamp() -> String {
     file_timestamp(Local::now())

@@ -153,6 +153,34 @@
 - 新命令：`ai_policy_get` / `ai_policy_set` / `ai_audit_tail` / `ai_kb_search` / `ai_web_fetch` / `ai_web_search`；
   错误码新增 `AI_DISABLED` / `NETWORK_DISABLED`（前后端一致）。
 
+### 研究助手骨架（阶段 D1，2026-10-11）
+
+按 [AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md) §9 落地「对话式深入调研 → 写入知识库」的
+**骨架**：五步固定流程 + DTO 冻结 + 假 Provider，**不联网、不接模型**也能跑通全链路。
+
+- **五步流程**（`application/ai/research.rs`，每步可单独调用、可中断、可审计）：
+  `research_start`（课题 → 3–5 个子问题 + 本地「已知基线」）→ `research_collect`（本地 FTS5 检索
+  → 按「意图标记」规则把材料归属到子问题 → 逐条分级）→ `research_verify`（≥2 个**独立**来源才算
+  交叉验证，单一来源只进待验证清单）→ `research_compose`（渲染固定六段报告）→
+  `research_proposal`（写入提案：默认 Inbox、写前 diff、同标题先给提示，**不落库**）；
+- **来源分级可复核**（`application/ai/source_grade.rs`，纯函数）：域名内置表（A–E）→ 内容自证
+  （标题 + 日期/作者）→ 兜底「弱」；本库笔记优先沿用 `source_reliability`，未标注时按来源类型
+  取保守档并在报告里写明理由；
+- **降级路径**（§9.6）：没有 Jev 用规则表，没有 LLM 用 `TemplateGenerativeModel`
+  （`template.draft`）——报告里明确标注「未接入模型」，推测段只是方向罗列，不冒充结论；
+- **报告六段固定**：结论先行 / 关键事实 / 争议与不确定性 / 与本知识库的关系 / 待验证清单 /
+  参考来源；顶部固定「**资料截至 YYYY-MM-DD**」，未验证 / 单一来源 / 可能过时三类**警告块**
+  必须醒目；结论的每一句都带 `[n]` 引用，引用能定位到本地 `note_id` 或 URL + 获取时间；
+- **会话持久化**：`.knowledge/research/<sessionId>.json`（中止后已得材料仍作为草稿保留）；
+- 命令：`research_start` / `research_get` / `research_list` / `research_collect` / `research_verify`
+  / `research_compose` / `research_proposal` / `research_abort`；
+- 测试：`src-tauri/tests/research_flow.rs` 5 项（闸门与宽泛课题、六段报告与「全程无外发」、
+  提案落 Inbox + 同标题提示 + diff、会话持久化与中止、分级跟随笔记元数据），加上
+  `source_grade` 5 项与模板 Provider 2 项单元测试、DTO 契约 1 项；
+- **本阶段边界（如实告知）**：只检索本地知识库；外部检索（`web_search` / `web_fetch`）属于 D3，
+  联网档位即使打开也**不发起任何请求**，只在报告里给出警告；名称/语义归并、冲突检测、
+  `valid_until` 到期复核提醒分别在 D4 与 N3。
+
 ### 目录分组：语义结论（阶段 C5，2026-10-11）
 
 语雀的「分组」是目录里的**非文档容器**（能装文档、自己不是文档）。经核对当前实现，结论是

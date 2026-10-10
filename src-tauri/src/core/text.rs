@@ -229,6 +229,20 @@ pub fn truncate_chars(text: &str, max_chars: usize) -> String {
     out
 }
 
+/// 取一段文本的第一句（句末标点或换行截断），并压平空白。
+///
+/// 用于研究助手把「来源片段」摘成可用作引用的一句话（V1.2.1 阶段 D1）。
+pub fn first_sentence(text: &str) -> String {
+    let trimmed = text.trim();
+    let cut = trimmed
+        .char_indices()
+        .find(|(_, ch)| matches!(ch, '。' | '！' | '？' | '\n' | '；'))
+        .map(|(index, ch)| index + ch.len_utf8())
+        .unwrap_or(trimmed.len());
+    let sentence = &trimmed[..cut];
+    sentence.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// 查询词的一段：ASCII 词或中日韩连续片段。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuerySegment {
@@ -950,6 +964,14 @@ mod wikilink_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_sentence_cuts_on_sentence_punctuation() {
+        assert_eq!(first_sentence("甲。乙。"), "甲。");
+        assert_eq!(first_sentence("line1\nline2"), "line1");
+        assert_eq!(first_sentence("没有标点的一句话"), "没有标点的一句话");
+        assert!(first_sentence(&"字".repeat(200)).chars().count() <= 200);
+    }
 
     #[test]
     fn sanitize_removes_illegal_characters() {

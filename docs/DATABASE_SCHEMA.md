@@ -294,7 +294,22 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 - 每篇最多 50 份、同一篇 60 秒内只留一份；永久删除笔记时对应目录一并清理；
 - 与 `notes` 表无外键关系：历史是**旁路数据**，不参与索引与检索。
 
-## 5. 迁移
+## 5. 研究会话的存储位置（V1.2.1 阶段 D1）
+
+研究助手（`docs/AI_ARCHITECTURE_PLAN.md` §9）的会话同样落在工作区里，**不进数据库**：
+
+```
+<工作区>/.knowledge/research/<sessionId>.json     # sessionId = research_<ULID>
+<工作区>/.knowledge/logs/ai-audit.jsonl           # AI 行为审计（不含正文）
+```
+
+- 一个会话一份 JSON：研究计划、来源（含分级与理由）、报告、写入提案、步骤日志；
+- 是**可丢弃的中间产物**：删掉 `.knowledge/research` 只会丢研究草稿，不影响任何笔记；
+- 写入知识库的研究报告走正常 `note_create` 路径（因此仍可用 Markdown 全量重建）；
+- 审计只记行为元数据（时间 / 能力 / 是否外发 / 结果 / 耗时 / 备注），上限由策略里的
+  `auditMaxEntries` 控制（默认 500）。
+
+## 6. 迁移
 
 - 迁移脚本：`src-tauri/migrations/*.sql`，通过 `include_str!` 编入二进制；
 - 记录表：`schema_migrations(version, name, applied_at)`，同时写入 `PRAGMA user_version`；

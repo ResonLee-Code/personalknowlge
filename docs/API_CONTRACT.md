@@ -372,7 +372,32 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 切换联网档位会清空既有的确认时间戳（切回「仅本地」后再切到联网需重新确认一次）；
 - 审计写在 `.knowledge/logs/ai-audit.jsonl`，仅记录行为元数据（时间 / 能力 / 是否外发 / 结果 / 耗时 / 备注）。
 
-## 24. 前端服务层
+## 24. 研究助手（V1.2.1 阶段 D1 / AI_ARCHITECTURE_PLAN §9）
+
+五步固定流程，每步一个命令，便于界面逐步推进、显示进度、随时中止。
+所有步骤都先过 §23 的策略闸门（总开关默认关闭 → `AI_DISABLED`）。
+
+| 命令 | 参数 | 返回 | 说明 |
+| --- | --- | --- | --- |
+| `research_start` | `{ input: ResearchRequest }` | `ResearchSession` | 立项：课题 → 3–5 个子问题 + 本地「已知基线」；课题过于宽泛返回 `INVALID_INPUT` 并要求补充范围 |
+| `research_get` | `{ sessionId }` | `ResearchSession` | 读取会话（刷新页面后恢复现场） |
+| `research_list` | `{ limit }` | `ResearchSessionSummary[]` | 最近的会话（新的在前） |
+| `research_collect` | `{ sessionId, confirmed }` | `ResearchSession` | 收集材料：本地 FTS5；**外部检索未接入（D3），`confirmed` 不影响本地路径** |
+| `research_verify` | `{ sessionId }` | `ResearchSession` | 按子问题汇总，≥2 个独立来源才算交叉验证 |
+| `research_compose` | `{ sessionId }` | `ResearchSession` | 渲染固定六段报告（顶部「资料截至 YYYY-MM-DD」） |
+| `research_proposal` | `{ sessionId }` | `ResearchSession` | 写入提案（默认 Inbox、写前 diff、同标题提示）；**不落库** |
+| `research_abort` | `{ sessionId, reason? }` | `ResearchSession` | 中止；已得材料保留为草稿 |
+
+- 步骤状态机：`planned → collected → verified → composed → proposed`；顺序不可跳过
+  （例如未收集就验证返回 `INVALID_INPUT`），`aborted` 后不可再推进；
+  `research_proposal` 允许在 `composed` / `proposed` 重复调用（同标题冲突可能后出现）；
+- 会话持久化在 `.knowledge/research/<sessionId>.json`；**不写入正文**以外的任何外部系统；
+- 报告结构（顺序固定）：① 结论先行（只放交叉验证过的）② 关键事实 ③ 争议与不确定性
+  ④ 与本知识库的关系（`[[标题]]`）⑤ 待验证清单 ⑥ 参考来源；推测段由模板 Provider 生成，
+  默认不写入笔记，需要时在写入确认里勾选；
+- 审计：每一步都写 `research_*` 记录（不含正文）；**默认口径下 `outbound` 恒为 `false`**。
+
+## 25. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 

@@ -8,6 +8,7 @@ pub mod graph;
 pub mod link;
 pub mod ai;
 pub mod note;
+pub mod research;
 pub mod search;
 pub mod settings;
 pub mod tag;

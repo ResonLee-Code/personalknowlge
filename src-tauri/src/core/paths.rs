@@ -19,6 +19,8 @@ pub const LOG_DIR: &str = "logs";
 pub const INDEX_DIR: &str = "index";
 pub const TEMPLATES_DIR: &str = "templates";
 pub const HISTORY_DIR: &str = "history";
+/// 研究会话目录：`.knowledge/research/<session_id>.json`（V1.2.1 阶段 D1）
+pub const RESEARCH_DIR: &str = "research";
 pub const DATABASE_FILE: &str = "database.sqlite";
 pub const CONFIG_FILE: &str = "config.json";
 pub const TEMP_PREFIX: &str = ".pkos-tmp-";
@@ -72,6 +74,11 @@ impl WorkspacePaths {
         self.knowledge_dir().join(HISTORY_DIR)
     }
 
+    /// 研究会话目录：`.knowledge/research/`（V1.2.1 阶段 D1）。
+    pub fn research_dir(&self) -> PathBuf {
+        self.knowledge_dir().join(RESEARCH_DIR)
+    }
+
     pub fn note_history_dir(&self, note_id: &str) -> PathBuf {
         self.history_dir().join(note_id)
     }
@@ -96,6 +103,7 @@ impl WorkspacePaths {
             self.log_dir(),
             self.backups_dir(),
             self.templates_dir(),
+            self.research_dir(),
             self.trash_dir(),
             self.attachments_dir(),
             self.inbox_dir(),

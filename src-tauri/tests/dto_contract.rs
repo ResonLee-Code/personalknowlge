@@ -10,6 +10,7 @@ use personal_knowledge_os_lib::domain::category::CreateCategoryInput;
 use personal_knowledge_os_lib::domain::note::{
     CreateNoteInput, NoteListQuery, NoteSort, NoteStatus, SaveNoteInput,
 };
+use personal_knowledge_os_lib::domain::research::ResearchRequest;
 use personal_knowledge_os_lib::domain::search::SearchQuery;
 use personal_knowledge_os_lib::domain::settings::UpdateSettingsInput;
 
@@ -137,4 +138,25 @@ fn settings_input_accepts_fractional_pixel_values() {
             .expect("整数应可用");
     assert_eq!(integers.sidebar_width, Some(248));
     assert_eq!(integers.editor_split_ratio, Some(0.0));
+}
+
+#[test]
+fn research_request_accepts_a_bare_topic() {
+    // 研究助手的第一步只有课题是必填，其余（范围/时间窗/写回意图）都可能缺省
+    let input: ResearchRequest =
+        serde_json::from_str(r#"{ "topic": "Rust 异步运行时调度" }"#).expect("只给课题也要能用");
+    assert_eq!(input.topic, "Rust 异步运行时调度");
+    assert!(input.scope.is_none());
+    assert!(input.time_window_days.is_none());
+    assert!(!input.write_back);
+    assert!(input.target_category_id.is_none());
+
+    let full: ResearchRequest = serde_json::from_str(
+        r#"{ "topic": "Rust 异步运行时调度", "scope": "运行时实现", "timeWindowDays": 365,
+             "writeBack": true, "targetCategoryId": "cat_1" }"#,
+    )
+    .expect("完整输入应可解析");
+    assert_eq!(full.time_window_days, Some(365));
+    assert!(full.write_back);
+    assert_eq!(full.target_category_id.as_deref(), Some("cat_1"));
 }

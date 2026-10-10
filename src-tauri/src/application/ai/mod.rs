@@ -9,12 +9,17 @@
 //! - 唯一已实现的是离线兜底 `RuleDecisionProvider`（无网络、无新依赖）
 
 pub mod policy;
+pub mod research;
 pub mod rule_provider;
+pub mod source_grade;
+pub mod template_provider;
 pub mod tools;
 pub mod traits;
 
 pub use policy::AiPolicyService;
+pub use research::ResearchService;
 pub use rule_provider::RuleDecisionProvider;
+pub use template_provider::TemplateGenerativeModel;
 pub use traits::{
     DecisionCandidate, DecisionChoice, DecisionKind, DecisionModel, DecisionResult, DecisionState,
     GenerationRequest, GenerationResponse, GenerativeModel, RetrievalOrigin, RetrievedChunk,
