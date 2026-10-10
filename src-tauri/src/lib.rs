@@ -95,6 +95,7 @@ pub fn run() {
             commands::batch_commands::notes_tag_batch,
             commands::batch_commands::notes_delete_batch,
             commands::note_commands::note_count,
+            commands::note_commands::note_due_for_review,
             commands::note_commands::note_import,
             commands::note_commands::note_export,
             commands::category_commands::category_list,

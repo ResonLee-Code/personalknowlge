@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/badge';
 import { UnresolvedLinksCard } from '@/components/notes/UnresolvedLinksCard';
+import { ReviewDueCard } from '@/features/dashboard/ReviewDueCard';
 import { formatRelative } from '@/lib/format';
 import { ROUTES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
@@ -28,7 +29,7 @@ import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import type { NoteSummary } from '@/types';
+import type { NoteSummary, ReviewDueNote } from '@/types';
 
 /** 首页（设计文档 16.3）。 */
 export function DashboardPage() {
@@ -42,6 +43,7 @@ export function DashboardPage() {
   const categories = useCategoriesStore((state) => state.flat);
   const pathOf = useCategoriesStore((state) => state.pathOf);
   const [recent, setRecent] = useState<NoteSummary[]>([]);
+  const [dueForReview, setDueForReview] = useState<ReviewDueNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
 
@@ -55,6 +57,9 @@ export function DashboardPage() {
         setRecent(result);
         setLoading(false);
       }
+      // 待复核（D4）：失败不影响首页其它区块
+      const due = await noteService.dueForReview(14).catch(() => [] as ReviewDueNote[]);
+      if (!cancelled) setDueForReview(due);
     };
     void load();
     return () => {
@@ -197,6 +202,9 @@ export function DashboardPage() {
             </div>
           </div>
         </section>
+
+        {/* 待复核（D4）：只在有时效到期的笔记时出现 */}
+        <ReviewDueCard items={dueForReview} onOpen={(id) => navigate(ROUTES.note(id))} />
 
         <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4">
           <div className="mb-3 flex items-center justify-between">

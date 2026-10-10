@@ -9,9 +9,10 @@ use crate::core::hash::sha256_hex_str;
 use crate::core::ids::note_id;
 use crate::core::paths::{WorkspacePaths, INBOX_DIR};
 use crate::core::text::{count_words, markdown_to_plain_text};
-use crate::core::time::{now_file_timestamp, now_iso};
+use crate::core::time::{days_between, now_file_timestamp, now_iso, today_date};
 use crate::domain::note::{
     ReorderNotesInput,
+    ReviewDueNote,
     SetParentInput,
     SetSourceInput,
     CreateNoteInput, Note, NoteDetail, NoteListQuery, NoteListResult, NoteStatus, NoteSummary,
@@ -1035,6 +1036,61 @@ impl NoteService {
     }
 
     /// 列表查询。
+    /// 待复核笔记（V1.2.1 阶段 D4）：`valid_until` 已过期，或将在 `within_days` 天内到期。
+    ///
+    /// 只返回**活跃**笔记；时效字段无法解析时跳过（宁可漏报，也不误报）。
+    pub fn due_for_review(&self, within_days: i64) -> Result<Vec<ReviewDueNote>> {
+        let within = within_days.clamp(0, 3650);
+        let candidates = self
+            .ctx
+            .db
+            .with_conn(|conn| SqliteNoteRepository.list_with_valid_until(conn, self.workspace_id()))?;
+        let today = today_date();
+        let mut due: Vec<(Note, i64)> = Vec::new();
+        for note in candidates {
+            let Some(valid_until) = note.valid_until.clone() else {
+                continue;
+            };
+            let Some(overdue) = days_between(&valid_until, &today) else {
+                tracing::debug!(target: "app", "跳过无法解析的 valid_until：{} ({})", note.title, valid_until);
+                continue;
+            };
+            if overdue >= 0 || -overdue <= within {
+                due.push((note, overdue));
+            }
+        }
+        let summaries = self
+            .ctx
+            .to_summaries(due.iter().map(|(note, _)| note.clone()).collect())?;
+        let mut result: Vec<ReviewDueNote> = due
+            .into_iter()
+            .map(|(note, overdue)| {
+                let category_path = summaries
+                    .iter()
+                    .find(|summary| summary.id == note.id)
+                    .map(|summary| summary.category_path.clone())
+                    .unwrap_or_default();
+                ReviewDueNote {
+                    note_id: note.id.clone(),
+                    title: note.title.clone(),
+                    category_path,
+                    valid_until: note.valid_until.clone().unwrap_or_default(),
+                    overdue_days: overdue,
+                    source_type: note.source_type.clone(),
+                    source_reliability: note.source_reliability,
+                }
+            })
+            .collect();
+        // 先过期最久的，再按到期日升序（与 SQL 的排序一致，这里兜底保证稳定性）
+        result.sort_by(|left, right| {
+            right
+                .overdue_days
+                .cmp(&left.overdue_days)
+                .then_with(|| left.valid_until.cmp(&right.valid_until))
+        });
+        Ok(result)
+    }
+
     pub fn list(&self, query: NoteListQuery) -> Result<NoteListResult> {
         let (notes, total) = self.ctx.db.with_conn(|conn| {
             SqliteNoteRepository.list(conn, self.workspace_id(), &query)

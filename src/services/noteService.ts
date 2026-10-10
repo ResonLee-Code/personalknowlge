@@ -16,6 +16,7 @@ import type {
   ExportNoteResult,
   HistoryContent,
   HistoryEntry,
+  ReviewDueNote,
 } from '@/types';
 
 import { call } from './api';
@@ -106,6 +107,9 @@ export const noteService = {
 
   /** 导入外部 Markdown / 文本文件或目录（复制进知识库） */
   importFiles: (input: ImportNotesInput) => call<ImportReport>('note_import', { input }),
+
+  /** 待复核笔记（`valid_until` 已过期或 `days` 天内到期，V1.2.1 D4） */
+  dueForReview: (days = 14) => call<ReviewDueNote[]>('note_due_for_review', { days }),
 
   /** 导出单篇笔记（md / html / docx / pdf 打印视图） */
   exportNote: (input: ExportNoteInput) => call<ExportNoteResult>('note_export', { input }),

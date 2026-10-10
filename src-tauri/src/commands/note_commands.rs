@@ -9,7 +9,7 @@ use crate::application::export_service::{ExportNoteInput, ExportNoteResult, Expo
 use crate::core::error::Result;
 use crate::domain::note::{
     CreateNoteInput, NoteDetail, NoteListQuery, NoteListResult, NoteStatus, NoteSummary,
-    ReorderNotesInput, SaveNoteInput, SaveNoteResult, SetParentInput, SetSourceInput,
+    ReorderNotesInput, ReviewDueNote, SaveNoteInput, SaveNoteResult, SetParentInput, SetSourceInput,
 };
 use crate::state::AppState;
 use crate::repositories::{NoteRepository, SqliteNoteRepository};
@@ -286,4 +286,11 @@ pub async fn note_export(
 ) -> Result<ExportNoteResult> {
     let context = state.inner.context()?;
     run(move || ExportService::new(context).export_note(input)).await
+}
+
+/// 待复核笔记（V1.2.1 阶段 D4）：`valid_until` 已过期或将在 `days` 天内到期。
+#[tauri::command]
+pub async fn note_due_for_review(state: State<'_, AppState>, days: i64) -> Result<Vec<ReviewDueNote>> {
+    let context = state.inner.context()?;
+    run(move || NoteService::new(context).due_for_review(days)).await
 }

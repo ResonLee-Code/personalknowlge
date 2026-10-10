@@ -320,4 +320,31 @@ describe('浏览器预览后端的来源与时效（N1 对齐，C1 剪藏依赖�
     expect(page.wordCount).toBeGreaterThan(0);
     await expect(clipService.clip('   ')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
+
+  it('note_due_for_review 只返回已过期与窗口内到期的笔记（D4）', async () => {
+    await workspaceService.create('待复核库', '/tmp/mock-review');
+    const iso = (offsetDays: number) => {
+      const date = new Date();
+      date.setDate(date.getDate() + offsetDays);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+        date.getDate(),
+      ).padStart(2, '0')}`;
+    };
+
+    const overdue = await noteService.create({ title: '过期的手册' });
+    await noteService.setSource({ id: overdue.note.id, sourceType: 'official', validUntil: iso(-7) });
+    const soon = await noteService.create({ title: '快要复核' });
+    await noteService.setSource({ id: soon.note.id, sourceType: 'official', validUntil: iso(3) });
+    const far = await noteService.create({ title: '很久以后' });
+    await noteService.setSource({ id: far.note.id, sourceType: 'official', validUntil: iso(200) });
+    await noteService.create({ title: '没有时效字段' });
+
+    const due = await noteService.dueForReview(14);
+    expect(due.map((item) => item.noteId)).toEqual([overdue.note.id, soon.note.id]);
+    expect(due[0]!.overdueDays).toBe(7);
+    expect(due[1]!.overdueDays).toBe(-3);
+
+    expect((await noteService.dueForReview(365)).length).toBe(3);
+    expect((await noteService.dueForReview(0)).length).toBe(1);
+  });
 });

@@ -1840,6 +1840,35 @@ export async function handleMockInvoke(
       const status = (payload.status as string) ?? 'active';
       return state.notes.filter((note) => note.status === status).length;
     }
+    case 'note_due_for_review': {
+      requireWorkspace();
+      const days = Math.min(3650, Math.max(0, Number(payload.days ?? 14)));
+      const today = new Date();
+      const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+        today.getDate(),
+      ).padStart(2, '0')}`;
+      return state.notes
+        .filter((note) => note.status === 'active' && (note.validUntil ?? '').trim().length > 0)
+        .map((note) => {
+          const validUntil = (note.validUntil ?? '').trim().slice(0, 10);
+          const target = new Date(`${validUntil}T00:00:00`);
+          const base = new Date(`${todayIso}T00:00:00`);
+          if (Number.isNaN(target.getTime())) return null;
+          const overdueDays = Math.round((base.getTime() - target.getTime()) / 86_400_000);
+          if (overdueDays < 0 && -overdueDays > days) return null;
+          return {
+            noteId: note.id,
+            title: note.title,
+            categoryPath: categoryPath(note.categoryId),
+            validUntil: note.validUntil ?? '',
+            overdueDays,
+            sourceType: note.sourceType ?? null,
+            sourceReliability: note.sourceReliability ?? null,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null)
+        .sort((left, right) => right.overdueDays - left.overdueDays);
+    }
     case 'notes_move_batch': {
       requireWorkspace();
       const input = payload.input as { ids: string[]; categoryId?: string | null };

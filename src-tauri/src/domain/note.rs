@@ -103,6 +103,22 @@ pub struct NoteSummary {
     pub snippet: Vec<TextSegment>,
 }
 
+/// 待复核笔记（N1 的 `valid_until` 已过期或即将到期，V1.2.1 阶段 D4）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDueNote {
+    pub note_id: String,
+    pub title: String,
+    /// `技术/数据库` 形式的分类路径
+    pub category_path: String,
+    /// 笔记里写的时效字段（原样回显）
+    pub valid_until: String,
+    /// 已过期天数：`> 0` 已过期，`<= 0` 表示还有 `-overdue_days` 天到期
+    pub overdue_days: i64,
+    pub source_type: Option<String>,
+    pub source_reliability: Option<i64>,
+}
+
 /// 打开笔记时返回的完整内容。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

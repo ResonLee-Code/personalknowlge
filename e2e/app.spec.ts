@@ -626,6 +626,29 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.locator('.cm-content')).toContainText('资料截至');
   await expect(page.getByText('调研报告', { exact: true }).first()).toBeVisible();
 
+  // 34. 待复核提醒（D4）：把这篇报告的复核时间改成过去 → 首页出现「待复核」卡片
+  // 用本地日期拼 `YYYY-MM-DD`：toISOString 走 UTC，在东八区会差一天
+  const overdue = new Date();
+  overdue.setDate(overdue.getDate() - 5);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const overdueDate = `${overdue.getFullYear()}-${pad(overdue.getMonth() + 1)}-${pad(overdue.getDate())}`;
+  await page.getByTitle('点击编辑来源与时效').click();
+  await expect(page.getByRole('dialog')).toContainText('来源与时效');
+  await page.getByLabel('有效期至').fill(overdueDate);
+  await page.getByRole('button', { name: '保存' }).click();
+
+  await page.goto('/#/');
+  const reviewCard = page.getByTestId('review-due-card');
+  await expect(reviewCard).toBeVisible();
+  await expect(reviewCard).toContainText('待复核');
+  await expect(reviewCard).toContainText('已过期 5 天');
+  await expect(reviewCard).toContainText('调研报告：Rust 异步调度方案');
+  await page.screenshot({ path: path.join(SHOTS, '44-review-due.png') });
+
+  // 点标题跳到对应笔记（时效字段已写入 frontmatter）
+  await reviewCard.getByRole('button', { name: '调研报告：Rust 异步调度方案' }).click();
+  await expect(page.locator('.cm-content')).toContainText('资料截至');
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

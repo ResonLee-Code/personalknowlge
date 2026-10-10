@@ -105,6 +105,9 @@ pub trait NoteRepository {
         workspace_id: &str,
         status: NoteStatus,
     ) -> Result<i64>;
+    /// 带 `valid_until` 的活跃笔记（按到期日升序）。时效判断留给领域层，
+    /// 因为 `valid_until` 可能是 `YYYY-MM-DD` 也可能是带时区的 ISO 时间串。
+    fn list_with_valid_until(&self, conn: &Connection, workspace_id: &str) -> Result<Vec<Note>>;
 }
 
 pub struct SqliteNoteRepository;
@@ -532,6 +535,17 @@ impl NoteRepository for SqliteNoteRepository {
             |row| row.get(0),
         )?;
         Ok(count)
+    }
+
+    fn list_with_valid_until(&self, conn: &Connection, workspace_id: &str) -> Result<Vec<Note>> {
+        let mut statement = conn.prepare(&format!(
+            "SELECT {NOTE_COLUMNS} FROM notes
+             WHERE workspace_id = ?1 AND status = 'active'
+               AND valid_until IS NOT NULL AND TRIM(valid_until) <> ''
+             ORDER BY valid_until ASC, title COLLATE NOCASE ASC"
+        ))?;
+        let rows = statement.query_map(params![workspace_id], map_note)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<Note>>>()?)
     }
 }
 

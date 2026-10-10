@@ -199,8 +199,31 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 - 字段写入笔记 frontmatter（`source_type` / `source_ref` / `source_reliability` / `valid_until`），
   保证「文件是唯一事实来源」；外部编辑器改 frontmatter 后，扫描会同步回数据库列；
 - `source_reliability` 只接受 1–5，越界忽略；空字符串视为清空该字段；
-- 来源类型建议取值：`official` / `book` / `paper` / `experiment` / `personal` / `conversation` / `ai` / `unknown`；
+- 来源类型建议取值：`official` / `book` / `paper` / `experiment` / `personal` / `conversation` / `ai` / `web` / `research` / `unknown`；
 - 界面：编辑器元信息栏显示来源与星标，逾期显示「可能已过期」，30 天内显示「即将到期」。
+
+### 12.1 待复核提醒（V1.2.1 阶段 D4）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `note_due_for_review` | `{ days? }`（默认 14，夹取 0–3650） | `ReviewDueNote[]` |
+
+```ts
+interface ReviewDueNote {
+  noteId: string;
+  title: string;
+  categoryPath: string;   // 未分类（Inbox）为空串
+  validUntil: string;     // 原样回显笔记里的时效字段
+  overdueDays: number;    // >0 已过期；<=0 表示还有 -overdueDays 天到期
+  sourceType: string | null;
+  sourceReliability: number | null;
+}
+```
+
+- 只返回**活跃**笔记（回收站 / 缺失状态不提醒，恢复后重新提醒）；
+- 排序：过期最久的在前，其次按到期日升序；
+- `valid_until` 无法解析时**跳过**该笔记（宁可漏报，不误报）；
+- 前端入口：首页「待复核」卡片（无待复核笔记时不渲染）。
 
 ## 13. 知识图谱（V1.1 M3）
 

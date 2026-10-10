@@ -131,6 +131,19 @@ export interface NoteDetail {
   tags: Tag[];
 }
 
+/** 待复核笔记（`valid_until` 已过期或即将到期，V1.2.1 D4） */
+export interface ReviewDueNote {
+  noteId: string;
+  title: string;
+  /** `技术/数据库` 形式的分类路径（Inbox 为空串） */
+  categoryPath: string;
+  validUntil: string;
+  /** >0 已过期天数；<=0 表示还有 `-overdueDays` 天到期 */
+  overdueDays: number;
+  sourceType?: string | null;
+  sourceReliability?: number | null;
+}
+
 export interface NoteListQuery {
   categoryId?: string | null;
   tagId?: string | null;
