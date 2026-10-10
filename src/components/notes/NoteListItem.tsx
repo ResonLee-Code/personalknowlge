@@ -22,6 +22,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
+import { CopyNoteDialog } from '@/components/notes/CopyNoteDialog';
 import { CreateChildNoteDialog } from '@/components/notes/CreateChildNoteDialog';
 import { DeleteNoteDialog } from '@/components/notes/DeleteNoteDialog';
 import { MoveNoteDialog } from '@/components/notes/MoveNoteDialog';
@@ -63,6 +64,7 @@ function NoteMenuItems({
   onCopyTitle,
   onRename,
   onMove,
+  onCopyTo,
   onExport,
   onDuplicate,
   onDelete,
@@ -80,6 +82,7 @@ function NoteMenuItems({
   onCopyTitle: () => void;
   onRename: () => void;
   onMove: () => void;
+  onCopyTo: () => void;
   onExport: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -141,6 +144,9 @@ function NoteMenuItems({
       </Item>
       <Item onSelect={onMove} data-testid="note-menu-move">
         <FolderTree className="h-3.5 w-3.5" /> 移动分类…
+      </Item>
+      <Item onSelect={onCopyTo} data-testid="note-menu-copy-to">
+        <Copy className="h-3.5 w-3.5" /> 复制到分类…
       </Item>
       <Item onSelect={onExport} data-testid="note-menu-export">
         <Download className="h-3.5 w-3.5" /> 导出（MD / HTML / Word / PDF）
@@ -214,6 +220,7 @@ export function NoteListItem({
   const [childOpen, setChildOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -283,6 +290,7 @@ export function NoteListItem({
     onCopyTitle: () => void copyText(note.title, '标题'),
     onRename: () => setRenameOpen(true),
     onMove: () => setMoveOpen(true),
+    onCopyTo: () => setCopyOpen(true),
     onExport: () => setExportOpen(true),
     onDuplicate: () => void duplicate(note.id).then(() => toast.success('已创建副本')),
     onDelete: handleDelete,
@@ -524,6 +532,7 @@ export function NoteListItem({
           onClose={() => setMoveOpen(false)}
         />
       ) : null}
+      {copyOpen ? <CopyNoteDialog note={note} onClose={() => setCopyOpen(false)} /> : null}
       {exportOpen ? (
         <ExportNoteDialog noteId={note.id} title={note.title} onClose={() => setExportOpen(false)} />
       ) : null}

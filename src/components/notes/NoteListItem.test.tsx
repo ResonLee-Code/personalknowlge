@@ -250,3 +250,25 @@ describe('NoteListItem', () => {
     expect(await screen.findByTestId('note-menu-promote')).toBeInTheDocument();
   });
 });
+
+describe('条目菜单：复制到分类入口（C4）', () => {
+  it('菜单里有「复制到分类…」并打开对话框', async () => {
+    render(
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter>
+          <ul>
+            <NoteListItem note={note} selected={false} basePath="/notes" onOpen={() => {}} />
+          </ul>
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByTestId('note-list-item'),
+      keys: '[MouseRight]',
+    });
+    await userEvent.click(await screen.findByTestId('note-menu-copy-to'));
+    expect(await screen.findByText('复制到分类')).toBeInTheDocument();
+    expect(screen.getByTestId('copy-note-confirm')).toBeInTheDocument();
+  });
+});

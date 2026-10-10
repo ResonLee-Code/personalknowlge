@@ -128,3 +128,42 @@ describe('笔记列表筛选与批量撤销', () => {
     expect(useNotesStore.getState().selection).toEqual([]);
   });
 });
+
+describe('单篇复制到指定分类（C4）', () => {
+  it('复制出副本并移动，原作保留', async () => {
+    vi.spyOn(noteService, 'list').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 300,
+    });
+    const duplicate = vi
+      .spyOn(noteService, 'duplicate')
+      .mockResolvedValue({ note: { id: 'copy_1', title: '甲 副本' } } as never);
+    const move = vi.spyOn(noteService, 'move').mockResolvedValue({} as never);
+    const remove = vi.spyOn(noteService, 'remove').mockResolvedValue(undefined);
+
+    const ok = await useNotesStore.getState().copyTo('note_1', 'cat_target');
+
+    expect(ok).toBe(true);
+    expect(duplicate).toHaveBeenCalledWith('note_1');
+    expect(move).toHaveBeenCalledWith('copy_1', 'cat_target');
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('目标为 Inbox（null）时不调用移动', async () => {
+    vi.spyOn(noteService, 'list').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 300,
+    });
+    vi.spyOn(noteService, 'duplicate').mockResolvedValue({
+      note: { id: 'copy_2', title: '甲 副本' },
+    } as never);
+    const move = vi.spyOn(noteService, 'move').mockResolvedValue({} as never);
+
+    await useNotesStore.getState().copyTo('note_1', null);
+    expect(move).not.toHaveBeenCalled();
+  });
+});

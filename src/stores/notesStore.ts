@@ -82,6 +82,8 @@ interface NotesState {
   moveMany: (categoryId: string | null) => Promise<void>;
   /** 批量复制到分类（原作保留） */
   copyManyTo: (categoryId: string | null) => Promise<void>;
+  /** 单篇复制到指定分类（原作保留；标题带「副本」后缀） */
+  copyTo: (id: string, categoryId: string | null) => Promise<boolean>;
   /** 拖拽等场景：直接给定 ids 移动 */
   moveNotes: (ids: string[], categoryId: string | null) => Promise<void>;
   tagMany: (tags: string[], mode?: 'add' | 'remove' | 'replace') => Promise<void>;
@@ -402,6 +404,20 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (ids.length === 0) return;
     await get().moveNotes(ids, categoryId);
     set({ selection: [], selectionMode: false });
+  },
+
+  copyTo: async (id, categoryId) => {
+    try {
+      const detail = await noteService.duplicate(id);
+      if (categoryId) await noteService.move(detail.note.id, categoryId);
+      set({ error: null });
+      await get().refresh();
+      await useCategoriesStore.getState().refresh();
+      return true;
+    } catch (error) {
+      set({ error: errorMessage(error) });
+      return false;
+    }
   },
 
   copyManyTo: async (categoryId) => {

@@ -408,6 +408,24 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByText('索引设计笔记').first()).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '30-batch-copy.png') });
 
+  // 单篇「复制到分类」（C4）：副本落到指定分类，原作保留
+  // （批量操作结束后多选模式已自动退出，这里直接操作条目）
+  const rowsBeforeSingleCopy = await page.getByTestId('note-list-item').count();
+  await page
+    .getByTestId('note-list-item')
+    .filter({ hasText: '欢迎使用 Personal Knowledge OS' })
+    .first()
+    .click({ button: 'right' });
+  await page.getByTestId('note-menu-copy-to').click();
+  await expect(page.getByRole('dialog')).toContainText('复制到分类');
+  await page.getByLabel('目标分类').selectOption({ label: '技术' });
+  await page.getByTestId('copy-note-confirm').click();
+  await expect
+    .poll(async () => page.getByTestId('note-list-item').count())
+    .toBe(rowsBeforeSingleCopy + 1);
+  await expect(page.getByTestId('note-list-item').filter({ hasText: '副本' }).first()).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '30b-single-copy.png') });
+
   // 27. 大纲「右侧常驻 / mini 态」与「另存为模板」入口（V1.2.1）
   await page.goto('/#/notes');
   await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
