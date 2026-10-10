@@ -7,6 +7,7 @@ pub mod attachment_service;
 pub mod backup_service;
 pub mod batch_service;
 pub mod category_service;
+pub mod clip_service;
 pub mod context;
 pub mod export_service;
 pub mod graph_service;

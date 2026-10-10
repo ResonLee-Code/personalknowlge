@@ -43,6 +43,7 @@ export const SOURCE_TYPE_LABELS: Record<string, string> = {
   experiment: '实测',
   personal: '个人推测',
   conversation: '交流',
+  web: '网页剪藏',
   ai: 'AI 生成',
   unknown: '未标注',
 };

@@ -75,6 +75,7 @@ pub fn run() {
             commands::note_commands::note_history_remove,
             commands::note_commands::note_history_save_version,
             commands::note_commands::note_history_label,
+            commands::clip_commands::note_clip_url,
             commands::batch_commands::notes_move_batch,
             commands::batch_commands::notes_tag_batch,
             commands::batch_commands::notes_delete_batch,

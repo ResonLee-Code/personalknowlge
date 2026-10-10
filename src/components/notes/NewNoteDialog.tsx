@@ -1,4 +1,13 @@
-import { CheckCircle2, FileUp, FolderOpen, Loader2, PencilLine, X, XCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  FileUp,
+  FolderOpen,
+  Link2,
+  Loader2,
+  PencilLine,
+  X,
+  XCircle,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -16,15 +25,16 @@ import { Input, Label, Textarea } from '@/components/ui/input';
 import { errorMessage } from '@/lib/format';
 import { isTauriRuntime } from '@/services/api';
 import { pickDirectory, pickMarkdownFiles } from '@/services/appService';
+import { clipService } from '@/services/clipService';
 import { noteService } from '@/services/noteService';
 import { templateService } from '@/services/templateService';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import type { ImportReport, TemplateSummary } from '@/types';
+import type { ClippedPage, ImportReport, TemplateSummary } from '@/types';
 
-type Mode = 'create' | 'import';
+type Mode = 'create' | 'import' | 'clip';
 
 /** 新建笔记（支持手动创建与导入外部文件）。 */
 export function NewNoteDialog() {
@@ -56,6 +66,7 @@ function NewNotePanel({ onClose }: { onClose: () => void }) {
             [
               { value: 'create', label: '手动创建', icon: PencilLine },
               { value: 'import', label: '导入外部文件', icon: FileUp },
+              { value: 'clip', label: '从网页剪藏', icon: Link2 },
             ] as const
           ).map((option) => (
             <button
@@ -95,8 +106,10 @@ function NewNotePanel({ onClose }: { onClose: () => void }) {
 
           {mode === 'create' ? (
             <CreateForm categoryId={categoryId} onClose={onClose} />
-          ) : (
+          ) : mode === 'import' ? (
             <ImportForm categoryId={categoryId} onClose={onClose} />
+          ) : (
+            <ClipForm categoryId={categoryId} onClose={onClose} />
           )}
         </div>
       </DialogContent>
@@ -243,6 +256,150 @@ function CreateForm({ categoryId, onClose }: { categoryId: string; onClose: () =
         </Button>
         <Button onClick={() => void submit()} disabled={busy}>
           创建笔记
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
+
+/**
+ * 从网页剪藏（V1.2.1 C1）：
+ * 输入地址 → 抓取预览（标题 / 站点 / 字数 / 正文前几行）→ 创建笔记，
+ * 并把来源写进 frontmatter（`source_type: web` + `source_ref: 最终地址`）。
+ */
+function ClipForm({ categoryId, onClose }: { categoryId: string; onClose: () => void }) {
+  const navigate = useNavigate();
+  const create = useNotesStore((state) => state.create);
+  const [url, setUrl] = useState('');
+  const [page, setPage] = useState<ClippedPage | null>(null);
+  const [title, setTitle] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  const fetchPage = async () => {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      toast.error('请填写网页地址');
+      return;
+    }
+    setBusy(true);
+    try {
+      const clipped = await clipService.clip(trimmed);
+      setPage(clipped);
+      setTitle(clipped.title);
+      toast.success(`已抓取：${clipped.wordCount} 字`);
+    } catch (error) {
+      setPage(null);
+      toast.error(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!page) {
+      toast.error('请先抓取网页');
+      return;
+    }
+    const trimmed = title.trim() || page.title;
+    setCreating(true);
+    // 来源信息写进正文抬头（frontmatter 的 source_* 由 setSource 落库）
+    const header = `> 来源：${page.finalUrl}\n> 抓取于 ${page.fetchedAt}${page.site ? ` · ${page.site}` : ''}\n\n`;
+    const detail = await create({
+      title: trimmed,
+      categoryId: categoryId || null,
+      initialContent: `${header}${page.markdown}`,
+    });
+    if (detail) {
+      try {
+        await noteService.setSource({
+          id: detail.note.id,
+          sourceType: 'web',
+          sourceRef: page.finalUrl,
+        });
+      } catch (error) {
+        // 来源是附加信息：不阻断剪藏，但要如实告诉用户
+        toast.warning(`笔记已创建，但来源信息写入失败：${errorMessage(error)}`);
+      }
+      // 重新拉一次详情，让编辑器的元信息栏立刻显示「网页剪藏」来源
+      await useNotesStore.getState().openDetail(detail.note.id);
+      setCreating(false);
+      onClose();
+      toast.success('已剪藏为新笔记');
+      navigate(`/notes/${detail.note.id}`);
+      return;
+    }
+    setCreating(false);
+    toast.error(useNotesStore.getState().error ?? '创建失败');
+  };
+
+  const preview = page ? page.markdown.split('\n').slice(0, 12).join('\n') : '';
+
+  return (
+    <>
+      <div className="space-y-2 rounded-md border border-[var(--border-subtle)] p-3">
+        <div className="flex flex-wrap gap-2">
+          <Input
+            value={url}
+            data-testid="clip-url"
+            placeholder="https://example.com/article"
+            className="h-8 min-w-[220px] flex-1 text-xs"
+            onChange={(event) => setUrl(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void fetchPage();
+            }}
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="clip-fetch"
+            disabled={busy}
+            onClick={() => void fetchPage()}
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+            抓取
+          </Button>
+        </div>
+        <p className="text-[11px] text-[var(--ink-subtle)]">
+          只抓取**公开网页**（http / https，单页 ≤ 3 MB）：抽取正文转成 Markdown，
+          并把来源地址写进笔记元数据；页面需要登录或正文由脚本渲染时可能抽不到内容。
+        </p>
+
+        {page ? (
+          <div className="space-y-2 border-t border-[var(--border-subtle)] pt-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="clip-title">标题</Label>
+              <Input
+                id="clip-title"
+                value={title}
+                className="h-8 text-xs"
+                onChange={(event) => setTitle(event.target.value)}
+              />
+            </div>
+            <p className="text-[11px] text-[var(--ink-subtle)]" data-testid="clip-meta">
+              站点：{page.site ?? '未知'} · {page.wordCount} 字 · 抓取于 {page.fetchedAt}
+            </p>
+            <pre
+              data-testid="clip-preview"
+              className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-[var(--surface-muted)] p-2 text-[11px] leading-relaxed text-[var(--ink-muted)]"
+            >
+              {preview}
+            </pre>
+          </div>
+        ) : null}
+      </div>
+
+      <DialogFooter>
+        <Button variant="secondary" onClick={onClose} disabled={creating}>
+          取消
+        </Button>
+        <Button
+          data-testid="clip-create"
+          onClick={() => void submit()}
+          disabled={creating || !page}
+        >
+          {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+          剪藏为新笔记
         </Button>
       </DialogFooter>
     </>

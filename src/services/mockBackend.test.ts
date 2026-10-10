@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { clipService } from '@/services/clipService';
 import { linkService } from '@/services/linkService';
 import { graphService } from '@/services/graphService';
 import { noteService } from '@/services/noteService';
@@ -281,5 +282,42 @@ describe('浏览器预览后端的版本历史（与 Rust 端行为对齐）', (
     await noteService.save({ id, content: '改过了', baseContentHash: null });
     await noteService.save({ id, content: '改过了', baseContentHash: null });
     expect(await noteService.historyList(id)).toHaveLength(1);
+  });
+});
+
+describe('浏览器预览后端的来源与时效（N1 对齐，C1 剪藏依赖它）', () => {
+  beforeEach(async () => {
+    localStorage.clear();
+    await workspaceService.create('来源库', '/tmp/mock-source');
+  });
+
+  it('note_set_source 写入来源字段并可读回；空串按清除处理', async () => {
+    const created = await noteService.create({ title: '来源笔记', categoryId: null });
+    const id = created.note.id;
+
+    const updated = await noteService.setSource({
+      id,
+      sourceType: 'web',
+      sourceRef: 'https://example.com/a',
+      sourceReliability: 4,
+      validUntil: '2027-01-01',
+    });
+    expect(updated.note.sourceType).toBe('web');
+    expect(updated.note.sourceRef).toBe('https://example.com/a');
+    expect(updated.note.sourceReliability).toBe(4);
+    expect(updated.note.validUntil).toBe('2027-01-01');
+
+    const cleared = await noteService.setSource({ id, sourceType: '  ', sourceRef: '' });
+    expect(cleared.note.sourceType).toBeNull();
+    expect(cleared.note.sourceRef).toBeNull();
+  });
+
+  it('note_clip_url 返回可用的剪藏结果（浏览器预览端为模拟实现）', async () => {
+    const page = await clipService.clip('example.com/post');
+    expect(page.finalUrl).toBe('https://example.com/post');
+    expect(page.title).toContain('example.com');
+    expect(page.markdown).toContain('# ');
+    expect(page.wordCount).toBeGreaterThan(0);
+    await expect(clipService.clip('   ')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 });

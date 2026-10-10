@@ -30,6 +30,7 @@ import type {
   ReorderNotesInput,
   SearchQuery,
   SetParentInput,
+  SetSourceInput,
   TextSegment,
   UnresolvedLink,
   Workspace,
@@ -1190,6 +1191,63 @@ export async function handleMockInvoke(
         '浏览器预览模式无法读取 .knowledge/templates，请在桌面应用中使用模板。',
       );
       break;
+    case 'note_set_source': {
+      requireWorkspace();
+      const input = (payload.input ?? {}) as SetSourceInput;
+      const note = state.notes.find((item) => item.id === input.id);
+      if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
+      const trim = (value?: string | null) => {
+        const text = (value ?? '').trim();
+        return text.length > 0 ? text : null;
+      };
+      note.sourceType = trim(input.sourceType);
+      note.sourceRef = trim(input.sourceRef);
+      note.sourceReliability =
+        typeof input.sourceReliability === 'number' && input.sourceReliability >= 1
+          ? Math.min(5, Math.round(input.sourceReliability))
+          : null;
+      note.validUntil = trim(input.validUntil);
+      note.updatedAt = now();
+      persist();
+      emit('notes://changed', { kind: 'modified', noteId: note.id });
+      return toDetail(note);
+    }
+    case 'note_clip_url': {
+      const raw = String(payload.url ?? '').trim();
+      if (!raw) fail('INVALID_INPUT', '请填写网页地址。');
+      const url = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`;
+      if (url.includes(' ')) fail('INVALID_INPUT', '网页地址里不能有空格。');
+      if (url.includes('fail.example')) {
+        fail('INVALID_INPUT', '抓取失败：无法访问该地址（浏览器预览模式为模拟实现）。');
+      }
+      // 浏览器预览模式不真的联网：返回一份固定结果，便于验证界面流程
+      const markdown = [
+        '# 剪藏示例：' + url.replace(/^https?:\/\//, '').split('/')[0],
+        '',
+        '这是浏览器预览模式下的**模拟剪藏结果**：桌面应用会真实抓取网页，',
+        '抽取正文（标题 / 段落 / 列表 / 代码块 / 表格）并转成 Markdown。',
+        '',
+        '## 抽取能力',
+        '',
+        '- 标题层级 → Markdown 标题',
+        '- 列表 → `- ` / `1. `（嵌套缩进）',
+        '- 链接与图片 → 转成绝对地址',
+        '',
+        '```js',
+        "console.log('桌面端才会真的抓取');",
+        '```',
+      ].join('\n');
+      return {
+        url: raw,
+        finalUrl: url,
+        title: `剪藏示例 · ${url.replace(/^https?:\/\//, '').split('/')[0]}`,
+        site: url.replace(/^https?:\/\//, '').split('/')[0],
+        markdown,
+        wordCount: markdown.replace(/\s/g, '').length,
+        fetchedAt: now(),
+        bytes: markdown.length,
+      };
+    }
     case 'note_history_list': {
       requireWorkspace();
       const noteId = String(payload.noteId);

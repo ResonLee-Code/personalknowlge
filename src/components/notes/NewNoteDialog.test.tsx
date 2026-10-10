@@ -1,10 +1,11 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NewNoteDialog } from '@/components/notes/NewNoteDialog';
 import { templateService } from '@/services/templateService';
+import { useNotesStore } from '@/stores/notesStore';
 import { useUiStore } from '@/stores/uiStore';
 
 vi.mock('@/services/templateService', () => ({
@@ -93,5 +94,78 @@ describe('NewNoteDialog', () => {
       ),
     );
     expect(renderTemplate).toHaveBeenCalledWith({ name: '会议记录', title: '周会' });
+  });
+});
+
+describe('NewNoteDialog · 从网页剪藏（C1）', () => {
+  it('抓取后展示标题/站点/预览，并可剪藏为新笔记（含来源元数据）', async () => {
+    const { clipService } = await import('@/services/clipService');
+    const clip = vi.spyOn(clipService, 'clip').mockResolvedValue({
+      url: 'example.com/a',
+      finalUrl: 'https://example.com/a',
+      title: '一篇好文章',
+      site: 'example.com',
+      markdown: '# 一篇好文章\n\n正文第一段。',
+      wordCount: 12,
+      fetchedAt: '2026-10-10T12:00:00+08:00',
+      bytes: 100,
+    });
+    const { noteService } = await import('@/services/noteService');
+    const create = vi.spyOn(useNotesStore.getState(), 'create').mockResolvedValue({
+      note: { id: 'note_clip', title: '一篇好文章' },
+      content: '',
+      categoryPath: '',
+      tags: [],
+    } as never);
+    const setSource = vi.spyOn(noteService, 'setSource').mockResolvedValue({} as never);
+
+    useUiStore.setState({ newNoteDialogOpen: true });
+    render(
+      <MemoryRouter>
+        <NewNoteDialog />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /从网页剪藏/ }));
+    await userEvent.type(screen.getByTestId('clip-url'), 'example.com/a');
+    await userEvent.click(screen.getByTestId('clip-fetch'));
+
+    await waitFor(() => expect(clip).toHaveBeenCalledWith('example.com/a'));
+    expect(await screen.findByTestId('clip-meta')).toHaveTextContent('example.com');
+    expect(screen.getByTestId('clip-preview')).toHaveTextContent('一篇好文章');
+
+    await userEvent.click(screen.getByTestId('clip-create'));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    const payload = create.mock.calls[0]![0];
+    expect(payload.title).toBe('一篇好文章');
+    expect(payload.initialContent).toContain('> 来源：https://example.com/a');
+    expect(payload.initialContent).toContain('# 一篇好文章');
+    await waitFor(() =>
+      expect(setSource).toHaveBeenCalledWith({
+        id: 'note_clip',
+        sourceType: 'web',
+        sourceRef: 'https://example.com/a',
+      }),
+    );
+    create.mockRestore();
+  });
+
+  it('抓取失败时给出错误提示且无法创建', async () => {
+    const { clipService } = await import('@/services/clipService');
+    vi.spyOn(clipService, 'clip').mockRejectedValue({ code: 'INVALID_INPUT', message: '抓取失败' });
+
+    useUiStore.setState({ newNoteDialogOpen: true });
+    render(
+      <MemoryRouter>
+        <NewNoteDialog />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /从网页剪藏/ }));
+    await userEvent.type(screen.getByTestId('clip-url'), 'bad.example');
+    await userEvent.click(screen.getByTestId('clip-fetch'));
+
+    await waitFor(() => expect(screen.queryByTestId('clip-preview')).not.toBeInTheDocument());
+    expect(screen.getByTestId('clip-create')).toBeDisabled();
   });
 });

@@ -50,7 +50,7 @@ V1.x 不引入云端与账号体系（见 [ARCHITECTURE.md](./ARCHITECTURE.md) �
 | 评论 / @提及 | 支持 | ⛔ 不适用 | 无协作场景 |
 | 多人实时协同 | CRDT / OT | ⛔ 不适用 | 明确不做（设计与文档 4.2 一致） |
 | 历史/审计/水印 | 企业能力 | ⛔ 不适用 | — |
-| 导入导出 | Word/Markdown/PDF、网页剪藏、开放 API | ✅ md/txt/docx/csv + Obsidian/Notion 目录导入（可保留目录结构）；导出 Markdown/HTML/Word/PDF | 🔷 仅剩「网页剪藏」（本地抓取 URL → Markdown） |
+| 导入导出 | Word/Markdown/PDF、网页剪藏、开放 API | ✅ md/txt/docx/csv + Obsidian/Notion 目录导入 + **网页剪藏**（V1.2.1 C1）；导出 Markdown/HTML/Word/PDF | 已对齐（开放 API 不做） |
 | 移动端 | App / 小程序 | ⛔ 不适用 | 保持桌面端 |
 
 一句话结论：**协作类能力（权限、评论、实时协同）不做**；

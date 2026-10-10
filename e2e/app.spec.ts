@@ -535,6 +535,23 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByRole('dialog')).toContainText('批量移动分类');
   await page.getByRole('button', { name: '取消' }).click();
 
+  // 31. 网页剪藏（C1）：抓取 → 预览 → 剪藏为新笔记（含来源元数据）
+  await page.goto('/#/notes');
+  await page.getByRole('button', { name: '新建笔记' }).first().click();
+  await page.getByRole('button', { name: /从网页剪藏/ }).click();
+  await page.getByTestId('clip-url').fill('example.com/articles/fts5');
+  await page.getByTestId('clip-fetch').click();
+  await expect(page.getByTestId('clip-meta')).toContainText('example.com');
+  await expect(page.getByTestId('clip-preview')).toContainText('剪藏示例');
+  await page.screenshot({ path: path.join(SHOTS, '37-web-clip.png') });
+  await page.getByTestId('clip-create').click();
+
+  // 剪藏后直接打开新笔记：标题、正文抬头与来源标签都在
+  await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue(/剪藏示例/);
+  await expect(page.locator('.cm-content')).toContainText('> 来源：https://example.com/articles/fts5');
+  await expect(page.getByText('网页剪藏')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '38-web-clip-note.png') });
+
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
 

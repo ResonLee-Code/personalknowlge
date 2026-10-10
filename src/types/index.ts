@@ -592,6 +592,18 @@ export interface RenderTemplateInput {
   title?: string | null;
 }
 
+/** 网页剪藏结果（V1.2.1 C1）：抓取 + 抽取后的网页正文 */
+export interface ClippedPage {
+  url: string;
+  finalUrl: string;
+  title: string;
+  site?: string | null;
+  markdown: string;
+  wordCount: number;
+  fetchedAt: string;
+  bytes: number;
+}
+
 /** 版本历史快照（对标语雀「查看历史版本」） */
 export interface HistoryEntry {
   entryId: string;

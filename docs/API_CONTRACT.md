@@ -344,7 +344,19 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
   写入路径仍走 `note_save`，因此索引、双链、关系都会照常刷新；
 - id 校验：`noteId` / `entryId` 不允许包含路径分隔符或 `..`。
 
-## 22. 前端服务层
+## 22. 网页剪藏（V1.2.1 C1）
+
+| 命令 | 参数 | 返回 |
+| --- | --- | --- |
+| `note_clip_url` | `{ url }` | `ClippedPage`（url / finalUrl / title / site / markdown / wordCount / fetchedAt / bytes） |
+
+- **只读**：抓取 + 转换，不写库；调用方（前端）走常规 `note_create` 落库，
+  再用 `note_set_source` 写 `source_type: web` 与 `source_ref`；
+- 只接受 http/https 公开页面，缺协议自动补 `https://`；非 HTML 的 `Content-Type` 直接报错；
+- 单页读取上限 3 MB、整体超时 20 秒、正文 Markdown 上限 12 万字符（超出截断并注明）；
+- 抽取失败（如需要登录）返回 `INVALID_INPUT` 并提示原因。
+
+## 23. 前端服务层
 
 前端不直接拼命令字符串，统一经 `src/services/api.ts` 的 `call()`：
 
