@@ -153,6 +153,26 @@
 - 新命令：`ai_policy_get` / `ai_policy_set` / `ai_audit_tail` / `ai_kb_search` / `ai_web_fetch` / `ai_web_search`；
   错误码新增 `AI_DISABLED` / `NETWORK_DISABLED`（前后端一致）。
 
+### 不变量补测：AI 不写库 / 文件即事实来源 / 检索源受域名规则约束（2026-10-11）
+
+按「0 信任」把文档里承诺过、但之前没有测试证据的三条不变量补上：
+
+1. **写入提案之前，AI 不碰工作区**（`research_steps_before_write_touch_nothing_on_disk`）：
+   走完立项 → 收集 → 验证 → 汇总 → 提案之后，笔记数与 Markdown 文件清单**完全不变**，
+   且研究会话（`.knowledge/research/*.json`）不会混进可扫描的 Markdown；
+2. **文件是唯一事实来源 + 落库即可检索**（`written_report_is_a_normal_markdown_note_and_becomes_searchable`）：
+   直接读磁盘上的那份 Markdown，断言 frontmatter 里 `id` / `source_type: research` /
+   `source_reliability` / `valid_until` / `source_ref` / 标签都对得上，正文含报告抬头；
+   随后**立刻**用 FTS 检索到这篇笔记（索引在写入时已更新，不需要等下次扫描）；
+3. **每一步都被闸门挡住 + 拒绝也要留痕**（`every_research_step_is_gated_by_the_ai_switch`）：
+   关掉总开关后 collect / verify / compose / proposal / write / abort 全部返回 `AI_DISABLED`，
+   审计里至少 6 条 `denied` 记录且 `outbound` 全为 false；而**读取会话**不受影响（草稿不丢）；
+4. **检索源本身也受域名白名单约束**（`search_endpoint_itself_is_subject_to_the_domain_allowlist`）：
+   白名单非空且不含检索源主机时返回 `NETWORK_DISABLED` 且**一次请求都不发**；
+   把该主机加进白名单后才放行（端口被规范化掉，按主机匹配）。
+
+至此 `research_flow.rs` 14 项、`web_search_flow.rs` 4 项；Rust 全量仍是 29 个测试目标全绿。
+
 ### 打包前预检（版本校验四处 + release 档编译，2026-10-11）
 
 打包仍按你的指令暂停，但把「恢复打包时最容易翻车」的两件事先验掉：

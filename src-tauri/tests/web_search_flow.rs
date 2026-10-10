@@ -214,6 +214,46 @@ fn allowed_network_collects_graded_web_sources_and_drops_suspected_injection() {
 }
 
 #[test]
+fn search_endpoint_itself_is_subject_to_the_domain_allowlist() {
+    let fixture = Fixture::new();
+    let (host, touched) = spawn_once_server(r#"{"results":[]}"#.to_string());
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            search_endpoint: Some(format!("http://{host}/search?q={{query}}&limit={{limit}}")),
+            // 白名单非空，但不包含检索源所在主机 → 检索源也算外发目标，必须拒绝
+            domain_allowlist: Some(vec!["docs.example.com".to_string()]),
+            ..Default::default()
+        })
+        .expect("配置白名单");
+
+    let error = fixture
+        .tools()
+        .web_search("Rust 调度", 3, true)
+        .expect_err("白名单外的检索源必须拒绝");
+    assert_eq!(error.code.as_str(), "NETWORK_DISABLED");
+    assert!(!touched.load(Ordering::SeqCst), "被拒绝时不得访问检索源");
+
+    // 把检索源主机加进白名单 → 放行（端口会被规范化掉，只按主机匹配）
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            domain_allowlist: Some(vec!["127.0.0.1".to_string()]),
+            ..Default::default()
+        })
+        .expect("放行检索源");
+    let hits = fixture
+        .tools()
+        .web_search("Rust 调度", 3, true)
+        .expect("白名单内应当放行");
+    assert!(hits.is_empty(), "桩服务返回空结果");
+    assert!(touched.load(Ordering::SeqCst), "放行后必须真的访问检索源");
+}
+
+#[test]
 fn missing_search_endpoint_reports_clearly_without_any_request() {
     let fixture = Fixture::new();
     fixture

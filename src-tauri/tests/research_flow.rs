@@ -16,11 +16,14 @@ use personal_knowledge_os_lib::application::ai::traits::{
     DecisionKind, DecisionModel, DecisionResult, DecisionState,
 };
 use personal_knowledge_os_lib::application::note_service::NoteService;
+use personal_knowledge_os_lib::application::search_service::SearchService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
 use personal_knowledge_os_lib::core::time::today_date;
 use personal_knowledge_os_lib::domain::ai::UpdateAiPolicyInput;
 use personal_knowledge_os_lib::domain::note::{CreateNoteInput, SetSourceInput};
+use personal_knowledge_os_lib::domain::search::SearchQuery;
+use personal_knowledge_os_lib::infrastructure::frontmatter;
 use personal_knowledge_os_lib::domain::research::{
     ResearchRequest, ResearchSession, ResearchStatus, ResearchWriteInput, SourceLevel, WarningKind,
     WRITE_MODE_ABANDON, WRITE_MODE_APPEND, WRITE_MODE_CREATE,
@@ -707,4 +710,174 @@ fn swapping_the_decision_model_changes_scores_without_touching_the_pipeline() {
         "0 分的模型应当压低可信度：{stub_score} vs {rule_score}"
     );
     assert!(stub_score > 0.0, "级别折算的一半是下限，不会被模型拉到 0");
+}
+
+#[test]
+fn research_steps_before_write_touch_nothing_on_disk() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    seed(&fixture);
+    let context = fixture.context();
+
+    let before_files = context.storage.list_markdown_files().expect("文件清单");
+    let before_notes = NoteService::new(fixture.context())
+        .recent(500)
+        .expect("笔记数")
+        .len();
+
+    // 走完前四步 + 生成写入提案（**都还没有落库**）
+    let session = run_until(
+        &fixture,
+        request("Rust 异步运行时调度"),
+        &["collect", "verify", "compose", "proposal"],
+    );
+    assert_eq!(session.status, ResearchStatus::Proposed);
+
+    let after_files = context.storage.list_markdown_files().expect("文件清单");
+    let after_notes = NoteService::new(fixture.context())
+        .recent(500)
+        .expect("笔记数")
+        .len();
+    assert_eq!(
+        before_notes, after_notes,
+        "AI 不直接写库：写入提案之前不得新增任何笔记"
+    );
+    assert_eq!(
+        before_files, after_files,
+        "写入提案之前不得改动工作区里的任何 Markdown 文件"
+    );
+    // 会话文件是旁路数据，不在 Markdown 清单里
+    assert!(
+        after_files
+            .iter()
+            .all(|path| !path.contains(".knowledge/research")),
+        "研究会话不应混进可扫描的 Markdown：{after_files:?}"
+    );
+}
+
+#[test]
+fn every_research_step_is_gated_by_the_ai_switch() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    seed(&fixture);
+    let research = fixture.research();
+    let session = research.start(request("Rust 异步运行时调度")).expect("立项");
+    research.collect(&session.id, false).expect("收集");
+
+    // 关掉总开关：**每一步**都必须被闸门挡住（闸门在步骤校验之前）
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput { enabled: Some(false), ..Default::default() })
+        .expect("关闭总开关");
+
+    let steps: Vec<(&str, String)> = vec![
+        (
+            "collect",
+            research.collect(&session.id, false).expect_err("收集").code.as_str().to_string(),
+        ),
+        ("verify", research.verify(&session.id).expect_err("验证").code.as_str().to_string()),
+        ("compose", research.compose(&session.id).expect_err("汇总").code.as_str().to_string()),
+        ("proposal", research.proposal(&session.id).expect_err("提案").code.as_str().to_string()),
+        (
+            "write",
+            research
+                .write(ResearchWriteInput {
+                    session_id: session.id.clone(),
+                    mode: WRITE_MODE_CREATE.to_string(),
+                    ..Default::default()
+                })
+                .expect_err("落库")
+                .code
+                .as_str()
+                .to_string(),
+        ),
+        ("abort", research.abort(&session.id, None).expect_err("中止").code.as_str().to_string()),
+    ];
+    for (step, code) in &steps {
+        assert_eq!(code, "AI_DISABLED", "{step} 必须被闸门挡住");
+    }
+
+    // 读取会话是本地操作、不经过闸门：关掉 AI 之后草稿仍然读得到（不丢数据）
+    let draft = research.get(&session.id).expect("读取会话不应被闸门挡住");
+    assert_eq!(draft.status, ResearchStatus::Collected);
+    assert!(!draft.sources.is_empty());
+
+    // 审计里能查到这些拒绝记录（能力名 + AI_DISABLED）
+    let audit = fixture.policy().audit_tail(30).expect("审计");
+    assert!(
+        audit
+            .iter()
+            .filter(|entry| entry.outcome == "denied" && entry.note.as_deref() == Some("AI_DISABLED"))
+            .count()
+            >= 6,
+        "每一步的拒绝都要留痕：{audit:?}"
+    );
+    assert!(audit.iter().all(|entry| !entry.outbound), "被拒绝时不得外发");
+}
+
+#[test]
+fn written_report_is_a_normal_markdown_note_and_becomes_searchable() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    seed(&fixture);
+
+    let session = run_until(
+        &fixture,
+        request("Rust 异步运行时调度"),
+        &["collect", "verify", "compose", "proposal"],
+    );
+    let result = fixture
+        .research()
+        .write(ResearchWriteInput {
+            session_id: session.id.clone(),
+            mode: WRITE_MODE_CREATE.to_string(),
+            ..Default::default()
+        })
+        .expect("写入");
+    let note_id = result.note_id.clone().expect("笔记 id");
+
+    // 1) 文件是唯一事实来源：磁盘上的 Markdown 自带 frontmatter 元数据 + 报告正文
+    let detail = NoteService::new(fixture.context())
+        .get(&note_id)
+        .expect("读回笔记");
+    let path = fixture
+        .workspace
+        .path()
+        .join(detail.note.file_path.replace('\\', "/"));
+    let raw = std::fs::read_to_string(&path).expect("笔记文件存在");
+    let parsed = frontmatter::parse(&raw);
+    assert!(parsed.parse_error.is_none(), "frontmatter 必须可解析");
+    assert_eq!(parsed.frontmatter.id.as_deref(), Some(note_id.as_str()));
+    assert_eq!(parsed.frontmatter.source_type.as_deref(), Some("research"));
+    assert_eq!(
+        parsed.frontmatter.source_reliability,
+        Some(result.source_reliability),
+        "可靠性要落到文件里（按最低来源级别取整）"
+    );
+    assert!(parsed.frontmatter.valid_until.is_some(), "复核时间要落到文件里");
+    assert!(
+        parsed.frontmatter.source_ref.as_deref().unwrap_or("").contains("[1]"),
+        "来源清单要落到文件里：{:?}",
+        parsed.frontmatter.source_ref
+    );
+    assert!(parsed.body.contains("资料截至"), "正文含报告抬头");
+    assert!(
+        parsed.frontmatter.tags.iter().any(|tag| tag == "调研报告"),
+        "标签要落到文件里：{:?}",
+        parsed.frontmatter.tags
+    );
+
+    // 2) 落库后立刻能被检索到（索引已更新，不是等下次扫描）
+    let hits = SearchService::new(fixture.context())
+        .search(SearchQuery {
+            keyword: "调研报告".to_string(),
+            page: Some(1),
+            page_size: Some(20),
+            ..Default::default()
+        })
+        .expect("检索");
+    assert!(
+        hits.hits.iter().any(|hit| hit.note.id == note_id),
+        "写入后应当立刻可被检索到"
+    );
 }
