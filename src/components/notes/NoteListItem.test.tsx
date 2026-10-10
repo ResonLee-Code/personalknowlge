@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { NoteListItem } from '@/components/notes/NoteListItem';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { useNotesStore } from '@/stores/notesStore';
 import type { NoteSummary } from '@/types';
 
 const note: NoteSummary = {
@@ -27,7 +28,7 @@ const note: NoteSummary = {
 };
 
 describe('NoteListItem', () => {
-  it('展示标题、分类、标签与摘要高亮', () => {
+  it('语雀式单行条目：只显示标题，分类 / 标签 / 时间不在列表里重复', () => {
     render(
       <TooltipProvider delayDuration={0}>
         <MemoryRouter>
@@ -38,10 +39,53 @@ describe('NoteListItem', () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByText('SQLite 全文搜索学习笔记')).toBeInTheDocument();
-    expect(screen.getByText(/技术\/数据库/)).toBeInTheDocument();
-    expect(screen.getByText('sqlite')).toBeInTheDocument();
-    expect(screen.getByText('全文搜索')).toHaveClass('search-highlight');
+    expect(screen.getByTestId('note-list-item-title')).toHaveTextContent('SQLite 全文搜索学习笔记');
+    // 元信息移到预览页与「目录管理」页，列表不再展示
+    expect(screen.queryByText(/技术\/数据库/)).not.toBeInTheDocument();
+    expect(screen.queryByText('sqlite')).not.toBeInTheDocument();
+    expect(screen.queryByText(/分钟前|小时前|天前/)).not.toBeInTheDocument();
+  });
+
+  it('搜索态才显示命中摘要并高亮', () => {
+    useNotesStore.setState({ keyword: '全文搜索' });
+    render(
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter>
+          <ul>
+            <NoteListItem note={note} selected={false} basePath="/notes" onOpen={() => {}} />
+          </ul>
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+
+    // 摘要里的命中片段（标题里也有同样的词，因此按摘要容器内的元素断言）
+    const highlighted = screen
+      .getAllByText('全文搜索')
+      .filter((element) => element.className.includes('search-highlight'));
+    expect(highlighted.length).toBeGreaterThan(0);
+    useNotesStore.setState({ keyword: '' });
+  });
+
+  it('置顶与收藏用图标表达，并提供 hover 快捷「新建子文档」', async () => {
+    render(
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter>
+          <ul>
+            <NoteListItem
+              note={{ ...note, pinned: true }}
+              selected={false}
+              basePath="/notes"
+              onOpen={() => {}}
+            />
+          </ul>
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByTestId('note-pinned-marker')).toHaveAttribute('title', '已置顶');
+    expect(screen.getByTestId('note-favorite-marker')).toHaveAttribute('title', '已收藏');
+    await userEvent.click(screen.getByTestId('note-quick-child'));
+    expect(await screen.findByText('新建子文档')).toBeInTheDocument();
   });
 
   it('点击时触发打开回调', async () => {
@@ -56,7 +100,7 @@ describe('NoteListItem', () => {
       </TooltipProvider>,
     );
 
-    await userEvent.click(screen.getByText('SQLite 全文搜索学习笔记'));
+    await userEvent.click(screen.getByTestId('note-list-item'));
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
@@ -84,7 +128,7 @@ describe('NoteListItem', () => {
     });
   });
 
-  it('右键弹出操作菜单（含创建子文档与大纲预览）', async () => {
+  it('右键弹出操作菜单（含创建子文档等入口）', async () => {
     render(
       <TooltipProvider delayDuration={0}>
         <MemoryRouter>
@@ -101,13 +145,12 @@ describe('NoteListItem', () => {
     });
 
     expect(await screen.findByTestId('note-menu-create-child')).toBeInTheDocument();
-    expect(screen.getByTestId('note-menu-outline')).toBeInTheDocument();
     expect(screen.getByTestId('note-menu-rename')).toBeInTheDocument();
     expect(screen.getByTestId('note-menu-export')).toBeInTheDocument();
     expect(screen.getByTestId('note-menu-pin')).toHaveTextContent('置顶');
   });
 
-  it('置顶状态会反映在菜单文案与条目元信息上', async () => {
+  it('置顶状态反映在图标与菜单文案上', async () => {
     render(
       <TooltipProvider delayDuration={0}>
         <MemoryRouter>
@@ -123,7 +166,7 @@ describe('NoteListItem', () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByText('已置顶')).toBeInTheDocument();
+    expect(screen.getByTestId('note-pinned-marker')).toHaveAttribute('title', '已置顶');
     await userEvent.pointer({
       target: screen.getByTestId('note-list-item'),
       keys: '[MouseRight]',

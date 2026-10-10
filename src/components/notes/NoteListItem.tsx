@@ -8,7 +8,6 @@ import {
   FileCode2,
   FolderTree,
   Heading1,
-  ListTree,
   MoreHorizontal,
   Pin,
   PinOff,
@@ -26,7 +25,6 @@ import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { CreateChildNoteDialog } from '@/components/notes/CreateChildNoteDialog';
 import { DeleteNoteDialog } from '@/components/notes/DeleteNoteDialog';
 import { MoveNoteDialog } from '@/components/notes/MoveNoteDialog';
-import { NoteOutlineDialog } from '@/components/notes/NoteOutlineDialog';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -45,7 +43,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
 import { isNoteDrag, readNoteDragIds, setNoteDragData } from '@/lib/dragNotes';
 import { noteDropPosition, type NoteDropPosition } from '@/lib/noteDragDrop';
-import { formatRelative } from '@/lib/format';
 import { splitHighlight } from '@/lib/highlight';
 import { cn } from '@/lib/utils';
 import { useNotesStore } from '@/stores/notesStore';
@@ -62,7 +59,6 @@ function NoteMenuItems({
   onTogglePinned,
   onCreateChild,
   onPromote,
-  onOutline,
   onCopyPath,
   onCopyTitle,
   onRename,
@@ -80,7 +76,6 @@ function NoteMenuItems({
   onTogglePinned: () => void;
   onCreateChild: () => void;
   onPromote: () => void;
-  onOutline: () => void;
   onCopyPath: () => void;
   onCopyTitle: () => void;
   onRename: () => void;
@@ -133,9 +128,6 @@ function NoteMenuItems({
           <CornerLeftUp className="h-3.5 w-3.5" /> 升级为顶层文档
         </Item>
       ) : null}
-      <Item onSelect={onOutline} data-testid="note-menu-outline">
-        <ListTree className="h-3.5 w-3.5" /> 大纲预览
-      </Item>
       {/* 对标语雀「复制链接」：本地知识库里对应的是相对路径与标题 */}
       <Item onSelect={onCopyPath} data-testid="note-menu-copy-path">
         <FileCode2 className="h-3.5 w-3.5" /> 复制相对路径
@@ -220,7 +212,6 @@ export function NoteListItem({
   const setSelectionMode = useNotesStore((state) => state.setSelectionMode);
 
   const [childOpen, setChildOpen] = useState(false);
-  const [outlineOpen, setOutlineOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -288,7 +279,6 @@ export function NoteListItem({
     onTogglePinned: handlePin,
     onCreateChild: () => setChildOpen(true),
     onPromote: handlePromote,
-    onOutline: () => setOutlineOpen(true),
     onCopyPath: () => void copyText(note.filePath, '相对路径'),
     onCopyTitle: () => void copyText(note.title, '标题'),
     onRename: () => setRenameOpen(true),
@@ -308,6 +298,7 @@ export function NoteListItem({
             role="button"
             tabIndex={0}
             data-testid="note-list-item"
+            data-depth={depth}
             onClick={(event) => {
               // 多选模式下点击即勾选；Cmd/Ctrl+点击随时切换并进入多选
               if (selectionMode || event.metaKey || event.ctrlKey) {
@@ -382,20 +373,25 @@ export function NoteListItem({
                 className="pointer-events-none absolute inset-x-1 -bottom-px h-0.5 rounded-full bg-[var(--brand)]"
               />
             ) : null}
-            <div className="flex items-start gap-2">
+            {/*
+              语雀式目录条目：一行只有「层级 + 标题 + 状态图标」。
+              分类 / 标签 / 更新时间在预览页的元信息栏里已有，列表不再重复展示；
+              元数据要一览时用「目录管理」页的宽表。
+            */}
+            <div className="flex items-center gap-1.5">
               {selectionMode ? (
                 <input
                   type="checkbox"
-                  className="mt-0.5 shrink-0"
+                  className="shrink-0"
                   checked={selectedForBatch}
                   aria-label={`选择 ${note.title}`}
                   onChange={() => toggleSelected(note.id)}
                   onClick={(event) => event.stopPropagation()}
                 />
               ) : null}
-              {/* 子文档层级：用缩进 + 展开箭头表达父子关系（对标语雀目录树） */}
+              {/* 子文档层级：缩进 + 展开 / 折叠箭头 */}
               <span
-                className="flex w-3.5 shrink-0 items-center justify-center pt-0.5"
+                className="flex w-3.5 shrink-0 items-center justify-center"
                 style={{ marginLeft: depth * 12 }}
               >
                 {childCount > 0 ? (
@@ -419,77 +415,91 @@ export function NoteListItem({
                   </button>
                 ) : null}
               </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start gap-1.5">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span
-                        data-testid="note-list-item-title"
-                        className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--ink)]"
-                      >
-                        {titleSegments.map((segment, index) => (
-                          <span key={index} className={segment.matched ? 'search-highlight' : undefined}>
-                            {segment.text}
-                          </span>
-                        ))}
-                      </span>
-                    </TooltipTrigger>
-                    {/* 标题被截断时，悬停显示完整标题 */}
-                    <TooltipContent side="top" className="max-w-[min(420px,60vw)] break-words">
-                      {note.title}
-                    </TooltipContent>
-                  </Tooltip>
-                  {note.favorite ? <Star className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" /> : null}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="笔记操作"
-                        title="更多操作"
-                        onClick={(event) => event.stopPropagation()}
-                        className="rounded p-0.5 text-[var(--ink-subtle)] opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100"
-                      >
-                        <MoreHorizontal className="h-3.5 w-3.5" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      align="start"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <NoteMenuItems variant="dropdown" note={note} {...menuHandlers} />
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-
-                {snippet.length > 0 ? (
-                  <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[var(--ink-muted)]">
-                    {snippet.map((segment, index) => (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    data-testid="note-list-item-title"
+                    className="min-w-0 flex-1 truncate text-sm text-[var(--ink)]"
+                  >
+                    {titleSegments.map((segment, index) => (
                       <span key={index} className={segment.matched ? 'search-highlight' : undefined}>
                         {segment.text}
                       </span>
                     ))}
-                  </p>
-                ) : null}
-
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--ink-subtle)]">
-                  {note.pinned ? (
-                    <span className="flex items-center gap-0.5 text-[var(--brand)]">
-                      <Pin className="h-3 w-3" />
-                      已置顶
-                    </span>
-                  ) : null}
-                  <span>{formatRelative(note.updatedAt)}</span>
-                  {note.categoryPath ? <span>· {note.categoryPath}</span> : null}
-                  {childCount > 0 ? <span>· {childCount} 篇子文档</span> : null}
-                  {note.tags.slice(0, 3).map((tag) => (
-                    <span key={tag} className="rounded-full bg-[var(--surface-muted)] px-1.5 py-px">
-                      {tag}
-                    </span>
-                  ))}
-                  {note.tags.length > 3 ? <span>+{note.tags.length - 3}</span> : null}
-                </div>
-              </div>
+                  </span>
+                </TooltipTrigger>
+                {/* 标题被截断时，悬停显示完整标题 */}
+                <TooltipContent side="top" className="max-w-[min(420px,60vw)] break-words">
+                  {note.title}
+                </TooltipContent>
+              </Tooltip>
+              {note.pinned ? (
+                <span
+                  data-testid="note-pinned-marker"
+                  role="img"
+                  aria-label="已置顶"
+                  title="已置顶"
+                  className="flex shrink-0 text-[var(--brand)]"
+                >
+                  <Pin className="h-3 w-3" />
+                </span>
+              ) : null}
+              {note.favorite ? (
+                <span
+                  data-testid="note-favorite-marker"
+                  role="img"
+                  aria-label="已收藏"
+                  title="已收藏"
+                  className="flex shrink-0 text-amber-500"
+                >
+                  <Star className="h-3 w-3" />
+                </span>
+              ) : null}
+              {/* hover 才出现的快捷操作（对标语雀：⋮ 与 + 在建条目右侧） */}
+              <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                <button
+                  type="button"
+                  data-testid="note-quick-child"
+                  title="新建子文档"
+                  aria-label={`为 ${note.title} 新建子文档`}
+                  disabled={deleted}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setChildOpen(true);
+                  }}
+                  className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--brand)] disabled:opacity-40"
+                >
+                  <FilePlus2 className="h-3.5 w-3.5" />
+                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="笔记操作"
+                      title="更多操作"
+                      onClick={(event) => event.stopPropagation()}
+                      className="rounded p-0.5 text-[var(--ink-subtle)] data-[state=open]:opacity-100"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
+                    <NoteMenuItems variant="dropdown" note={note} {...menuHandlers} />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </span>
             </div>
+            {/* 搜索态才显示命中摘要：定位匹配位置用，平时保持列表紧凑 */}
+            {keyword && snippet.length > 0 ? (
+              <p className="mt-0.5 line-clamp-2 pl-5 text-[11px] leading-relaxed text-[var(--ink-muted)]">
+                {snippet.map((segment, index) => (
+                  <span key={index} className={segment.matched ? 'search-highlight' : undefined}>
+                    {segment.text}
+                  </span>
+                ))}
+              </p>
+            ) : null}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent onClick={(event) => event.stopPropagation()}>
@@ -499,9 +509,6 @@ export function NoteListItem({
 
       {childOpen ? (
         <CreateChildNoteDialog parent={note} onClose={() => setChildOpen(false)} />
-      ) : null}
-      {outlineOpen ? (
-        <NoteOutlineDialog note={note} onClose={() => setOutlineOpen(false)} />
       ) : null}
       {renameOpen ? (
         <RenameFileDialog

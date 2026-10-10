@@ -278,10 +278,11 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   // 创建后直接打开子文档
   await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue('索引策略');
 
-  // 列表显示父子层级：父行带子文档数量与折叠箭头，子行缩进显示
-  await expect(parentRow).toContainText('1 篇子文档');
+  // 列表显示父子层级：父行带折叠箭头，子行以层级缩进呈现（行内不再有元信息文字）
+  await expect(parentRow.getByTestId('note-tree-toggle')).toHaveAttribute('aria-expanded', 'true');
   const childRow = page.getByTestId('note-list-item').filter({ hasText: '索引策略' }).first();
   await expect(childRow).toBeVisible();
+  await expect(childRow).toHaveAttribute('data-depth', '1');
   await page.screenshot({ path: path.join(SHOTS, '22-note-tree.png') });
 
   await parentRow.getByTestId('note-tree-toggle').click();
@@ -289,14 +290,18 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await parentRow.getByTestId('note-tree-toggle').click();
   await expect(childRow).toBeVisible();
 
-  // 右键菜单 → 大纲预览 → 点击标题打开并跳转
+  // 右键菜单（⋮ 与右键同一套）：截图留档，顺便确认菜单结构
   await parentRow.click({ button: 'right' });
-  await expect(page.getByTestId('note-menu-outline')).toBeVisible();
+  await expect(page.getByTestId('note-menu-create-child')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '23-context-menu.png') });
-  await page.getByTestId('note-menu-outline').click();
-  await expect(page.getByTestId('outline-preview-item').first()).toContainText('全文搜索');
-  await page.screenshot({ path: path.join(SHOTS, '24-outline-preview.png') });
-  await page.getByTestId('outline-preview-item').first().click();
+  await page.keyboard.press('Escape');
+
+  // 列表侧常驻大纲：选中哪篇看哪篇，点击标题打开并跳转（不再走右键菜单弹窗）
+  await parentRow.click();
+  await expect(page.getByTestId('list-outline-pane')).toBeVisible();
+  await expect(page.getByTestId('list-outline-item').first()).toContainText('全文搜索');
+  await page.screenshot({ path: path.join(SHOTS, '24-list-outline.png') });
+  await page.getByTestId('list-outline-item').first().click();
   await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue(
     'SQLite 全文搜索学习笔记',
   );
@@ -304,7 +309,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   // 子文档可升级为顶层文档
   await childRow.click({ button: 'right' });
   await page.getByTestId('note-menu-promote').click();
-  await expect(parentRow).not.toContainText('1 篇子文档');
+  await expect(parentRow.getByTestId('note-tree-toggle')).toHaveCount(0);
 
   // 23. 拖拽建立层级 / 同层排序（V1.2.1，对标语雀的拖拽语义）
   await page.goto('/#/notes');
@@ -318,19 +323,20 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await dragSource().dragTo(nestTarget(), {
     targetPosition: { x: nestBox.width / 2, y: nestBox.height / 2 },
   });
-  await expect(nestTarget()).toContainText('1 篇子文档');
+  await expect(nestTarget().getByTestId('note-tree-toggle')).toHaveAttribute('aria-expanded', 'true');
+  await expect(dragSource()).toHaveAttribute('data-depth', '1');
   await page.screenshot({ path: path.join(SHOTS, '25-drag-nest.png') });
 
-  // 拖到行上边缘 = 同层插入（会自动切到「自定义顺序」）
+  // 拖到「第一行」的上边缘 = 同层插入到最前（会自动切到「自定义顺序」）
   await page.getByRole('button', { name: '自定义顺序' }).click();
-  const orderBefore = await page.getByTestId('note-list-item').allInnerTexts();
-  const topRow = page.getByTestId('note-list-item').filter({ hasText: '欢迎使用 Personal Knowledge OS' }).first();
-  const topBox = await topRow.boundingBox();
-  if (!topBox) throw new Error('未找到第二个拖拽目标');
-  await dragSource().dragTo(topRow, { targetPosition: { x: topBox.width / 2, y: 2 } });
+  const firstRow = page.getByTestId('note-list-item').first();
+  await expect(firstRow).not.toContainText('索引策略');
+  const firstBox = await firstRow.boundingBox();
+  if (!firstBox) throw new Error('未找到第一个条目');
+  await dragSource().dragTo(firstRow, { targetPosition: { x: firstBox.width / 2, y: 2 } });
   await expect
-    .poll(async () => (await page.getByTestId('note-list-item').allInnerTexts()).join('|'))
-    .not.toBe(orderBefore.join('|'));
+    .poll(async () => (await page.getByTestId('note-list-item').first().innerText()))
+    .toContain('索引策略');
   await page.screenshot({ path: path.join(SHOTS, '26-drag-reorder.png') });
 
   // 24. 「不在目录中」筛选 + 删除可撤销（V1.2.1）
@@ -340,7 +346,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await dragSource().dragTo(nestTarget(), {
     targetPosition: { x: nestBox2.width / 2, y: nestBox2.height / 2 },
   });
-  await expect(nestTarget()).toContainText('1 篇子文档');
+  await expect(dragSource()).toHaveAttribute('data-depth', '1');
 
   // 只看顶层文档：折叠在父文档下的子文档不再出现
   await page.getByTestId('root-only-toggle').click();
@@ -371,7 +377,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect
     .poll(async () => (await page.getByTestId('note-list-item').allInnerTexts())[0])
     .toContain('欢迎使用');
-  await expect(page.getByTestId('note-list-item').first()).toContainText('已置顶');
+  await expect(page.getByTestId('note-list-item').first().getByTestId('note-pinned-marker')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '29-pin.png') });
 
   await page.getByTestId('note-list-item').first().click({ button: 'right' });
@@ -471,7 +477,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
     .getByTestId('note-list-item')
     .filter({ hasText: 'SQLite 全文搜索学习笔记' })
     .first();
-  await expect(parentRowForDelete).toContainText('1 篇子文档');
+  await expect(parentRowForDelete.getByTestId('note-tree-toggle')).toBeVisible();
   await parentRowForDelete.click({ button: 'right' });
   await page.getByTestId('note-menu-delete').click();
   await expect(page.getByRole('dialog')).toContainText('删除有子文档的笔记');

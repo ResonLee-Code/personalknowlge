@@ -37,6 +37,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import type { NoteSort } from '@/types';
 
 import { BatchCopyDialog, BatchMoveDialog, BatchTagDialog } from './BatchActionDialogs';
+import { ListOutlinePane } from './ListOutlinePane';
 import { NoteListItem } from './NoteListItem';
 
 const SORT_OPTIONS = [
@@ -494,6 +495,9 @@ export function NoteListPanel() {
           </button>
         </div>
       ) : null}
+
+      {/* 列表侧常驻大纲：选中哪篇看哪篇，不必再进右键菜单（V1.2.1 界面调整） */}
+      {scope.kind !== 'trash' && scope.kind !== 'missing' ? <ListOutlinePane /> : null}
 
       {/* 仅在按分类/标签筛选时出现：用于回到全部笔记 */}
       {scope.kind === 'category' || scope.kind === 'tag' ? (

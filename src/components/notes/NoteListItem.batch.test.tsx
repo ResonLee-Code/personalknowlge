@@ -31,7 +31,7 @@ describe('NoteListItem 点击行为', () => {
         </MemoryRouter>
       </TooltipProvider>,
     );
-    await userEvent.click(screen.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }));
+    await userEvent.click(screen.getByTestId('note-list-item'));
     expect(onOpen).toHaveBeenCalled();
     expect(useNotesStore.getState().selectionMode).toBe(false);
   });
@@ -46,7 +46,7 @@ describe('NoteListItem 点击行为', () => {
         </MemoryRouter>
       </TooltipProvider>,
     );
-    await userEvent.click(screen.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }));
+    await userEvent.click(screen.getByTestId('note-list-item'));
     expect(onOpen).not.toHaveBeenCalled();
     expect(useNotesStore.getState().selection).toEqual(['note_1']);
   });
