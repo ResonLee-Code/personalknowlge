@@ -175,6 +175,10 @@
   `/api/docs/{slug}?mode=markdown` 的 `data.sourcecode`），
   [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) 第 7 节改为逐条带出处的版本，
   原始摘录见 [research/YUQUE_FEATURE_NOTES.md](./research/YUQUE_FEATURE_NOTES.md)；
+- 研究助手的两项决策已确认（2026-10-10）：联网闸门默认关闭 + 两档 + 首次使用再确认；
+  写入纪律（默认 Inbox、不覆盖、写前 diff、可回滚、推测段折叠）——已回填
+  [AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md) §9.7（含设置契约：档位、白/黑名单、
+  预算、首次确认对话框、运行中可中止）与 [PLAN_V1.2.1.md](./PLAN_V1.2.1.md) 第 6 节；
 - [AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md) 新增 **§9 研究助手**（对话式深入调研 →
   来源权威性分级 A–E → 交叉验证与时效 → 报告 → 用户确认后写入知识库），并在隐私开关表、
   落地表、NEXT_GEN_ANALYSIS 的 N 路线（新增 N10）中同步；[PLAN_V1.2.1.md](./PLAN_V1.2.1.md)
