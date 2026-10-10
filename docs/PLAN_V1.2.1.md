@@ -1,0 +1,81 @@
+# V1.2.1 阶段计划（收口与稳定性）
+
+> 制定时间：2026-10-10。依据是仓库当前状态（`git log`、CHANGELOG、ROADMAP、
+> PRODUCT_REQUIREMENTS 的未勾选项），不是路线图里的原始设想。
+> 完成定义沿用 [PLAN_V1.1.md](./PLAN_V1.1.md) 第 7 节（有测试、全绿、文档同步、跨平台产物需确认）。
+
+## 1. 起点：现在到底完成了什么
+
+| 维度 | 现状 | 证据 |
+| --- | --- | --- |
+| 功能计划 | P1 6 项 + P2 7 项 **全部完成** | [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) §7.4 逐条 ✅；命令/迁移/组件均在仓库中 |
+| 质量门 | 前端 187 用例、Rust 22 组测试、E2E 主流程 30 步全绿 | 最近一次全量回归（2026-10-10） |
+| 版本号 | 代码已是 V1.2.1 的内容，但四处版本号仍是 **1.2.0** | `package.json` / `Cargo.toml` / `tauri.conf.json` |
+| 安装包 | macOS V1.2.0 已出；Windows V1.2.0 已同步；**均未包含 V1.2.1 的功能** | `src-tauri/target/release/bundle/`、`dist-windows/` |
+| 文档 | 功能文档已同步；**路线图与旧对标表此前有漂移，本次已校正** | 本文件 + ROADMAP 更新 |
+
+## 2. 阶段 A：V1.2.1 收口（等指令，预计半天）
+
+| # | 任务 | 验收标准 |
+| --- | --- | --- |
+| A1 | 版本号四处升到 `1.2.1`（`package.json` / `Cargo.toml` / `Cargo.lock` / `tauri.conf.json`），CHANGELOG 去掉「未发布」 | 四处一致；`pnpm tauri build --no-bundle` 产物版本信息为 1.2.1 |
+| A2 | 全量回归：`cargo test --offline`、`pnpm test`、`pnpm lint`、`pnpm build`、`pnpm test:e2e` | 全绿，无跳过 |
+| A3 | 三平台产物：推 `v1.2.1` 标签走 [release.yml](../.github/workflows/release.yml)，或本机 macOS + 交叉 Windows + Linux 脚本 | Release 附 `.dmg` / `.exe`+portable `.zip` / `.deb`+`.rpm`+`.AppImage` 与 `SHA256SUMS-*` |
+| A4 | 新建 `ACCEPTANCE_V1.2.1.md`（沿用 1.2.0 结构：产物完整性 / 升级迁移 / 性能 / 真机人工项 / Windows 对照 / 已知限制 / 自动化实测） | 自动化项有证据；人工项列成可勾选清单 |
+| A5 | 真机人工验收（需你操作）：编辑器输入与 `[[` 补全、原生下拉/日期、导入导出对话框、备份恢复 | 逐条勾选；未通过项登记为缺陷 |
+
+**为什么放在最前**：V1.2.1 的功能量已经够一个版本（子文档层级、拖拽排序、置顶、历史版本、
+目录管理页、Word/CSV 导入、统计明细），而现有安装包**落后于代码**；本轮功能只在
+「组件测试 + 浏览器 E2E + Rust 集成测试」里验证过，桌面端尚未点验。
+
+## 3. 阶段 B：稳定性专项（建议作为下一阶段的主攻，预计 1–2 天）
+
+**问题**：同一工作区里「显式扫描」与「文件监听回调」并发时会重复采纳同一路径，
+触发 `UNIQUE constraint failed: notes.workspace_id, notes.file_path`，两侧扫描反复中止
+（3000 篇基准下 active 卡在 375 —— 恰好一个分类目录的量）。第一版修复（`scan_lock`）
+因锁序倒置会让监听集成测试挂起而回退。详见 [CHANGELOG](./CHANGELOG.md) V1.1.0「3000 篇基准」小节。
+
+| # | 任务 | 验收标准 |
+| --- | --- | --- |
+| B1 | **先写复现**：并发集成测试（`scan_workspace` 与 `apply_file_changes` 同时跑） | 能稳定复现则记录失败细节；不能复现则给出「已被批量采纳/mtime 短路覆盖」的证据并关闭该限制项 |
+| B2 | 修复（按已定方向择一）：① 扫描单飞队列（watcher 只投递事件 → 同一工作线程串行消费）；② 采纳路径对插入冲突幂等（冲突时按外部修改同步，而不是中止整轮扫描） | 复现测试连续 10 次通过；`file_watcher_reports_external_changes` 不挂起 |
+| B3 | 基准回归：`cargo test --offline --test graph_bench -- --ignored --nocapture`（默认 3000 篇，`BENCH_NOTES` 可覆盖）与 `BENCH_NOTES=10000 cargo test --offline --test search_bench -- --ignored --nocapture` | 采纳后 `active == 文件数`；导入耗时与链接重建不劣化 |
+| B4 | 文档：更新 ROADMAP「已知限制」与 CHANGELOG | 该限制项标记为已修/已证伪 |
+
+**为什么它排第一**：这是唯一还挂着的**数据正确性**问题（会让大库首次导入的结果不完整），
+其余已知项要么是体验、要么是外部条件（真机/签名）。
+
+## 4. 阶段 C：可选增强（按价值择 1–2 项，不打包也可以做）
+
+| # | 候选 | 价值 | 成本 | 备注 |
+| --- | --- | --- | --- | --- |
+| C1 | **网页剪藏**（粘贴 URL → 本地抓取 → Markdown + 来源 frontmatter） | 对标语雀的 P1 里**唯一**还没做的能力 | 中（HTTP + 正文抽取） | 与「不做浏览器插件」不冲突：本地抓取，不引入账号 |
+| C2 | 图谱超大库降采样（3 万节点基准 + 交互优化） | 大库可用性 | 中 | 需要先生成 3 万篇合成库 |
+| C3 | 历史版本「命名版本」（对标语雀的「保存为版本」） | 与语雀对齐的最后一小块 | 小 | 复用 `history_capture` 与服务接口 |
+| C4 | 单篇「复制到指定分类」入口 | 少两步操作 | 小 | 现在用「创建副本 + 移动」两步 |
+| C5 | 分组节点（目录内的非文档容器） | 目录组织更接近语雀 | 中 | 与分类树职责重叠，需先定语义 |
+
+## 5. 阶段 D：第二代（默认只做储备，不写实现）
+
+- 现有储备：[AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md)、
+  [NEXT_GEN_ANALYSIS.md](./NEXT_GEN_ANALYSIS.md)、仓库根的
+  `Personal-Knowledge-OS-Jev-Architecture-V2.0.md`；
+- 已确认口径：Jev = TypeSafe AI 的 System One Model（类型化概率决策），
+  第二代方向是 **LLM + Jev 分工**（Jev 决策、LLM 生成）；本地模型倾向 **Ollama HTTP**；
+  向量索引可接受；
+- **启动条件**：第一代无 P0/P1 遗留（即阶段 A/B 完成）后，再评估是否落地
+  `ai_*` 接口骨架（仍不接模型）。在此之前只做方案增补，不动代码。
+
+## 6. 需要你确认的四个决策点
+
+1. **打包时机**：现在执行阶段 A（升 1.2.1 + 出三平台包），还是继续等？（你的上一句是「暂不重出」）
+2. **主攻方向**：下一阶段是否按本计划以**阶段 B（扫描/监听并发）**为主攻？
+3. **可选增强**：阶段 C 里先做哪 1–2 项？（我的建议顺序：C3 → C1 → C4）
+4. **第二代**：维持「只储备」，还是允许写不接模型的接口骨架？
+
+## 7. 不变式（无论选哪条路都不破）
+
+- 数据格式向后兼容：新增 frontmatter 字段（`parent` / `order` / `pinned`）**可缺省**，
+  旧库打开时自动迁移（当前 schema 9），删库可从 Markdown 全量重建；
+- 版本身份四处一致；跨平台产物更新前先取得确认；
+- 每个任务按「完成定义」收口：测试全绿 + 文档同步（CHANGELOG + 受影响 `docs/*.md`）。

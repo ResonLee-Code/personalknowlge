@@ -161,6 +161,9 @@
   `/api/docs/{slug}?mode=markdown` 的 `data.sourcecode`），
   [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) 第 7 节改为逐条带出处的版本，
   原始摘录见 [research/YUQUE_FEATURE_NOTES.md](./research/YUQUE_FEATURE_NOTES.md)；
+- 新增 [PLAN_V1.2.1.md](./PLAN_V1.2.1.md)：下一阶段计划（A 收口升版出包 / B 扫描与监听并发专项 /
+  C 可选增强 / D 第二代储备），并按当前实现校正了 [ROADMAP.md](./ROADMAP.md) 的
+  Phase 6·V1.1·V2.0 勾选状态、已知限制与 [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) §2 旧对标表；
 - 新增 [BUILD_COMMANDS.md](./BUILD_COMMANDS.md)：按「只编译可执行文件 / 单平台出包 / 三平台发版」
   整理构建命令，含产物路径、实测耗时与常见问题（命令与脚本逐一核对过仓库现状）；
 - [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) / [API_CONTRACT.md](./API_CONTRACT.md) /
