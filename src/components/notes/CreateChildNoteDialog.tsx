@@ -70,7 +70,8 @@ export function CreateChildNoteDialog({
           <DialogDescription>
             父文档：<span className="text-[var(--ink)]">{parent.title}</span>
             {parent.categoryPath ? `（分类 ${parent.categoryPath}）` : ''}
-            。子文档会继承父文档的分类，可在笔记列表中展开 / 折叠。
+            。子文档会继承父文档的分类，可在笔记列表中展开 / 折叠；
+            父文档也可以只当**分组**用（正文留空、标题写分组名，把文档都挂在它下面）。
           </DialogDescription>
         </DialogHeader>
 
