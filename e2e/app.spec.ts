@@ -226,14 +226,16 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   );
   await page.screenshot({ path: path.join(SHOTS, '17-backlink-from-source.png') });
 
-  // 18. 编辑器大纲（V1.1 M2-1）：解析标题层级并支持点击跳转
-  await page.getByRole('button', { name: '显示大纲' }).click();
+  // 18. 编辑器大纲（V1.1 M2-1；V1.2.1 起默认常驻在正文右侧）：解析标题层级并支持点击跳转
   await expect(page.getByTestId('outline-panel')).toBeVisible();
   await expect(page.getByTestId('outline-item').first()).toContainText('全文搜索');
   await page.getByTestId('outline-item').first().click();
   await page.screenshot({ path: path.join(SHOTS, '18-outline.png') });
+  // 工具栏可以隐藏大纲；隐藏后再打开，恢复后续步骤依赖的常驻状态
   await page.getByRole('button', { name: '隐藏大纲' }).click();
   await expect(page.getByTestId('outline-panel')).toHaveCount(0);
+  await page.getByRole('button', { name: '显示大纲' }).click();
+  await expect(page.getByTestId('outline-panel')).toBeVisible();
 
   // 19. ⌘/Ctrl + P 快速切换笔记（按标题模糊匹配）
   await page.keyboard.press('Meta+p');
@@ -296,12 +298,12 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.screenshot({ path: path.join(SHOTS, '23-context-menu.png') });
   await page.keyboard.press('Escape');
 
-  // 列表侧常驻大纲：选中哪篇看哪篇，点击标题打开并跳转（不再走右键菜单弹窗）
+  // 大纲常驻在正文右侧（对标语雀）：点开某篇即显示它的标题层级，点标题跳转
   await parentRow.click();
-  await expect(page.getByTestId('list-outline-pane')).toBeVisible();
-  await expect(page.getByTestId('list-outline-item').first()).toContainText('全文搜索');
-  await page.screenshot({ path: path.join(SHOTS, '24-list-outline.png') });
-  await page.getByTestId('list-outline-item').first().click();
+  await expect(page.getByTestId('outline-panel')).toBeVisible();
+  await expect(page.getByTestId('outline-item').first()).toContainText('全文搜索');
+  await page.screenshot({ path: path.join(SHOTS, '24-outline-right.png') });
+  await page.getByTestId('outline-item').first().click();
   await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue(
     'SQLite 全文搜索学习笔记',
   );
@@ -406,11 +408,11 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByText('索引设计笔记').first()).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '30-batch-copy.png') });
 
-  // 27. 大纲「钉住 / mini 态」与「另存为模板」入口（V1.2.1 P2）
+  // 27. 大纲「右侧常驻 / mini 态」与「另存为模板」入口（V1.2.1）
   await page.goto('/#/notes');
   await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
   await expect(page.locator('.cm-content')).toBeVisible();
-  await page.getByRole('button', { name: '显示大纲' }).click();
+  // 默认就固定在正文右侧，不需要任何开关
   await expect(page.getByTestId('outline-panel')).toBeVisible();
 
   // 收起为贴边 mini 态：面板消失、留下贴边条；鼠标移上去临时展开

@@ -122,6 +122,8 @@ export function NoteEditorPage() {
   const loadedId = useRef<string | null>(null);
   const baseHash = useRef<string | null>(null);
   const editorWrapper = useRef<HTMLDivElement | null>(null);
+  /** 预览区容器：纯预览模式下按标题序号滚动用 */
+  const previewPaneRef = useRef<HTMLDivElement | null>(null);
   const [splitWidth, setSplitWidth] = useState(0);
   const splitObserver = useRef<ResizeObserver | null>(null);
   const [linkCounts, setLinkCounts] = useState<LinkCounts | null>(null);
@@ -133,7 +135,8 @@ export function NoteEditorPage() {
    * 大纲形态（对标语雀）：hidden = 不显示；pinned = 固定在右侧；
    * mini = 贴边收起（鼠标移上去临时悬浮展开，可「钉住大纲」固定）。
    */
-  const [outlineMode, setOutlineMode] = useState<'hidden' | 'pinned' | 'mini'>('hidden');
+  // 大纲默认固定在正文右侧（对标语雀：右栏常驻）；可「收起」为贴边 mini 态
+  const [outlineMode, setOutlineMode] = useState<'hidden' | 'pinned' | 'mini'>('pinned');
   /** mini 态下鼠标是否悬停在贴边条上（临时展开） */
   const [outlineHover, setOutlineHover] = useState(false);
   /** 当前光标所在标题的偏移，用于大纲高亮 */
@@ -186,6 +189,26 @@ export function NoteEditorPage() {
     view.focus();
     setActiveHeadingOffset(offset);
   }, []);
+
+  /**
+   * 大纲点击：编辑器可用时跳编辑器；纯预览模式（编辑器未挂载）按标题**序号**
+   * 滚动预览区 —— 预览没有源码偏移，但标题顺序与 `parseOutline` 一致。
+   */
+  const jumpFromOutline = useCallback(
+    (offset: number, index: number) => {
+      if (editorViewRef.current?.view) {
+        jumpToHeading(offset);
+        return;
+      }
+      const nodeList = previewPaneRef.current?.querySelectorAll('h1, h2, h3, h4, h5, h6');
+      const target = nodeList?.[index];
+      if (target instanceof HTMLElement) {
+        target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        setActiveHeadingOffset(offset);
+      }
+    },
+    [jumpToHeading],
+  );
 
   // ---------------------------------------------------- 双向链接（V1.1 M2-2）
   const [wikilinkTitles, setWikilinkTitles] = useState<string[]>([]);
@@ -772,7 +795,11 @@ export function NoteEditorPage() {
             />
           ) : null}
           {editorMode !== 'edit' ? (
-          <div data-testid="preview-pane" className="min-w-0 flex-1 overflow-auto">
+          <div
+            ref={previewPaneRef}
+            data-testid="preview-pane"
+            className="min-w-0 flex-1 overflow-auto"
+          >
             <MarkdownPreview
               content={content}
               noteId={note.id}
@@ -782,15 +809,15 @@ export function NoteEditorPage() {
           </div>
           ) : null}
         </div>
-        {editorMode !== 'preview' && outlineMode === 'pinned' ? (
+        {outlineMode === 'pinned' ? (
           <OutlinePanel
             headings={headings}
             activeOffset={activeHeadingOffset}
-            onJump={jumpToHeading}
+            onJump={(offset) => jumpFromOutline(offset, headings.findIndex((item) => item.offset === offset))}
             onCollapse={() => setOutlineMode('mini')}
           />
         ) : null}
-        {editorMode !== 'preview' && outlineMode === 'mini' ? (
+        {outlineMode === 'mini' ? (
           <div
             data-testid="outline-mini"
             title="大纲（鼠标移上去展开）"
@@ -805,7 +832,7 @@ export function NoteEditorPage() {
           </div>
         ) : null}
         {/* mini 态：悬浮展开的大纲（绝对定位，不挤压正文） */}
-        {editorMode !== 'preview' && outlineMode === 'mini' && outlineHover ? (
+        {outlineMode === 'mini' && outlineHover ? (
           <div
             data-testid="outline-overlay"
             className="absolute right-0 top-0 z-20 h-full shadow-2xl"
@@ -815,7 +842,7 @@ export function NoteEditorPage() {
             <OutlinePanel
               headings={headings}
               activeOffset={activeHeadingOffset}
-              onJump={jumpToHeading}
+              onJump={(offset) => jumpFromOutline(offset, headings.findIndex((item) => item.offset === offset))}
               pinned={false}
               onPin={() => {
                 setOutlineHover(false);
