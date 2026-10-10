@@ -175,6 +175,10 @@
   `/api/docs/{slug}?mode=markdown` 的 `data.sourcecode`），
   [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) 第 7 节改为逐条带出处的版本，
   原始摘录见 [research/YUQUE_FEATURE_NOTES.md](./research/YUQUE_FEATURE_NOTES.md)；
+- [AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md) 新增 **§9 研究助手**（对话式深入调研 →
+  来源权威性分级 A–E → 交叉验证与时效 → 报告 → 用户确认后写入知识库），并在隐私开关表、
+  落地表、NEXT_GEN_ANALYSIS 的 N 路线（新增 N10）中同步；[PLAN_V1.2.1.md](./PLAN_V1.2.1.md)
+  阶段 D 补齐 D1–D5 拆分与两个新的待确认决策点（联网闸门、写入纪律）；
 - 新增 [PLAN_V1.2.1.md](./PLAN_V1.2.1.md)：下一阶段计划（A 收口升版出包 / B 扫描与监听并发专项 /
   C 可选增强 / D 第二代储备），并按当前实现校正了 [ROADMAP.md](./ROADMAP.md) 的
   Phase 6·V1.1·V2.0 勾选状态、已知限制与 [FEATURE_PLANNING.md](./FEATURE_PLANNING.md) §2 旧对标表；
