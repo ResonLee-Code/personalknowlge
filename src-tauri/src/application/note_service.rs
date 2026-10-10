@@ -221,9 +221,22 @@ impl NoteService {
             source_reliability: None,
             valid_until: None,
         };
-        self.ctx
-            .db
-            .with_conn(|conn| SqliteNoteRepository.insert(conn, &note))?;
+        // 幂等落库：文件先落盘，扫描/监听可能在这之前就采纳了它（frontmatter 里带着同一个 id）。
+        // 同一事务内先按路径确认一次，已存在就沿用那一行，而不是撞主键让「新建笔记」失败。
+        self.ctx.db.with_transaction(|tx| {
+            if SqliteNoteRepository
+                .get_by_path(tx, self.workspace_id(), &note.file_path)?
+                .is_some()
+            {
+                tracing::debug!(
+                    target: "notes",
+                    "新建的 {} 已被并发扫描采纳，沿用已有行",
+                    note.file_path
+                );
+                return Ok(());
+            }
+            SqliteNoteRepository.insert(tx, &note)
+        })?;
 
         if !tags.is_empty() {
             self.tags().set_note_tags(&id, &tags)?;
