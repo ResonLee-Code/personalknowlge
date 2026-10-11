@@ -14,7 +14,7 @@
 
 | 项目 | 结果 | 证据 |
 | --- | --- | --- |
-| Rust 全量测试 | ✅ 35 个测试目标全绿（库单测 111 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
+| Rust 全量测试 | ✅ 36 个测试目标全绿（库单测 111 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
 | 前端单元 / 组件测试 | ✅ 47 个文件、239 用例全通过 | `CI=true pnpm test` |
@@ -45,6 +45,7 @@
 | 文件监听降级 | 原生事件不可用时自动降级为轮询（3 秒）——用测试开关强制「探测通过但启动失败」，断言返回 `WatchMode::Polling` 而不是直接失败；线程创建失败也返回错误而非 panic | `src/infrastructure/watcher.rs` 单测（3 项） |
 | 异步竞态 | 快速切换笔记 / 连续输入检索词时，先发出的响应后到**不会**覆盖当前状态（详情、列表、检索三处）；反向验证过（撤掉守卫 → `expected 'note_a' to be 'note_b'`） | `src/stores/raceGuard.test.ts`（3 项）+ `src/lib/latestRequest.ts` |
 | 防抖保存不丢改动 | 切换笔记前先 flush（顺序断言「先落盘再取新详情」）；同一篇刷新不重复触发；`discardLocalEdits` 时跳过（冲突对话框「以磁盘为准」）；E2E 实测：延迟 3000ms 下输入后立刻切走，切回来内容仍在 | `src/hooks/useAutosave.test.ts`（3 项）+ `raceGuard.test.ts`（+1）+ E2E 第 5c 步 |
+| 缺失笔记可恢复 | 笔记文件被移出后标记缺失；文件放回再扫描 → 自动恢复为正常笔记、正文读回、**重新可检索**；整目录被删/被移走时不 panic、保存返回明确错误、目录放回后无需重启即可恢复 | `tests/external_interference_flow.rs`（3 项） |
 | 元数据保全 | `note_save` / `note_set_source` / AI 追加写入之后，frontmatter 的来源、时效、父子层级、手动顺序、置顶、类型化关系、自定义字段、标签全部保留；创建时间不被改写 | `tests/metadata_preservation_flow.rs`（3 项） |
 | 分类移动（挪目录 + 改路径） | 带孙分类的子树移到顶层 / 移回：完整目录路径正确、老目录消失、子目录随行、直属与子分类里的笔记路径改写且文件真实存在、归属 id 不变、移动后仍可检索、重开扫描后一致；防环与目标不存在被拒绝且不改数据 | `tests/category_move_flow.rs`（2 项） |
 | 分类目录展示 | 分类管理页副标题显示**完整**相对路径（子分类不再被误读为根目录）；未建目录时沿用父目录 | `src/lib/categoryDirectory.test.ts`（3 项） |

@@ -297,8 +297,17 @@ impl IndexService {
             .collect();
         let disk: HashSet<String> = files.iter().cloned().collect();
         let lookup = self.ctx.category_lookup()?;
+        // 候选里必须包含**已标记缺失**的笔记：文件被移走又放回来时，
+        // 扫描要能把它们恢复成正常笔记（否则文件明明回来了，笔记却永远停在「缺失」）。
         let existing = self.ctx.db.with_conn(|conn| {
-            SqliteNoteRepository.list_by_status(conn, self.workspace_id(), NoteStatus::Active)
+            let mut notes =
+                SqliteNoteRepository.list_by_status(conn, self.workspace_id(), NoteStatus::Active)?;
+            notes.extend(SqliteNoteRepository.list_by_status(
+                conn,
+                self.workspace_id(),
+                NoteStatus::Missing,
+            )?);
+            Ok::<Vec<Note>, crate::core::error::AppError>(notes)
         })?;
         let mut by_path: HashMap<String, Note> = existing
             .into_iter()
@@ -321,6 +330,20 @@ impl IndexService {
         for relative in files {
             match by_path.remove(&relative) {
                 Some(note) => {
+                    if note.status == NoteStatus::Missing {
+                        // 文件回来了：走「外部编辑」路径恢复（内含 缺失 → 正常 + 重建索引/链接/关系）
+                        match self.ctx.storage.read_note(&note.file_path) {
+                            Ok(stored) => {
+                                self.apply_external_edit(&note, &stored, &mut report)?;
+                                report.updated += 1;
+                            }
+                            Err(error) => report.warnings.push(format!(
+                                "{} 恢复失败：{}",
+                                note.file_path, error.message
+                            )),
+                        }
+                        continue;
+                    }
                     if self.sync_note_from_disk(&note, &mut report)? {
                         report.updated += 1;
                     } else {
@@ -351,6 +374,10 @@ impl IndexService {
         // 剩余记录对应的文件已消失
         for note in by_path.values() {
             if disk.contains(&note.file_path) {
+                continue;
+            }
+            if note.status == NoteStatus::Missing {
+                // 上一轮已经标记过：不重复计数、不重复发事件
                 continue;
             }
             // 快照可能已过期（并发写入/移动），落库前再做一次新鲜检查
