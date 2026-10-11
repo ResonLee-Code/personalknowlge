@@ -881,3 +881,73 @@ fn written_report_is_a_normal_markdown_note_and_becomes_searchable() {
         "写入后应当立刻可被检索到"
     );
 }
+
+#[test]
+fn scanning_after_write_back_does_not_duplicate_the_report_note() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    seed(&fixture);
+    let context = fixture.context();
+
+    let session = run_until(
+        &fixture,
+        request("Rust 异步运行时调度"),
+        &["collect", "verify", "compose", "proposal"],
+    );
+    let result = fixture
+        .research()
+        .write(ResearchWriteInput {
+            session_id: session.id.clone(),
+            mode: WRITE_MODE_CREATE.to_string(),
+            create_source_note: true,
+            ..Default::default()
+        })
+        .expect("写入");
+    let note_id = result.note_id.clone().expect("笔记 id");
+
+    let notes_before = NoteService::new(fixture.context())
+        .recent(500)
+        .expect("笔记数")
+        .len();
+    let files_before = context.storage.list_markdown_files().expect("文件清单");
+
+    // 写回之后再扫描两轮：文件是我们自己写的，**不能被当成外部新增重复采纳**
+    for round in 1..=2 {
+        personal_knowledge_os_lib::application::index_service::IndexService::new(fixture.context())
+            .scan_workspace()
+            .unwrap_or_else(|error| panic!("第 {round} 轮扫描失败：{}", error.message));
+    }
+
+    let notes_after = NoteService::new(fixture.context())
+        .recent(500)
+        .expect("笔记数")
+        .len();
+    let files_after = context.storage.list_markdown_files().expect("文件清单");
+    assert_eq!(
+        notes_before, notes_after,
+        "扫描不得把 AI 写入的笔记重复采纳成新笔记"
+    );
+    assert_eq!(files_before.len(), files_after.len(), "扫描不得新建文件");
+
+    // 同标题只剩一份（真的没有重复落库）
+    let listed = NoteService::new(fixture.context())
+        .list(personal_knowledge_os_lib::domain::note::NoteListQuery {
+            page_size: Some(500),
+            ..Default::default()
+        })
+        .expect("列表");
+    let same_title: Vec<&str> = listed
+        .items
+        .iter()
+        .filter(|item| item.title == "调研报告：Rust 异步运行时调度")
+        .map(|item| item.id.as_str())
+        .collect();
+    assert_eq!(same_title, vec![note_id.as_str()], "报告笔记应当只有一份");
+    assert!(
+        listed
+            .items
+            .iter()
+            .any(|item| item.title == "来源清单：Rust 异步运行时调度"),
+        "来源清单子文档也要在"
+    );
+}

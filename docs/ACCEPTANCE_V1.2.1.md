@@ -14,7 +14,7 @@
 
 | 项目 | 结果 | 证据 |
 | --- | --- | --- |
-| Rust 全量测试 | ✅ 34 个测试目标全绿（库单测 109 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
+| Rust 全量测试 | ✅ 35 个测试目标全绿（库单测 109 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
 | 前端单元 / 组件测试 | ✅ 43 个文件、227 用例全通过 | `CI=true pnpm test` |
@@ -46,6 +46,8 @@
 | 本地只读工具边界 | `kb_search` / `note_read` 在 AI 总开关关闭时仍可用（纯本地检索），且**永不产生 `outbound=true`** 审计；空关键词报 `INVALID_INPUT`、`limit` 夹取 1–50；`quick_search` 夹取 1–30 且看不到回收站里的笔记 | `tests/local_tools_flow.rs`（3 项） |
 | 前端动作反馈诚实性 | 写操作失败时**不再提示成功**：笔记条目/编辑器菜单的六类动作、删除确认（含子文档撤销按实际成功数报）、标签删除、三处「重建索引」；批量撤销如实计数（`已恢复 1/2 篇…`） | `src/lib/actionFeedback.test.ts`（3 项）+ `notesStore.filters.test.ts` 增 2 项 |
 | 加载失败不误导 | 设置 → AI 读取失败显示错误 + 重试（不再永远「正在读取…」）；快速切换读取失败显示「读取笔记失败 + 原因 + 重试」（不再假装「没有匹配」） | `AiSettingsPanel.test.tsx` / `QuickSwitcherDialog.test.tsx` 各增 1 项 |
+| 引用完整性（不产生悬挂引用） | 给不存在的分类：新建笔记 / 单篇移动 / 批量移动 / 导入 / **AI 写回**都明确报错，且**无副作用**（不建文件、不改路径、不改会话状态，失败后仍可改用 Inbox 重试） | `tests/reference_integrity_flow.rs`（5 项） |
+| 写回后再扫描不重复 | AI 写入的报告与「来源清单」子文档，连续两轮扫描后笔记数/文件数不变、同标题只有一份 | `tests/research_flow.rs`（15 项，含本项） |
 
 ## B. 性能（✅ 已自动验证，本机 2026-10-11 实测）
 
