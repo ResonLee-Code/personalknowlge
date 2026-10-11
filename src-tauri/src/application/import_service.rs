@@ -128,12 +128,6 @@ impl ImportService {
         };
 
         let preserve_structure = input.preserve_structure.unwrap_or(false);
-        let requested_mode = ImportMode::parse(input.mode.as_deref());
-        let mode = if requested_mode == ImportMode::Plain && input.mode.as_deref().is_none() {
-            ImportMode::Plain
-        } else {
-            requested_mode
-        };
         let mut report = ImportReport {
             warnings: Vec::new(),
             imported: Vec::new(),
@@ -166,8 +160,14 @@ impl ImportService {
         files.sort();
         files.dedup();
 
-        // 自动识别：目录里有 .obsidian/ → Obsidian；出现 `名称 <32 位十六进制>.md` → Notion
-        let mode = if input.mode.as_deref().unwrap_or("auto").eq_ignore_ascii_case("auto") {
+        // 导入模式：没有指定（或指定 auto）时按目录特征识别——
+        // 目录里有 `.obsidian/` → Obsidian；出现 `名称 <32 位十六进制>.md` → Notion；
+        // 其余按通用 Markdown。**显式指定优先**，不会被识别结果覆盖。
+        //
+        // 注：这里以前先算了一份 `mode` 又在下面遮蔽掉（死代码），条件还写成
+        // `is_none()`，读起来像是「没传 mode 才走 Plain」——已清理成单一分支。
+        let requested = input.mode.as_deref().unwrap_or("auto");
+        let mode = if requested.eq_ignore_ascii_case("auto") {
             let hints: Vec<String> = input
                 .paths
                 .iter()
@@ -183,7 +183,7 @@ impl ImportService {
                 .collect();
             detect_mode(&hints)
         } else {
-            mode
+            ImportMode::parse(Some(requested))
         };
         report.mode = mode.as_str().to_string();
 

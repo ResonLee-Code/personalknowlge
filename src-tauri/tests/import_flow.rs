@@ -570,3 +570,64 @@ fn utf8_imports_report_no_encoding_warning() {
         report.warnings
     );
 }
+/// 显式指定导入模式时**不能被自动识别覆盖**，未知模式退回通用 Markdown；
+/// 只有 `auto`（或不传）才按目录特征识别。
+///
+/// 回归背景：`import` 里曾先算一份 `mode` 又被后面的识别分支遮蔽（死代码 + 条件写成
+/// `is_none()`），读起来像是「不传 mode 就当 Plain」——这里把四种情况钉死。
+#[test]
+fn explicit_import_mode_wins_over_auto_detection() {
+    let fixture = Fixture::new();
+    // 一个「看起来像 Obsidian」的目录（用户选的是**文件夹**，与真实操作一致）
+    fixture.write_source(".obsidian/app.json", "{}");
+    fixture.write_source("note.md", "# 标题\n\n正文\n");
+    let root = fixture.source.to_string_lossy().to_string();
+
+    // 显式指定 plain：必须按通用 Markdown 导入，不被识别结果覆盖
+    let explicit_plain = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![root.clone()],
+            mode: Some("plain".into()),
+            preserve_structure: None,
+            category_id: None,
+        })
+        .expect("导入应成功");
+    assert_eq!(explicit_plain.mode, "plain", "显式指定优先于自动识别");
+
+    // 同一路径用 auto：按目录特征识别为 obsidian
+    let auto = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![root.clone()],
+            mode: Some("auto".into()),
+            preserve_structure: None,
+            category_id: None,
+        })
+        .expect("导入应成功");
+    assert_eq!(auto.mode, "obsidian", "auto 应按目录特征识别");
+
+    // 不传 mode 等价于 auto
+    let omitted = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![root.clone()],
+            mode: None,
+            preserve_structure: None,
+            category_id: None,
+        })
+        .expect("导入应成功");
+    assert_eq!(omitted.mode, "obsidian", "不传 mode 等价于 auto");
+
+    // 未知模式：退回通用 Markdown（而不是报错，历史上就是这样宽容）
+    let unknown = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![root],
+            mode: Some("随手写的".into()),
+            preserve_structure: None,
+            category_id: None,
+        })
+        .expect("导入应成功");
+    assert_eq!(unknown.mode, "plain", "未知模式退回通用 Markdown");
+}
