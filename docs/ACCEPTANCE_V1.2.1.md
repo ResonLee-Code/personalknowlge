@@ -45,8 +45,9 @@
 | 文件监听降级 | 原生事件不可用时自动降级为轮询（3 秒）——用测试开关强制「探测通过但启动失败」，断言返回 `WatchMode::Polling` 而不是直接失败；线程创建失败也返回错误而非 panic | `src/infrastructure/watcher.rs` 单测（3 项） |
 | 异步竞态 | 快速切换笔记 / 连续输入检索词时，先发出的响应后到**不会**覆盖当前状态（详情、列表、检索三处）；反向验证过（撤掉守卫 → `expected 'note_a' to be 'note_b'`） | `src/stores/raceGuard.test.ts`（3 项）+ `src/lib/latestRequest.ts` |
 | 防抖保存不丢改动 | 切换笔记前先 flush（顺序断言「先落盘再取新详情」）；同一篇刷新不重复触发；`discardLocalEdits` 时跳过（冲突对话框「以磁盘为准」）；E2E 实测：延迟 3000ms 下输入后立刻切走，切回来内容仍在 | `src/hooks/useAutosave.test.ts`（3 项）+ `raceGuard.test.ts`（+1）+ E2E 第 5c 步 |
-| 缺失笔记可恢复 | 笔记文件被移出后标记缺失；文件放回再扫描 → 自动恢复为正常笔记、正文读回、**重新可检索**；整目录被删/被移走时不 panic、保存返回明确错误、目录放回后无需重启即可恢复 | `tests/external_interference_flow.rs`（3 项） |
-| 恢复不覆盖他人文件 | 原路径被别的文件占用时，从回收站恢复会改用唯一路径：占位文件**原封不动**、笔记落在新路径且内容正确；`purge` 对已被外部删除的文件也能正常清干净（记录 / 索引 / 历史） | `tests/external_interference_flow.rs`（4 项，含本项） |
+| 缺失笔记可恢复 | 笔记文件被移出后标记缺失；文件放回再扫描 → 自动恢复为正常笔记、正文读回、**重新可检索**；整目录被删/被移走时不 panic、保存返回明确错误、目录放回后无需重启即可恢复 | `tests/external_interference_flow.rs`（含本项，共 6 项） |
+| 恢复不覆盖他人文件 | 原路径被别的文件占用时，从回收站恢复会改用唯一路径：占位文件**原封不动**、笔记落在新路径且内容正确；`purge` 对已被外部删除的文件也能正常清干净（记录 / 索引 / 历史） | `tests/external_interference_flow.rs`（共 6 项，含本项） |
+| 父文档后到也能归位 | 子文档先被采纳（`parent:` 指向当时不存在的父文档）→ 父文档在**后一轮**（整库扫描 / 文件监听两条入口都验证）出现时，层级在**同一轮内**补上，`declared_parent` 保留声明原文供重试；反向验证过（关掉重试 → 两条用例立即失败） | `tests/external_interference_flow.rs`（+2 项） |
 | 预览端与后端同规则 | ① 未知分类：新建 / 单篇移动 / 批量移动都拒绝（批量逐条记失败）；② 标签规范化：去空 / 折叠空白 / 大小写不敏感去重，空名与撞名按后端错误码拒绝；③ 返回形状（`note_set_tags` → `NoteDetail`、`note_set_tag_names` → `Tag[]`）；④ `app_info` 版本读 `package.json`、schemaVersion 与后端一致；⑤ 重命名与后端同规则（标题规范化 / 按时间戳改名文件 / `renameFile=false` 只改标题 / **重连 `[[旧标题]]` 链接**）；⑥ 相对路径（`YYYYMMDD-HHmmss-标题.md`、按分类目录落位、移动分类改路径、同秒撞名追加序号）；⑦ 永久删除「列表不可见 + 详情 `NOTE_NOT_FOUND`」，删除 / 永久删除不存在的笔记报错；⑧ 模板另存为在预览端如实报「不支持」。守卫逐条反向验证过（撤掉校验 / 强制 `renameFile=false` / 关掉链接改写 / `categoryDirectory` 恒返回 `00_Inbox` → 用例立即失败） | `src/services/mockBackend.test.ts`（26 项，含以上各项） |
 | 元数据保全 | `note_save` / `note_set_source` / AI 追加写入之后，frontmatter 的来源、时效、父子层级、手动顺序、置顶、类型化关系、自定义字段、标签全部保留；创建时间不被改写 | `tests/metadata_preservation_flow.rs`（3 项） |
 | 分类移动（挪目录 + 改路径） | 带孙分类的子树移到顶层 / 移回：完整目录路径正确、老目录消失、子目录随行、直属与子分类里的笔记路径改写且文件真实存在、归属 id 不变、移动后仍可检索、重开扫描后一致；防环与目标不存在被拒绝且不改数据 | `tests/category_move_flow.rs`（2 项） |
@@ -94,6 +95,7 @@
 | --- | --- | --- |
 | 旧库（schema 5，无 rowid 映射表）打开后自动迁移并重建索引 | ✅ 已索引 == 总数 | `cargo test --offline --test upgrade_flow` |
 | 子文档层级（迁移 007）在前向迁移后可用 | ✅ `parent_id` 列 + 索引存在，`parent:` 可写 id 或标题 | `tests/parent_flow.rs` |
+| 父文档声明原文（迁移 010） | ✅ `declared_parent` 列 + 索引存在，重建后可由 frontmatter 复原；旧库打开时自动迁移到 schema 10 | `tests/external_interference_flow.rs`（2 项） |
 | 新增 frontmatter 字段（`parent` / `order` / `pinned`）可缺省，旧库打开自动补齐 | ✅ | `tests/parent_flow.rs` / `tests/order_flow.rs` / `tests/pin_flow.rs` |
 | 删库可从 Markdown 全量重建 | ✅ | `tests/workspace_flow.rs` |
 | 研究会话是旁路数据（`.knowledge/research/`），删除不影响笔记 | ✅ | `tests/research_flow.rs` |
@@ -165,5 +167,9 @@
 4. **冲突检测是规则档**：同一子问题内「支持 vs 反对/限制」表述才判冲突，语义级比对待模型接入；
 5. **语义检索 / 向量索引未实现**：检索仍是 FTS5（中文双字方案），召回实测 100%（1 万篇基准口径内）；
 6. **中文分词未引入第三方分词器**：1 万篇基准下双字方案已达 100% 召回，按既定结论暂不引入；
-7. **父文档晚于子文档出现时**：子文档若先被采纳、父文档在**更晚的另一轮扫描**里才出现，
-   层级要等该子文档下次被外部编辑时才补上（同一次扫描内已修复；手动拖进父文档或编辑一次即可）。
+
+> 第 7 条（父文档晚于子文档出现时层级要等下次编辑）**已修复（2026-10-11）**：
+> 新增派生列 `declared_parent`（迁移 010）保存 `parent:` 声明原文，
+> 扫描末尾对「声明了父文档但还没解析成功」的子文档重试一次，
+> 父文档在后一轮出现时层级**当轮**即生效（见 `tests/external_interference_flow.rs` 2 项，
+> 反向验证过）。数据库 schema 随之升到 **10**。

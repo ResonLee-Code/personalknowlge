@@ -60,9 +60,14 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "notes_pinned",
         sql: include_str!("../../../migrations/009_notes_pinned.sql"),
     },
+    Migration {
+        version: 10,
+        name: "note_declared_parent",
+        sql: include_str!("../../../migrations/010_note_declared_parent.sql"),
+    },
 ];
 
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// 创建迁移记录表。
 fn ensure_migration_table(conn: &Connection) -> Result<()> {

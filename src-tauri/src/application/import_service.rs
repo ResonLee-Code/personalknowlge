@@ -495,6 +495,8 @@ impl ImportService {
             file_size: None,
             file_mtime: None,
             parent_id: None,
+            // 导入不写 `parent:`，层级由导入完成后统一解析（见 resolve_declared_parents）
+            declared_parent: None,
             sort_order: 0,
             pinned: false,
             source_type: source.source_type.clone(),

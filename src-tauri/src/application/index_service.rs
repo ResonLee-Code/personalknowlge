@@ -369,7 +369,17 @@ impl IndexService {
         if !to_adopt.is_empty() {
             self.adopt_files_batched(&to_adopt, &lookup, &mut report)?;
         }
-        self.resolve_declared_parents(&declared_parents)?;
+        let resolved_parents = self.resolve_declared_parents(&declared_parents)?;
+        if resolved_parents > 0 {
+            tracing::debug!(target: "index", "本轮解析了 {resolved_parents} 篇子文档的父文档");
+        }
+        // 本轮有新增 / 更新：父文档可能就是这一轮才出现的，补一次「待解析声明」的重试
+        if report.added > 0 || report.updated > 0 {
+            let retried = self.retry_unresolved_declarations()?;
+            if retried > 0 {
+                tracing::debug!(target: "index", "补解析了 {retried} 篇先前悬空的子文档层级");
+            }
+        }
 
         // 剩余记录对应的文件已消失
         for note in by_path.values() {
@@ -501,6 +511,14 @@ impl IndexService {
         if !to_adopt.is_empty() {
             self.adopt_files_batched(&to_adopt, &lookup, &mut report)?;
         }
+        // 父文档可能是这一轮才被外部新增的：补一次「待解析声明」的重试，
+        // 让先到的子文档在同一轮就归位（不必等它下次被编辑）。
+        if report.added > 0 || report.updated > 0 {
+            let retried = self.retry_unresolved_declarations()?;
+            if retried > 0 {
+                tracing::debug!(target: "index", "补解析了 {retried} 篇先前悬空的子文档层级");
+            }
+        }
         if defer_derived && report.added > 0 {
             self.rebuild_derived_after_bulk();
         }
@@ -577,6 +595,12 @@ impl IndexService {
                 .as_ref()
                 .map(|id| lookup.path_string(id))
                 .unwrap_or_default();
+            let declared_parent = stored
+                .frontmatter
+                .parent
+                .clone()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
             prepared.push(Prepared {
                 note: Note {
                     // id 在事务内确定（需要检查 frontmatter 里的 id 是否已被占用）
@@ -604,6 +628,7 @@ impl IndexService {
                     file_size: stamp.as_ref().map(|(size, _)| *size as i64),
                     file_mtime: stamp.and_then(|(_, mtime)| mtime),
                     parent_id: None,
+                    declared_parent: declared_parent.clone(),
                     // frontmatter 的 order 是文件里的顺序声明，扫描时投影到派生列
                     sort_order: stored.frontmatter.order.unwrap_or(0).max(0),
                     pinned: stored.frontmatter.pinned,
@@ -611,11 +636,7 @@ impl IndexService {
                 plain_text,
                 tags: stored.frontmatter.tags.clone(),
                 category_path,
-                declared_parent: stored
-                    .frontmatter
-                    .parent
-                    .clone()
-                    .filter(|value| !value.trim().is_empty()),
+                declared_parent,
             });
         }
 
@@ -696,9 +717,13 @@ impl IndexService {
     ///
     /// 必须等「本轮所有文件都入库」之后再跑：单文件路径是按文件名顺序采纳的，
     /// 子文档可能先于父文档被读到（例如删库后重扫、或一次拖入多篇）。
-    fn resolve_declared_parents(&self, pending: &[(String, String)]) -> Result<()> {
+    ///
+    /// 解析不到时（父文档在这一轮里还不存在）把**声明原文留在库里**，
+    /// 由 [`Self::retry_unresolved_declarations`] 在后续轮次重试——
+    /// 否则子文档会一直停在顶层，直到它下次被外部编辑。
+    fn resolve_declared_parents(&self, pending: &[(String, String)]) -> Result<usize> {
         if pending.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
         let workspace_id = self.workspace_id().to_string();
         let titles: HashMap<String, String> = self
@@ -710,22 +735,53 @@ impl IndexService {
             .into_iter()
             .map(|note| (note.title.to_lowercase(), note.id))
             .collect();
-        self.ctx.db.with_transaction(|tx| {
+        let resolved = self.ctx.db.with_transaction(|tx| {
+            let mut resolved = 0usize;
             for (note_id, declared) in pending {
-                if SqliteNoteRepository.get(tx, declared)?.is_some() {
-                    if declared != note_id {
-                        SqliteNoteRepository.set_parent(tx, note_id, Some(declared))?;
-                    }
+                let reference = declared.trim();
+                if reference.is_empty() {
                     continue;
                 }
-                if let Some(parent_id) = titles.get(&declared.to_lowercase()) {
-                    if parent_id != note_id {
-                        SqliteNoteRepository.set_parent(tx, note_id, Some(parent_id))?;
+                let parent_id = match SqliteNoteRepository.get(tx, reference)? {
+                    Some(_) => Some(reference.to_string()),
+                    None => titles.get(&reference.to_lowercase()).cloned(),
+                };
+                match parent_id {
+                    Some(parent_id) if parent_id != *note_id => {
+                        SqliteNoteRepository.set_parent(
+                            tx,
+                            note_id,
+                            Some(&parent_id),
+                            Some(reference),
+                        )?;
+                        resolved += 1;
                     }
+                    // 自指或解析不到：只保留声明原文，留给后续轮次重试
+                    _ => SqliteNoteRepository.set_declared_parent(tx, note_id, Some(reference))?,
                 }
             }
-            Ok(())
-        })
+            Ok(resolved)
+        })?;
+        Ok(resolved)
+    }
+
+    /// 重试解析「声明了父文档、但还没解析成功」的子文档。
+    ///
+    /// 场景：子文档先被采纳（父文档当时还不在工作区），父文档在**后一轮**扫描才出现。
+    /// 声明的原文存在 `notes.declared_parent`，所以这里只需一次小查询即可重试，
+    /// 不必为了找它们去读全库文件。
+    fn retry_unresolved_declarations(&self) -> Result<usize> {
+        let unresolved = self.ctx.db.with_conn(|conn| {
+            SqliteNoteRepository.list_unresolved_declared_parents(conn, self.workspace_id())
+        })?;
+        if unresolved.is_empty() {
+            return Ok(0);
+        }
+        let pending: Vec<(String, String)> = unresolved
+            .into_iter()
+            .map(|note| (note.id, note.declared_parent.unwrap_or_default()))
+            .collect();
+        self.resolve_declared_parents(&pending)
     }
 
     /// 采纳磁盘上的新文件。
@@ -800,6 +856,13 @@ impl IndexService {
             file_size: None,
             file_mtime: None,
             parent_id: None,
+            declared_parent: stored
+                .frontmatter
+                .parent
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
             sort_order: stored.frontmatter.order.unwrap_or(0).max(0),
             pinned: stored.frontmatter.pinned,
         };

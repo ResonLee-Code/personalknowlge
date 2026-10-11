@@ -198,6 +198,26 @@ CREATE INDEX IF NOT EXISTS idx_notes_parent ON notes(parent_id);
 - 防环：`set_parent` / 创建子文档时沿父链上溯，命中自身或超过 64 跳报 `INVALID_INPUT`；
 - 列表展示为「父文档 → 子文档」目录树，父子关系不改变笔记的文件位置（与分类目录相互独立）。
 
+### notes 的父文档声明原文列（迁移 010，待解析声明）
+
+```sql
+ALTER TABLE notes ADD COLUMN declared_parent TEXT;
+CREATE INDEX IF NOT EXISTS idx_notes_declared_parent ON notes(workspace_id, declared_parent);
+```
+
+| 列 | 含义 | 对应 frontmatter |
+| --- | --- | --- |
+| `declared_parent` | `parent:` 的**原文**（可能是父文档 id，也可能是标题） | 子文档的 `parent` |
+
+- **为什么需要它**：`parent_id` 只保存解析结果，解析不到（父文档还没出现）时线索就丢了，
+  子文档会一直停在顶层，直到它下次被外部编辑。保留声明原文后，扫描每轮都能对
+  「声明了父文档但还没解析成功」的子文档重试一次（`retry_unresolved_declarations`），
+  无需为了找它们去读全库文件；
+- **派生数据**：与 `parent_id` / `sort_order` / `pinned` 一样由文件投影而来，
+  删掉数据库重新扫描即可重建；应用内重命名父文档时，子文档的声明原文与文件一起改写；
+- 解析成功时 `parent_id` 与 `declared_parent` 同时写入；解析失败时只保留原文、
+  `parent_id` 留空（子文档按顶层展示，不会从列表消失）。
+
 ### notes 的手动排序列（迁移 008，自定义顺序）
 
 ```sql
@@ -319,7 +339,8 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 当前迁移列表：`001_init`（表结构）、`002_search_index`（FTS5）、`003_note_links`（双向链接），
 `004_note_assets`（类型化关系 + 来源时效）、`005_note_file_stamp`（文件快照）、
 `006_search_rowid_map`（FTS rowid 映射）、`007_note_parent`（子文档层级）、
-`008_notes_sort_order`（手动排序）、`009_notes_pinned`（置顶），`SCHEMA_VERSION = 9`。
+`008_notes_sort_order`（手动排序）、`009_notes_pinned`（置顶）、
+`010_note_declared_parent`（父文档声明原文，用于重试解析层级），`SCHEMA_VERSION = 10`。
 
 ## 6. 数据恢复能力
 

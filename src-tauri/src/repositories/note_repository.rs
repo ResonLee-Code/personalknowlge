@@ -49,7 +49,24 @@ pub trait NoteRepository {
     fn set_category(&self, conn: &Connection, id: &str, category_id: Option<&str>) -> Result<()>;
     fn set_favorite(&self, conn: &Connection, id: &str, favorite: bool) -> Result<()>;
     /// 更新父文档（子文档层级）
-    fn set_parent(&self, conn: &Connection, id: &str, parent_id: Option<&str>) -> Result<()>;
+    /// 写父子层级：`parent_id` 是**解析结果**，`declared_parent` 是 frontmatter 里的**原文**
+    /// （id 或标题）。解析失败时把原文留下来，下一轮扫描才能重试。
+    fn set_parent(
+        &self,
+        conn: &Connection,
+        id: &str,
+        parent_id: Option<&str>,
+        declared_parent: Option<&str>,
+    ) -> Result<()>;
+    /// 只更新声明原文（用于「声明还在、父文档还没出现」的待解析状态）。
+    fn set_declared_parent(&self, conn: &Connection, id: &str, declared: Option<&str>)
+        -> Result<()>;
+    /// 声明了父文档但**尚未解析成功**的活跃笔记（供扫描末尾重试解析）。
+    fn list_unresolved_declared_parents(
+        &self,
+        conn: &Connection,
+        workspace_id: &str,
+    ) -> Result<Vec<Note>>;
     /// 更新手动排序位次（同一层内的顺序，1 起；0 = 未排序）
     fn set_sort_order(&self, conn: &Connection, id: &str, sort_order: i64) -> Result<()>;
     /// 更新置顶标记
@@ -115,7 +132,7 @@ pub struct SqliteNoteRepository;
 const NOTE_COLUMNS: &str = "id, workspace_id, title, file_path, category_id, status, content_hash,
      word_count, favorite, created_at, updated_at, last_indexed_at,
      source_type, source_ref, source_reliability, valid_until, file_size, file_mtime, parent_id,
-     sort_order, pinned";
+     declared_parent, sort_order, pinned";
 
 fn map_note(row: &Row<'_>) -> rusqlite::Result<Note> {
     let status: String = row.get("status")?;
@@ -139,6 +156,7 @@ fn map_note(row: &Row<'_>) -> rusqlite::Result<Note> {
         file_size: row.get("file_size")?,
         file_mtime: row.get("file_mtime")?,
         parent_id: row.get("parent_id")?,
+        declared_parent: row.get("declared_parent")?,
         sort_order: row.get("sort_order")?,
         pinned: row.get::<_, i64>("pinned")? != 0,
     })
@@ -150,9 +168,10 @@ impl NoteRepository for SqliteNoteRepository {
             "INSERT INTO notes (id, workspace_id, title, file_path, category_id, status,
                                 content_hash, word_count, favorite, created_at, updated_at,
                                 last_indexed_at, source_type, source_ref, source_reliability,
-                                valid_until, file_size, file_mtime, parent_id, sort_order, pinned)
+                                valid_until, file_size, file_mtime, parent_id, declared_parent,
+                                sort_order, pinned)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21)",
+                     ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 note.id,
                 note.workspace_id,
@@ -173,6 +192,7 @@ impl NoteRepository for SqliteNoteRepository {
                 note.file_size,
                 note.file_mtime,
                 note.parent_id,
+                note.declared_parent,
                 note.sort_order,
                 i64::from(note.pinned),
             ],
@@ -186,8 +206,9 @@ impl NoteRepository for SqliteNoteRepository {
                               content_hash = ?6, word_count = ?7, favorite = ?8,
                               source_type = ?13, source_ref = ?14,
                               source_reliability = ?15, valid_until = ?16,
-                              file_size = ?17, file_mtime = ?18, parent_id = ?19, sort_order = ?20,
-                              pinned = ?21,
+                              file_size = ?17, file_mtime = ?18, parent_id = ?19,
+                              declared_parent = ?20, sort_order = ?21,
+                              pinned = ?22,
                               created_at = ?9, updated_at = ?10, last_indexed_at = ?11
              WHERE id = ?1",
             params![
@@ -209,6 +230,7 @@ impl NoteRepository for SqliteNoteRepository {
                 note.file_size,
                 note.file_mtime,
                 note.parent_id,
+                note.declared_parent,
                 note.sort_order,
                 i64::from(note.pinned),
             ],
@@ -409,12 +431,53 @@ impl NoteRepository for SqliteNoteRepository {
         }
     }
 
-    fn set_parent(&self, conn: &Connection, id: &str, parent_id: Option<&str>) -> Result<()> {
+    fn set_parent(
+        &self,
+        conn: &Connection,
+        id: &str,
+        parent_id: Option<&str>,
+        declared_parent: Option<&str>,
+    ) -> Result<()> {
         conn.execute(
-            "UPDATE notes SET parent_id = ?2 WHERE id = ?1",
-            params![id, parent_id],
+            "UPDATE notes SET parent_id = ?2, declared_parent = ?3 WHERE id = ?1",
+            params![id, parent_id, declared_parent],
         )?;
         Ok(())
+    }
+
+    fn set_declared_parent(
+        &self,
+        conn: &Connection,
+        id: &str,
+        declared: Option<&str>,
+    ) -> Result<()> {
+        conn.execute(
+            "UPDATE notes SET declared_parent = ?2 WHERE id = ?1",
+            params![id, declared],
+        )?;
+        Ok(())
+    }
+
+    fn list_unresolved_declared_parents(
+        &self,
+        conn: &Connection,
+        workspace_id: &str,
+    ) -> Result<Vec<Note>> {
+        let sql = format!(
+            "SELECT {NOTE_COLUMNS} FROM notes
+             WHERE workspace_id = ?1 AND status = 'active'
+               AND parent_id IS NULL
+               AND declared_parent IS NOT NULL
+               AND TRIM(declared_parent) <> ''
+             ORDER BY updated_at ASC"
+        );
+        let mut statement = conn.prepare(&sql)?;
+        let rows = statement.query_map(params![workspace_id], map_note)?;
+        let mut notes = Vec::new();
+        for row in rows {
+            notes.push(row?);
+        }
+        Ok(notes)
     }
 
     fn set_sort_order(&self, conn: &Connection, id: &str, sort_order: i64) -> Result<()> {

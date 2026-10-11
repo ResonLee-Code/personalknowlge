@@ -234,6 +234,8 @@ impl NoteService {
             file_size: None,
             file_mtime: None,
             parent_id: parent.as_ref().map(|note| note.id.clone()),
+            // 新建时 frontmatter 写的是父文档 id，声明原文即该 id
+            declared_parent: parent.as_ref().map(|note| note.id.clone()),
             sort_order: 0,
             pinned: false,
             source_type: None,
@@ -756,7 +758,8 @@ impl NoteService {
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
         self.ctx.storage.write_atomic(&note.file_path, &markdown)?;
         self.ctx.db.with_conn(|conn| {
-            SqliteNoteRepository.set_parent(conn, &note.id, parent.as_ref().map(|item| item.id.as_str()))
+            let parent_id = parent.as_ref().map(|item| item.id.as_str());
+            SqliteNoteRepository.set_parent(conn, &note.id, parent_id, parent_id)
         })?;
         self.refresh_file_stamp(&note.id, &note.file_path);
         self.get(&note.id)
@@ -961,6 +964,10 @@ impl NoteService {
             let markdown = frontmatter::serialize(&frontmatter, &stored.body);
             self.ctx.storage.write_atomic(&child.file_path, &markdown)?;
             self.refresh_file_stamp(&child.id, &child.file_path);
+            // 派生列里的声明原文也要跟着改，否则它会被当成「待解析声明」再解析回旧标题
+            self.ctx.db.with_conn(|conn| {
+                SqliteNoteRepository.set_declared_parent(conn, &child.id, Some(new_title))
+            })?;
             rewritten += 1;
         }
         Ok(rewritten)
@@ -969,17 +976,24 @@ impl NoteService {
     /// 外部编辑后同步父文档（frontmatter 里的 `parent` 可能是 id 或标题）。
     pub fn refresh_parent(&self, note: &Note) -> Result<()> {
         let stored = self.ctx.storage.read_note(&note.file_path)?;
-        let resolved = match stored.frontmatter.parent.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        let declared = stored
+            .frontmatter
+            .parent
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        let resolved = match declared {
             Some(reference) => self.resolve_parent(reference, Some(&note.id))?,
             None => None,
         };
         let parent_id = resolved.map(|item| item.id);
-        if parent_id == note.parent_id {
+        // 声明原文也要落库（解析不到时它是后续轮次重试的唯一线索）
+        if parent_id == note.parent_id && declared == note.declared_parent.as_deref() {
             return Ok(());
         }
-        self.ctx
-            .db
-            .with_conn(|conn| SqliteNoteRepository.set_parent(conn, &note.id, parent_id.as_deref()))?;
+        self.ctx.db.with_conn(|conn| {
+            SqliteNoteRepository.set_parent(conn, &note.id, parent_id.as_deref(), declared)
+        })?;
         Ok(())
     }
 

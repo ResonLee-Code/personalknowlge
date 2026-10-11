@@ -271,3 +271,117 @@ fn restoring_from_trash_does_not_clobber_a_file_that_took_the_old_path() {
         "恢复的应当是笔记自己的内容"
     );
 }
+
+/// 「父文档晚于子文档出现」：子文档先被外部拷进来（`parent:` 指向还不存在的父文档），
+/// 父文档在后一轮扫描才出现。此时层级必须在**同一轮**里补上，而不是等子文档下次被编辑。
+///
+/// 回归背景：已知限制第 7 条——`parent_id` 解析失败后线索就丢了，
+/// 因此新增派生列 `declared_parent` 保存声明原文，扫描末尾对「待解析」的子文档重试一次。
+#[test]
+fn child_adopted_before_parent_regains_its_level_in_the_next_round() {
+    let fixture = Fixture::new();
+    let root = fixture.workspace.path();
+    let index = IndexService::new(fixture.context());
+
+    // 1) 子文档先到：声明父文档「标题」（父文档此刻不存在）
+    std::fs::write(
+        root.join("子文档.md"),
+        "---\ntitle: 子文档\nparent: 父文档\n---\n子文档正文\n",
+    )
+    .expect("写入子文档");
+    let first = index.scan_workspace().expect("第一轮扫描");
+    assert_eq!(first.added, 1);
+
+    let child = fixture
+        .notes()
+        .list(NoteListQuery { keyword: Some("子文档".to_string()), ..Default::default() })
+        .expect("列出笔记")
+        .items
+        .into_iter()
+        .find(|item| item.title == "子文档")
+        .expect("子文档已被采纳");
+    assert_eq!(
+        child.parent_id, None,
+        "父文档还没出现时先按顶层展示（这条不变）"
+    );
+
+    // 2) 父文档后到：同一轮扫描内应当把子文档挂回去
+    std::fs::write(root.join("父文档.md"), "---\ntitle: 父文档\n---\n父文档正文\n")
+        .expect("写入父文档");
+    let second = index.scan_workspace().expect("第二轮扫描");
+    assert_eq!(second.added, 1);
+
+    let parent = fixture
+        .notes()
+        .list(NoteListQuery { keyword: Some("父文档".to_string()), ..Default::default() })
+        .expect("列出笔记")
+        .items
+        .into_iter()
+        .find(|item| item.title == "父文档")
+        .expect("父文档已被采纳");
+    let reloaded = fixture.notes().get(&child.id).expect("重新读取子文档");
+    assert_eq!(
+        reloaded.note.parent_id.as_deref(),
+        Some(parent.id.as_str()),
+        "父文档在同一轮出现后，子文档层级要立刻补上（不必等它下次被编辑）"
+    );
+    assert_eq!(
+        reloaded.note.declared_parent.as_deref(),
+        Some("父文档"),
+        "声明原文要留在库里（解析失败时它是唯一的重试线索）"
+    );
+}
+
+/// 同一条不变量走**文件监听**入口（轮询 / 原生事件走的是 `apply_file_changes`）。
+#[test]
+fn child_adopted_before_parent_regains_its_level_via_file_watch() {
+    use personal_knowledge_os_lib::infrastructure::watcher::{
+        FileChange, FileChangeBatch, FileChangeKind,
+    };
+
+    let fixture = Fixture::new();
+    let root = fixture.workspace.path();
+    let index = IndexService::new(fixture.context());
+
+    std::fs::write(
+        root.join("子文档.md"),
+        "---\ntitle: 子文档\nparent: 父文档\n---\n子文档正文\n",
+    )
+    .expect("写入子文档");
+    index
+        .apply_file_changes(FileChangeBatch {
+            changes: vec![FileChange {
+                path: "子文档.md".to_string(),
+                kind: FileChangeKind::Created,
+            }],
+            directories: Vec::new(),
+            attachments_changed: false,
+        })
+        .expect("监听：采纳子文档");
+
+    std::fs::write(root.join("父文档.md"), "---\ntitle: 父文档\n---\n父文档正文\n")
+        .expect("写入父文档");
+    index
+        .apply_file_changes(FileChangeBatch {
+            changes: vec![FileChange {
+                path: "父文档.md".to_string(),
+                kind: FileChangeKind::Created,
+            }],
+            directories: Vec::new(),
+            attachments_changed: false,
+        })
+        .expect("监听：采纳父文档");
+
+    let items = fixture
+        .notes()
+        .list(NoteListQuery::default())
+        .expect("列出笔记")
+        .items;
+    let child = items.iter().find(|item| item.title == "子文档").expect("子文档");
+    let parent = items.iter().find(|item| item.title == "父文档").expect("父文档");
+    assert_eq!(
+        child.parent_id.as_deref(),
+        Some(parent.id.as_str()),
+        "监听路径也要在同一轮把层级补上"
+    );
+}

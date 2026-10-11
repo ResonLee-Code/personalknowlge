@@ -137,6 +137,11 @@ research_write  → 用户确认后 note_create 或 note_save（追加留历史�
    设计文档 12.3 的 `note_01JXYZ123` 形式得以保留。
 2. **`notes` 表新增两列**：`favorite`（侧边栏「收藏」）与 `trash_path`（回收站位置）。
    其余字段与设计文档 11.2 完全一致，并提供迁移文件。
+   后续迁移另加了若干**派生列**（`parent_id` / `declared_parent` / `sort_order` / `pinned`）：
+   它们的唯一事实来源是笔记 frontmatter（`parent` / `order` / `pinned`），
+   扫描时投影、外部编辑后重算、删库可从 Markdown 全量重建；
+   其中 `declared_parent` 保存 `parent:` 的**原文**，用于「父文档还没出现」时在后续扫描轮次重试解析
+   （见 [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) 的迁移 007–010）。
 3. **打开已有目录时不改写用户文件**：外部文件在首次保存时才补全 frontmatter；
    数据库通过「路径 → 记录」复用保证 id 稳定（避免每次扫描产生新 id）。
 4. **正文首尾空行规范化**：frontmatter 与正文之间的分隔空行不属于正文内容。

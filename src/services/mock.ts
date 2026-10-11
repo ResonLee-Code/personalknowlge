@@ -60,7 +60,7 @@ import type {
 import packageJson from '../../package.json';
 
 /** 与后端 `SCHEMA_VERSION` 对齐的迁移版本（预览端不跑迁移，只用于如实展示）。 */
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 /** 仓库当前版本（来自 package.json，避免预览端硬编码版本号）。 */
 const packageVersion = packageJson.version;

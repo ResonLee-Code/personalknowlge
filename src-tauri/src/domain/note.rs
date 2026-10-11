@@ -65,6 +65,10 @@ pub struct Note {
     pub file_mtime: Option<String>,
     /// 父文档（子文档层级）；由 frontmatter 的 `parent` 投影而来
     pub parent_id: Option<String>,
+    /// frontmatter 里 `parent:` 的**原文**（可能是父笔记 id，也可能是标题）。
+    /// 保留原文才能在解析失败后重试：父文档晚于子文档出现时，
+    /// `parent_id` 解析不到，但声明还在，下一轮扫描可再解析一次。
+    pub declared_parent: Option<String>,
     /// 手动排序位次（同层内，1 起）；0 表示未显式排序
     pub sort_order: i64,
     /// 置顶：在所有排序方式下排在最前
