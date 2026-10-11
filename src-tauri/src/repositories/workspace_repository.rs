@@ -9,6 +9,11 @@ pub trait WorkspaceRepository {
     fn upsert(&self, conn: &Connection, workspace: &Workspace) -> Result<()>;
     fn get(&self, conn: &Connection, id: &str) -> Result<Option<Workspace>>;
     fn get_by_root(&self, conn: &Connection, root_path: &str) -> Result<Option<Workspace>>;
+    /// 库里已有的那一条工作区记录（按创建时间取最早的一条）。
+    ///
+    /// 用途：打开「被复制 / 被恢复到新目录」的知识库时沿用原来的身份，
+    /// 而不是新建一个 id 让快照里的行变成孤儿。
+    fn first(&self, conn: &Connection) -> Result<Option<Workspace>>;
     fn list(&self, conn: &Connection) -> Result<Vec<Workspace>>;
     fn delete(&self, conn: &Connection, id: &str) -> Result<()>;
     fn touch(&self, conn: &Connection, id: &str, updated_at: &str) -> Result<()>;
@@ -95,6 +100,18 @@ impl WorkspaceRepository for SqliteWorkspaceRepository {
              FROM workspaces WHERE root_path = ?1",
         )?;
         let mut rows = statement.query_map(params![root_path], map_workspace)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    fn first(&self, conn: &Connection) -> Result<Option<Workspace>> {
+        let mut statement = conn.prepare(
+            "SELECT id, name, root_path, created_at, updated_at
+             FROM workspaces ORDER BY created_at ASC, id ASC LIMIT 1",
+        )?;
+        let mut rows = statement.query_map([], map_workspace)?;
         match rows.next() {
             Some(row) => Ok(Some(row?)),
             None => Ok(None),

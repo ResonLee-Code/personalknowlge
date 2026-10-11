@@ -98,6 +98,21 @@ impl BackupService {
                 });
             }
         }
+        // 版本历史（命名版本）、模板、回收站：这些都是工作区里的**用户数据**，
+        // 以前没进备份——「备份 → 恢复到空目录」之后命名版本、模板、回收站里的东西都会消失，
+        // 而文档写的是「包含全部 Markdown、附件、数据库与配置」。
+        // 研究会话（可丢弃的中间产物）与 AI 审计日志仍然不入包，见文档的边界说明。
+        for root in [".knowledge/history", ".knowledge/templates", ".trash"] {
+            for relative in self.collect_relative_files(root)? {
+                let path = self.ctx.paths.resolve_relative(&relative)?;
+                if path.exists() {
+                    entries.push(BackupEntry {
+                        name: relative,
+                        source: BackupSource::File(path),
+                    });
+                }
+            }
+        }
 
         let mut manifest = BackupManifest::new(
             &self.ctx.workspace.id,
@@ -266,6 +281,27 @@ impl BackupService {
             note_count,
             attachment_count,
         })
+    }
+
+    /// 递归收集某个工作区相对目录下的全部文件（相对路径，已排序）。
+    ///
+    /// 用于把版本历史 / 模板 / 回收站一起打包；目录不存在时返回空列表。
+    fn collect_relative_files(&self, root: &str) -> Result<Vec<String>> {
+        let dir = self.ctx.paths.resolve_relative(root)?;
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut files = Vec::new();
+        for entry in walkdir::WalkDir::new(&dir).follow_links(false).into_iter().flatten() {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if let Ok(relative) = self.ctx.paths.to_relative(entry.path()) {
+                files.push(relative);
+            }
+        }
+        files.sort();
+        Ok(files)
     }
 
     /// 备份目录路径（设置页展示用）。

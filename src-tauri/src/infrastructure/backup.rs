@@ -67,6 +67,12 @@ pub struct BackupManifest {
     pub created_at: String,
     pub note_count: i64,
     pub attachment_count: i64,
+    /// `.knowledge/history` + `.knowledge/templates` 下的 Markdown（版本历史与模板）
+    #[serde(default)]
+    pub internal_markdown_count: i64,
+    /// `.trash/` 下的 Markdown（回收站）
+    #[serde(default)]
+    pub trash_count: i64,
     pub includes_database: bool,
     pub files: Vec<ManifestFile>,
 }
@@ -82,6 +88,8 @@ impl BackupManifest {
             created_at: now_iso(),
             note_count: 0,
             attachment_count: 0,
+            internal_markdown_count: 0,
+            trash_count: 0,
             includes_database: false,
             files: Vec::new(),
         }
@@ -91,6 +99,45 @@ impl BackupManifest {
 /// 写入压缩包，并在写入过程中填充清单（文件哈希、大小与数量统计）。
 ///
 /// 采用流式写入 + 边写边算哈希的方式，避免把整个知识库读入内存。
+/// 备份包内条目的分类（写入与校验**必须用同一套规则**，否则数量校验会自相矛盾）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EntryKind {
+    /// 活跃笔记的 Markdown
+    Note,
+    /// `attachments/` 下的附件
+    Attachment,
+    /// `.knowledge/history` 与 `.knowledge/templates` 下的 Markdown（版本历史 / 模板）
+    InternalMarkdown,
+    /// `.trash/` 下的 Markdown（回收站）
+    Trash,
+    /// 数据库、配置等不参与计数的文件
+    Other,
+}
+
+fn classify_entry(name: &str) -> EntryKind {
+    if name.starts_with("attachments/") {
+        return EntryKind::Attachment;
+    }
+    let is_markdown = name.ends_with(".md") || name.ends_with(".markdown");
+    if name.starts_with(".trash/") {
+        return if is_markdown { EntryKind::Trash } else { EntryKind::Other };
+    }
+    if name.starts_with(".knowledge/") {
+        let internal = name.starts_with(".knowledge/history/")
+            || name.starts_with(".knowledge/templates/");
+        return if internal && is_markdown {
+            EntryKind::InternalMarkdown
+        } else {
+            EntryKind::Other
+        };
+    }
+    if is_markdown {
+        EntryKind::Note
+    } else {
+        EntryKind::Other
+    }
+}
+
 pub fn write_archive(
     target: &Path,
     entries: &[BackupEntry],
@@ -107,6 +154,8 @@ pub fn write_archive(
     manifest.files.clear();
     manifest.note_count = 0;
     manifest.attachment_count = 0;
+    manifest.internal_markdown_count = 0;
+    manifest.trash_count = 0;
     manifest.includes_database = false;
 
     for entry in entries {
@@ -114,11 +163,12 @@ pub fn write_archive(
         if name.is_empty() {
             continue;
         }
-        if name.ends_with(".md") || name.ends_with(".markdown") {
-            manifest.note_count += 1;
-        }
-        if name.starts_with("attachments/") {
-            manifest.attachment_count += 1;
+        match classify_entry(&name) {
+            EntryKind::Note => manifest.note_count += 1,
+            EntryKind::Attachment => manifest.attachment_count += 1,
+            EntryKind::InternalMarkdown => manifest.internal_markdown_count += 1,
+            EntryKind::Trash => manifest.trash_count += 1,
+            EntryKind::Other => {}
         }
         if name == ".knowledge/database.sqlite" {
             manifest.includes_database = true;
@@ -275,13 +325,16 @@ pub fn validate_archive(archive: &Path) -> Result<BackupValidation> {
 
     let mut note_count = 0i64;
     let mut attachment_count = 0i64;
+    let mut internal_markdown_count = 0i64;
+    let mut trash_count = 0i64;
     let mut database_present = false;
     for name in entry_names_from(&mut zip)? {
-        if name.ends_with(".md") || name.ends_with(".markdown") {
-            note_count += 1;
-        }
-        if name.starts_with("attachments/") {
-            attachment_count += 1;
+        match classify_entry(&name) {
+            EntryKind::Note => note_count += 1,
+            EntryKind::Attachment => attachment_count += 1,
+            EntryKind::InternalMarkdown => internal_markdown_count += 1,
+            EntryKind::Trash => trash_count += 1,
+            EntryKind::Other => {}
         }
         if name == ".knowledge/database.sqlite" {
             database_present = true;
@@ -302,6 +355,19 @@ pub fn validate_archive(archive: &Path) -> Result<BackupValidation> {
         "附件数量一致",
         attachment_count == manifest.attachment_count,
         &format!("清单 {} 个，实际 {} 个", manifest.attachment_count, attachment_count),
+    ));
+    checks.push(check(
+        "版本历史 / 模板 Markdown 数量一致",
+        internal_markdown_count == manifest.internal_markdown_count,
+        &format!(
+            "清单 {} 个，实际 {} 个",
+            manifest.internal_markdown_count, internal_markdown_count
+        ),
+    ));
+    checks.push(check(
+        "回收站 Markdown 数量一致",
+        trash_count == manifest.trash_count,
+        &format!("清单 {} 个，实际 {} 个", manifest.trash_count, trash_count),
     ));
 
     // 逐文件校验大小与哈希

@@ -523,3 +523,154 @@ fn restoring_a_backup_keeps_hierarchy_metadata_links_and_search() {
         "恢复后的工作区要立刻可检索"
     );
 }
+
+/// 备份包必须包含**工作区里的非正文数据**：版本历史（命名版本）、模板、回收站、附件。
+///
+/// 回归背景：`create` 只收集「活跃笔记 + 附件 + 数据库 + 配置」，
+/// 版本历史 / 模板 / 回收站都被漏掉了——而文档写的是「包含全部 Markdown、附件、数据库与配置」。
+/// 结果是「备份 → 恢复到空目录」之后，命名版本、模板、回收站里的东西全没了。
+#[test]
+fn backup_carries_history_templates_trash_and_attachments() {
+    use personal_knowledge_os_lib::application::attachment_service::{
+        AttachmentService, SaveAttachmentInput,
+    };
+    use personal_knowledge_os_lib::application::backup_service::BackupService;
+    use personal_knowledge_os_lib::application::template_service::TemplateService;
+    use personal_knowledge_os_lib::core::base64;
+    use personal_knowledge_os_lib::domain::backup::{BackupCreateInput, RestoreBackupInput};
+    use personal_knowledge_os_lib::application::template_service::SaveTemplateInput;
+
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    let fixture = Fixture::new();
+    let notes = fixture.notes();
+    let original_workspace_id = fixture.context().workspace.id.clone();
+
+    // ① 活笔记 + 命名版本
+    let live = notes
+        .create(CreateNoteInput {
+            title: "会留版本的笔记".to_string(),
+            category_id: None,
+            initial_content: Some("第一版正文".to_string()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("建笔记")
+        .note;
+    let version = notes
+        .history_save_version(&live.id, "发布前")
+        .expect("保存命名版本");
+    assert_eq!(version.label.as_deref(), Some("发布前"));
+
+    // ② 附件（被这篇笔记引用）
+    let attachment = AttachmentService::new(fixture.context())
+        .save(SaveAttachmentInput {
+            note_id: Some(live.id.clone()),
+            file_name: Some("shot.png".to_string()),
+            mime_type: Some("image/png".to_string()),
+            data_base64: base64::encode(PNG),
+        })
+        .expect("保存附件");
+
+    // ③ 模板
+    TemplateService::new(fixture.context())
+        .save(SaveTemplateInput {
+            name: Some("周报模板".to_string()),
+            content: "# 周报\n\n{{date}}".to_string(),
+            overwrite: true,
+        })
+        .expect("保存模板");
+
+    // ④ 回收站：删掉一篇笔记
+    let trashed = notes
+        .create(CreateNoteInput {
+            title: "被删掉的笔记".to_string(),
+            category_id: None,
+            initial_content: Some("这句在回收站里".to_string()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("建待删笔记")
+        .note;
+    notes.delete(&trashed.id).expect("移入回收站");
+    // 收藏：只存在数据库里（frontmatter 不写 favorite），恢复时必须还在
+    notes.set_favorite(&live.id, true).expect("收藏");
+
+    let backup = BackupService::new(fixture.context())
+        .create(BackupCreateInput { target_dir: None, note: None })
+        .expect("创建备份");
+    let validation = BackupService::new(fixture.context())
+        .validate(&backup.path)
+        .expect("校验");
+    assert!(validation.valid, "校验细节：{:?}", validation.checks);
+
+    let restore_root = fixture._data.path().join("restored-full");
+    BackupService::new(fixture.context())
+        .restore(RestoreBackupInput {
+            archive_path: backup.path.clone(),
+            target_dir: restore_root.to_string_lossy().to_string(),
+        })
+        .expect("恢复");
+
+    WorkspaceService::new(Arc::clone(&fixture.app))
+        .close()
+        .expect("关闭原工作区");
+    WorkspaceService::new(Arc::clone(&fixture.app))
+        .open(&restore_root.to_string_lossy())
+        .expect("打开恢复出来的工作区");
+
+    let restored = NoteService::new(fixture.context());
+    let history = restored.history_list(&live.id).expect("版本历史");
+    assert!(
+        history.iter().any(|entry| entry.label.as_deref() == Some("发布前")),
+        "版本历史（含命名版本）要随备份恢复：{history:?}"
+    );
+    let templates = TemplateService::new(fixture.context())
+        .list()
+        .expect("模板列表");
+    assert!(
+        templates.iter().any(|item| item.name == "周报模板"),
+        "模板要随备份恢复：{templates:?}"
+    );
+    // 身份必须沿用：恢复出来的库仍是同一个知识库（否则快照里的行会变成孤儿，
+    // 回收站 / 收藏这类「只存在数据库里」的状态就丢了）
+    assert_eq!(
+        fixture.context().workspace.id,
+        original_workspace_id,
+        "恢复后必须沿用原来的知识库 id"
+    );
+    let strays: i64 = fixture
+        .context()
+        .db
+        .with_conn(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM notes WHERE workspace_id <> ?1",
+                rusqlite::params![fixture.context().workspace.id],
+                |row| row.get(0),
+            )?)
+        })
+        .expect("查孤儿行");
+    assert_eq!(strays, 0, "库里不应留下其它 workspace 的孤儿行");
+
+    let deleted = restored.list_deleted().expect("回收站");
+    assert!(
+        deleted.iter().any(|item| item.id == trashed.id),
+        "回收站里的笔记要随备份恢复：{deleted:?}"
+    );
+    assert!(
+        restore_root.join(&attachment.relative_path).exists(),
+        "附件要随备份恢复：{}",
+        attachment.relative_path
+    );
+    // 收藏是「只存在数据库里」的状态，必须能一起恢复
+    assert!(
+        restored.get(&live.id).expect("读回笔记").note.favorite,
+        "收藏状态要随备份恢复"
+    );
+}

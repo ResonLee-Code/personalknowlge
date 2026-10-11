@@ -98,6 +98,19 @@ Markdown 文件 + SQLite（WAL）+ FTS5 索引 + 回收站
 `VACUUM INTO` 生成数据库一致性快照 → 流式写入 ZIP（边写边算 SHA-256）→ 写入 `manifest.json` →
 `backup_validate` 复算哈希与数量 → `backup_restore` 只允许恢复到空目录。
 
+包内容（2026-10-11 起）：活跃笔记 Markdown、**版本历史**（`.knowledge/history`）、
+**模板**（`.knowledge/templates`）、**回收站**（`.trash`）、附件、数据库快照与 `config.json`。
+清单与校验按四类分别计数（笔记 / 附件 / 历史·模板 Markdown / 回收站 Markdown），
+写入与校验共用同一套分类规则（`classify_entry`），避免「清单说 N 个、实际 M 个」自相矛盾。
+不入包：`.knowledge/research`（可丢弃的中间产物）、`.knowledge/logs`（AI 审计元数据）、
+`backups` 自身。
+
+**恢复到新目录 = 同一个知识库换了位置**：`open()` 先按 `root_path` 查库里的记录；
+查不到但库里已有记录时（整目录拷贝 / 从备份恢复，也是文档推荐的搬迁方式），
+沿用那条记录的身份（id）并把 `root_path` 指到新位置——否则会新建 id，
+快照里的行全成孤儿，**回收站、收藏这些只存在数据库里的状态会静默丢失**。
+应用级「最近打开」按 id upsert，因此同一份备份恢复到多处时列表里只保留最近打开的那一个路径。
+
 ### 3.5 研究助手（V1.2.1 阶段 D）
 
 ```text

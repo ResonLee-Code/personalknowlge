@@ -161,19 +161,36 @@ impl WorkspaceService {
         })?;
         let workspace = match existing {
             Some(workspace) => workspace,
-            None => {
-                let now = now_iso();
-                let workspace = Workspace {
-                    id: workspace_id(),
-                    name: default_workspace_name(&root_path),
-                    root_path: root_path.to_string_lossy().to_string(),
-                    created_at: now.clone(),
-                    updated_at: now,
-                };
-                db.with_conn(|conn| SqliteWorkspaceRepository.upsert(conn, &workspace))?;
-                initialized = true;
-                workspace
-            }
+            None => match db.with_conn(|conn| SqliteWorkspaceRepository.first(conn))? {
+                // 目录里已经有数据库、但库里没有「这个路径」的记录：这是**同一个知识库**
+                // 被整目录拷贝 / 从备份恢复到了新位置（也是文档推荐的搬迁方式）。
+                // 必须沿用原来的 id，只把 root_path 指到新位置——否则会新建一个 id，
+                // 快照里的行全成孤儿：回收站、收藏这些**只存在数据库里**的状态会静默丢失。
+                Some(mut workspace) => {
+                    workspace.root_path = root_path.to_string_lossy().to_string();
+                    workspace.updated_at = now_iso();
+                    db.with_conn(|conn| SqliteWorkspaceRepository.upsert(conn, &workspace))?;
+                    tracing::info!(
+                        target: "workspace",
+                        "沿用已有知识库身份 {}（路径已迁移到新位置）",
+                        workspace.id
+                    );
+                    workspace
+                }
+                None => {
+                    let now = now_iso();
+                    let workspace = Workspace {
+                        id: workspace_id(),
+                        name: default_workspace_name(&root_path),
+                        root_path: root_path.to_string_lossy().to_string(),
+                        created_at: now.clone(),
+                        updated_at: now,
+                    };
+                    db.with_conn(|conn| SqliteWorkspaceRepository.upsert(conn, &workspace))?;
+                    initialized = true;
+                    workspace
+                }
+            },
         };
 
         let context = self.build_context(workspace, db, paths)?;
