@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GraphPage } from '@/features/graph/GraphPage';
+import { toast } from 'sonner';
 import { graphService } from '@/services/graphService';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -11,6 +12,10 @@ import type { GraphData } from '@/types';
 
 vi.mock('@/services/graphService', () => ({
   graphService: { get: vi.fn() },
+}));
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
 const getGraph = vi.mocked(graphService.get);
@@ -146,5 +151,21 @@ describe('GraphPage', () => {
     expect(screen.getByText('查询失败')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '重试' }));
     await waitFor(() => expect(getGraph.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  // 回归：无 Canvas 的环境（测试、无头）里点「导出 PNG」以前是**静默无事发生**，
+  // 现在必须把失败原因交回页面提示用户，而不是让人以为已经导出成功。
+  it('导出 PNG 失败时给出明确提示，而不是静默', async () => {
+    renderPage();
+    await screen.findByTestId('graph-canvas');
+    await screen.findByRole('button', { name: '导出 PNG' });
+
+    await userEvent.click(screen.getByRole('button', { name: '导出 PNG' }));
+
+    await waitFor(() =>
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        expect.stringContaining('不支持 Canvas'),
+      ),
+    );
   });
 });

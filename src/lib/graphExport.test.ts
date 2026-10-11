@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildGraphSvg, escapeXml, toBase64Utf8 } from '@/lib/graphExport';
+import {
+  buildGraphSvg,
+  escapeXml,
+  legendPanelRect,
+  toBase64Utf8,
+} from '@/lib/graphExport';
 
 const base = {
   width: 400,
@@ -52,5 +57,29 @@ describe('escapeXml / toBase64Utf8', () => {
     const encoded = toBase64Utf8('知识图谱 A');
     const decoded = Buffer.from(encoded, 'base64').toString('utf8');
     expect(decoded).toBe('知识图谱 A');
+  });
+});
+
+describe('legendPanelRect', () => {
+  const size = { width: 800, height: 600 };
+
+  it('没有图例时不画面板', () => {
+    expect(legendPanelRect(0, size)).toBeNull();
+  });
+
+  it('高度随条目数增长，且锚定在右下角、留出边距', () => {
+    const one = legendPanelRect(1, size)!;
+    const five = legendPanelRect(5, size)!;
+    expect(five.height - one.height).toBe(4 * 20);
+    expect(one.x + one.width).toBe(size.width - 20);
+    expect(one.y + one.height).toBe(size.height - 20);
+  });
+
+  it('面板始终落在画布范围内', () => {
+    const rect = legendPanelRect(3, { width: 400, height: 300 })!;
+    expect(rect.x).toBeGreaterThanOrEqual(0);
+    expect(rect.y).toBeGreaterThanOrEqual(0);
+    expect(rect.x + rect.width).toBeLessThanOrEqual(400);
+    expect(rect.y + rect.height).toBeLessThanOrEqual(300);
   });
 });

@@ -324,6 +324,7 @@ export function GraphPage() {
               onOpen={(id) => navigate(ROUTES.note(id))}
               legend={legend}
               onExportPng={(dataUrl) => void exportPng(dataUrl)}
+              onExportFailed={(reason) => toast.error(reason)}
               onExportSvg={(svg) => void exportSvg(svg)}
               exportAllLabels={exportAllLabels}
             />

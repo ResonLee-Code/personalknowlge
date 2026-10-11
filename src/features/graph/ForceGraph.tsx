@@ -19,6 +19,8 @@ interface ForceGraphProps {
   colors?: Map<string, string>;
   /** 导出「带图例的 PNG」（base64 data URL，由页面落盘） */
   onExportPng?: (dataUrl: string) => void;
+  /** 导出失败的回调：失败必须让用户看到原因，不能静默（无头环境没有 Canvas 时会走到这里） */
+  onExportFailed?: (reason: string) => void;
   /** 导出 SVG（文本，由页面落盘） */
   onExportSvg?: (svg: string) => void;
   /** 导出时写入的图例 */
@@ -43,6 +45,7 @@ export function ForceGraph({
   onSettled,
   colors,
   onExportPng,
+  onExportFailed,
   onExportSvg,
   legend = [],
   exportAllLabels = false,
@@ -403,14 +406,20 @@ export function ForceGraph({
               onClick={() => {
                 const canvas = canvasRef.current;
                 const state = stateRef.current;
-                if (!canvas || !state) return;
+                if (!canvas || !state) {
+                  onExportFailed?.('导出失败：画布还没准备好，请等图谱渲染完成后再试。');
+                  return;
+                }
                 try {
                   // 复制当前画面，再补上图例与标题，保证分享出去能自解释
                   const output = document.createElement('canvas');
                   output.width = canvas.width;
                   output.height = canvas.height;
                   const context = output.getContext('2d');
-                  if (!context) return;
+                  if (!context) {
+                    onExportFailed?.('导出失败：当前环境不支持 Canvas 绘制，无法生成 PNG。');
+                    return;
+                  }
                   context.fillStyle = '#ffffff';
                   context.fillRect(0, 0, output.width, output.height);
                   context.drawImage(canvas, 0, 0);
@@ -442,8 +451,11 @@ export function ForceGraph({
                   );
                   context.restore();
                   onExportPng(output.toDataURL('image/png'));
-                } catch {
-                  // 无头环境没有 Canvas 实现，忽略
+                } catch (error) {
+                  // 以前这里静默吞掉：用户点了「导出 PNG」什么都没发生。
+                  // 现在把原因交回页面（toast 提示），并保留控制台线索。
+                  console.warn('导出 PNG 失败', error);
+                  onExportFailed?.('导出 PNG 失败：生成图片时出错，请重试或改用「导出 SVG」。');
                 }
               }}
             >

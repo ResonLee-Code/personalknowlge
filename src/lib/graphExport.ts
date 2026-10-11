@@ -144,6 +144,34 @@ export function buildGraphSvg(input: GraphExportInput): string {
   return parts.join('\n');
 }
 
+/** 图例面板的几何参数（与 Canvas 绘制共用，便于单测）。 */
+export interface LegendPanelOptions {
+  rowHeight?: number;
+  panelWidth?: number;
+  margin?: number;
+  headerHeight?: number;
+}
+
+/** 图例面板的位置与尺寸（右下角锚定）；没有图例时返回 `null`。 */
+export function legendPanelRect(
+  legendCount: number,
+  size: { width: number; height: number },
+  options: LegendPanelOptions = {},
+): { x: number; y: number; width: number; height: number } | null {
+  if (legendCount <= 0) return null;
+  const rowHeight = options.rowHeight ?? 20;
+  const panelWidth = options.panelWidth ?? 190;
+  const margin = options.margin ?? 20;
+  const headerHeight = options.headerHeight ?? 34;
+  const panelHeight = headerHeight + legendCount * rowHeight;
+  return {
+    x: size.width - panelWidth - margin,
+    y: size.height - panelHeight - margin,
+    width: panelWidth,
+    height: panelHeight,
+  };
+}
+
 /** 在 Canvas 上绘制与 SVG 一致的图例面板（用于「带图例的 PNG」）。 */
 export function drawLegendOnCanvas(
   context: CanvasRenderingContext2D,
@@ -158,20 +186,17 @@ export function drawLegendOnCanvas(
     context.textBaseline = 'alphabetic';
     context.fillText(title, 20, 30);
   }
-  if (legend.length === 0) return;
-
+  const rect = legendPanelRect(legend.length, size);
+  if (!rect) return;
   const rowHeight = 20;
-  const panelWidth = 190;
-  const panelHeight = 34 + legend.length * rowHeight;
-  const x = size.width - panelWidth - 20;
-  const y = size.height - panelHeight - 20;
+  const { x, y } = rect;
 
   context.save();
   context.fillStyle = 'rgba(255, 255, 255, 0.92)';
   context.strokeStyle = '#e2e8f0';
   context.lineWidth = 1;
   context.beginPath();
-  context.roundRect(x, y, panelWidth, panelHeight, 8);
+  context.roundRect(x, y, rect.width, rect.height, 8);
   context.fill();
   context.stroke();
 
