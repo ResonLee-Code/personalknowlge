@@ -731,4 +731,55 @@ describe('浏览器预览后端 · 分类重命名 / 移动 / 删除（与 Rust 
       code: 'CATEGORY_NOT_FOUND',
     });
   });
+
+});
+
+// 设置写入必须与后端 `apply_settings` 同规则：只认已知字段、数值夹取、枚举只接受已知值。
+// 预览端以前是「整包展开」——脏值（例如 editorMode: 'SPLIT'）会被写进设置，
+// 界面随后拿着它去查表、查不到就静默退化；未知字段也会混进设置里。
+describe('浏览器预览后端 · 设置写入（与 Rust 对齐）', () => {
+  it('数值夹取、枚举白名单、未知字段忽略', async () => {
+    await workspaceService.create('设置规则库', '/tmp/mock-settings');
+
+    const clamped = await workspaceService.updateSettings({
+      autosaveDelayMs: 99_999,
+      fontSize: 99,
+      sidebarWidth: 1,
+      listWidth: 9_999,
+      editorSplitRatio: 0.95,
+    });
+    expect(clamped.autosaveDelayMs).toBe(10_000);
+    expect(clamped.fontSize).toBe(32);
+    expect(clamped.sidebarWidth).toBe(160);
+    expect(clamped.listWidth).toBe(640);
+    expect(clamped.editorSplitRatio).toBeCloseTo(0.7);
+
+    // 先落到一个有效值，再发脏值：脏值必须被忽略、保留上一个有效值
+    await workspaceService.updateSettings({ editorMode: 'preview', editorTheme: 'dark' });
+    const rejected = await workspaceService.updateSettings({
+      editorMode: 'SPLIT',
+      editorTheme: 'solarized',
+      defaultNewLocation: 'somewhere',
+      listSort: 'bogus',
+      // 未知字段不该混进设置
+      somethingElse: 'x',
+    } as never);
+    expect(rejected.editorMode).toBe('preview');
+    expect(rejected.editorTheme).toBe('dark');
+    expect(rejected.defaultNewLocation).toBe('inbox');
+    expect(rejected.listSort).toBe('updatedDesc');
+    expect(Object.keys(rejected)).not.toContain('somethingElse');
+
+    // 合法值照常生效
+    const applied = await workspaceService.updateSettings({
+      editorMode: 'edit',
+      editorTheme: 'light',
+      listSort: 'manual',
+      autosaveDelayMs: 1500,
+    });
+    expect(applied.editorMode).toBe('edit');
+    expect(applied.editorTheme).toBe('light');
+    expect(applied.listSort).toBe('manual');
+    expect(applied.autosaveDelayMs).toBe(1500);
+  });
 });

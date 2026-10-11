@@ -130,6 +130,51 @@ const emptySettings: AppSettings = {
   lastCategoryId: null,
 };
 
+/**
+ * 应用设置更新（与后端 `apply_settings` 同规则，见 `application/workspace_service.rs`）：
+ * - **只认已知字段**：未知键直接忽略，不会混进设置里；
+ * - 数值字段按后端区间夹取（自动保存 200–10000ms、字号 10–32、分屏比例 0.3–0.7、
+ *   侧栏 160–480、列表 220–640）；
+ * - 枚举字段只接受已知值（主题 / 新建位置 / 编辑器模式 / 排序），未知值**保留上一个有效值**，
+ *   避免界面拿着脏值去查表、查不到就静默退化。
+ */
+function applyMockSettings(current: AppSettings, input: Record<string, unknown>): AppSettings {
+  const next: AppSettings = { ...current };
+  const clamp = (value: unknown, min: number, max: number) =>
+    Math.min(max, Math.max(min, Math.round(Number(value))));
+  const pick = (value: unknown, allowed: string[]) =>
+    typeof value === 'string' && allowed.includes(value) ? value : undefined;
+
+  if (typeof input.autosaveEnabled === 'boolean') next.autosaveEnabled = input.autosaveEnabled;
+  if (input.autosaveDelayMs !== undefined) next.autosaveDelayMs = clamp(input.autosaveDelayMs, 200, 10_000);
+  if (input.fontSize !== undefined) next.fontSize = clamp(input.fontSize, 10, 32);
+  if (input.sidebarWidth !== undefined) next.sidebarWidth = clamp(input.sidebarWidth, 160, 480);
+  if (input.listWidth !== undefined) next.listWidth = clamp(input.listWidth, 220, 640);
+  if (input.editorSplitRatio !== undefined) {
+    const ratio = Number(input.editorSplitRatio);
+    if (Number.isFinite(ratio)) next.editorSplitRatio = Math.min(0.7, Math.max(0.3, ratio));
+  }
+  next.editorTheme = pick(input.editorTheme, ['light', 'dark']) ?? next.editorTheme;
+  next.defaultNewLocation =
+    pick(input.defaultNewLocation, ['inbox', 'currentCategory', 'lastCategory']) ??
+    next.defaultNewLocation;
+  next.editorMode =
+    pick(input.editorMode, ['edit', 'split', 'preview']) ?? next.editorMode;
+  next.listSort =
+    pick(input.listSort, ['updatedDesc', 'updatedAsc', 'createdDesc', 'titleAsc', 'manual']) ??
+    next.listSort;
+  if (input.backupDir !== undefined) {
+    next.backupDir = input.backupDir === null ? null : String(input.backupDir);
+  }
+  if (input.lastOpenedNoteId !== undefined) {
+    next.lastOpenedNoteId = input.lastOpenedNoteId === null ? null : String(input.lastOpenedNoteId);
+  }
+  if (input.lastCategoryId !== undefined) {
+    next.lastCategoryId = input.lastCategoryId === null ? null : String(input.lastCategoryId);
+  }
+  return next;
+}
+
 const defaultAiPolicy: AiPolicy = {
   enabled: false,
   network: 'localOnly',
@@ -2042,8 +2087,8 @@ export async function handleMockInvoke(
     case 'settings_get':
       return state.settings;
     case 'settings_update': {
-      const input = payload.input as Record<string, unknown>;
-      state.settings = { ...state.settings, ...input } as AppSettings;
+      const input = (payload.input ?? {}) as Record<string, unknown>;
+      state.settings = applyMockSettings(state.settings, input);
       persist();
       return state.settings;
     }
