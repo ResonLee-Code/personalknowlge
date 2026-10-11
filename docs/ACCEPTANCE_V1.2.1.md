@@ -17,7 +17,7 @@
 | Rust 全量测试 | ✅ 39 个测试目标全绿（库单测 116 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
-| 前端单元 / 组件测试 | ✅ 54 个文件、279 用例全通过 | `CI=true pnpm test` |
+| 前端单元 / 组件测试 | ✅ 55 个文件、280 用例全通过 | `CI=true pnpm test` |
 | 前端生产构建 | ✅ 构建成功 | `CI=true pnpm build` |
 | 端到端主流程 | ✅ 1 条主流程通过（34 个编号步骤 + 补充断言，浏览器预览后端） | `CI=true pnpm test:e2e`（截图见 `docs/screenshots/`）；重负载下时序敏感，配置了 1 次重试与 10s 断言超时（原因写在 `playwright.config.ts` 注释里） |
 
@@ -46,7 +46,8 @@
 | 备份包内容与「恢复即同一知识库」 | 包内含笔记 / 版本历史（命名版本）/ 模板 / **回收站** / 附件 / 数据库 / 配置；恢复到新目录后打开：**沿用原知识库 id**（不产生孤儿行）、命名版本、模板、回收站里的笔记、附件、**收藏**（只存在数据库里的状态）全部回来；写入与校验共用同一套条目分类（四类分别计数） | `tests/rebuild_flow.rs`（含本项，反向验证过） |
 | 决策层打分 | 来源可信度 ∈ (0,1]、交叉验证结论置信度高于单一来源；注入桩 `DecisionModel` 可改变打分（A/B 通路） | `tests/research_flow.rs` |
 | 本地模型接入 | 开启后可信度由模型分决定且报告写明 provider；连不上自动降级且流程不中断；开关关闭时零请求；远程地址被拒绝（**写入侧与读取侧各校验一次**：即使有人直接改了库里的地址，也不会把笔记内容发到远程） | `tests/local_model_flow.rs`（4 项） |
-| 文档与代码一致性 | README / ARCHITECTURE / 安装指南 / 发布流程的版本、能力表、命令与体积都按当前代码校正；文档内引用的相对路径全部存在（**可执行守卫**：跑 `pnpm test` 即检查，链接改坏立刻失败） | `src/lib/docsLinks.test.ts`（两类：相对链接目标 + 行内代码里的仓库内路径，均反向验证过） |
+| 文档与代码一致性 | README / ARCHITECTURE / 安装指南 / 发布流程的版本、能力表、命令与体积都按当前代码校正；文档内引用的相对路径全部存在（**可执行守卫**：跑 `pnpm test` 即检查，链接改坏立刻失败） | `src/lib/docsLinks.test.ts`（两类：相对链接目标 + 行内代码里的仓库内路径，均反向验证过） || 文档与代码一致性 | README / ARCHITECTURE / 安装指南 / 发布流程的版本、能力表、命令与体积都按当前代码校正；文档内引用的相对路径全部存在（**可执行守卫**：跑 `pnpm test` 即检查，链接改坏立刻失败） | `src/lib/docsLinks.test.ts`（两类：相对链接目标 + 行内代码里的仓库内路径，均反向验证过） |
+| 版本身份四处一致 | `package.json` / `src-tauri/Cargo.toml` / `Cargo.lock` / `tauri.conf.json` 四处版本号一致（本地守卫，漏改一处立刻失败；CHANGELOG 的版本小节刻意不在此列） | `src/lib/versionConsistency.test.ts`（1 项，反向验证过） |
 | 命令契约 | 前端 104 条命令与 `lib.rs` 注册表、mock 分支三方对齐；**参数名也对齐**（77 处带参调用 0 不一致）；守卫两次反向验证（插入未注册命令 / 改错参数名 → 立即失败） | `tests/command_contract.rs`（3 项） |
 | IPC 契约 | ① 响应结构：界面读取的 **29 个 DTO**，TS 字段必须存在于 Rust 结构（238 字段 0 不一致）；② **事件名** 3/3 一致；③ **错误码** 22/22 集合相等。三条都反向验证过（故意制造漂移 → 立即失败） | `tests/dto_contract.rs`（13 项） |
 | 可访问性（程序化标签） | 全部 `Input` / `select` / `textarea` 都有 `id` / `aria-label` / 被 `<label>` 包裹（本轮补齐 25 处）；无标题图标按钮与缺 `alt` 图片均为 0；守卫反向验证过 | `src/lib/a11yLabels.test.ts` |

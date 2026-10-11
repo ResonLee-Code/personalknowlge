@@ -163,6 +163,9 @@ pnpm build && pnpm test:e2e      # 端到端 UI 验证，截图输出到 docs/sc
 
 - **可机检的四处**：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、
   `src-tauri/tauri.conf.json`（发布工作流的 preflight 会拦截不一致的标签）；
+  **本地也有一道**：`src/lib/versionConsistency.test.ts` 随 `pnpm test` 检查这四处，
+  漏改一处立刻失败（不必等到推 tag）；刻意不受检查的是 `docs/CHANGELOG.md` 的版本小节——
+  内容可以先落地、打包时再统一升版（见 `PLAN_V1.2.1.md` 阶段 A1）；
 - 另外 `docs/CHANGELOG.md` 的版本小节也要同步，否则用户看到的「当前构建」会对不上。
 
 ### 文档链接守卫
