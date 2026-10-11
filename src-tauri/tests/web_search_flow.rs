@@ -449,6 +449,131 @@ fn unusable_grade_e_sources_never_reach_the_conclusion_sections() {
     );
 }
 
+/// §9.3：「黑名单命中的来源**直接丢弃**，并计入报告附录」。
+///
+/// 默认口径**不抓正文**（只用检索摘要），因此域名策略必须在「候选」这一步生效——
+/// 只靠抓取时的拦截，会让黑名单域名以摘要形式混进来源列表。
+#[test]
+fn blacklisted_search_results_are_dropped_and_recorded_in_the_report() {
+    let fixture = Fixture::new();
+    let (host, _touched) = spawn_once_server(
+        r#"{"results":[
+            {"title":"Rust 异步运行时调度官方文档","url":"https://doc.rust-lang.org/book/","content":"调度器说明。"},
+            {"title":"Rust 异步运行时调度论坛贴","url":"https://twitter.com/someone/status/1","content":"帖子里聊调度器。"}
+        ]}"#
+        .to_string(),
+    );
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            search_endpoint: Some(format!("http://{host}/search?q={{query}}&limit={{limit}}")),
+            domain_denylist: Some(vec!["twitter.com".to_string()]),
+            ..Default::default()
+        })
+        .expect("打开联网档位并设置黑名单");
+
+    let research = fixture.research();
+    let session = research
+        .start(request("Rust 异步运行时调度"))
+        .expect("立项");
+    let collected = research.collect(&session.id, true).expect("收集（含联网）");
+    assert!(
+        collected
+            .sources
+            .iter()
+            .all(|source| !source.url.clone().unwrap_or_default().contains("twitter.com")),
+        "黑名单域名的结果不得进入来源列表：{:?}",
+        collected.sources
+    );
+    assert_eq!(
+        collected.dropped_sources.len(),
+        1,
+        "命中的结果要如实记下来（附录可见）：{:?}",
+        collected.dropped_sources
+    );
+    assert_eq!(collected.dropped_sources[0].reason, "denylist");
+    assert_eq!(collected.dropped_sources[0].host, "twitter.com");
+
+    research.verify(&session.id).expect("验证");
+    let composed = research.compose(&session.id).expect("汇总");
+    let report = composed.report.as_ref().expect("报告");
+    let warning = report
+        .warnings
+        .iter()
+        .find(|warning| warning.kind == WarningKind::DroppedSources)
+        .unwrap_or_else(|| panic!("被丢弃的来源必须在报告里可见：{:?}", report.warnings));
+    assert!(
+        warning.message.contains("黑名单") && warning.message.contains("twitter.com"),
+        "警告要说清原因与域名：{}",
+        warning.message
+    );
+    // 附录（警告块）里点名域名是有意的；但**参考来源段**不能把它当成一条来源列出
+    let references_section = report
+        .markdown
+        .split("## 6. 参考来源")
+        .nth(1)
+        .expect("第 6 段");
+    assert!(
+        !references_section.contains("twitter.com"),
+        "被丢弃的来源不能出现在参考来源段：\n{references_section}"
+    );
+    assert!(
+        report
+            .references
+            .iter()
+            .all(|source| !source.url.clone().unwrap_or_default().contains("twitter.com")),
+        "被丢弃的来源不能留在 references 里"
+    );
+    assert!(
+        report.markdown.contains("⚠️ 警告") && report.markdown.contains("域名策略"),
+        "警告块要写进报告的醒目位置：\n{}",
+        report.markdown
+    );
+}
+
+/// 白名单非空时：不在白名单里的检索结果同样直接丢弃（并计入附录）。
+#[test]
+fn results_outside_the_allowlist_are_dropped_too() {
+    let fixture = Fixture::new();
+    let (host, _touched) = spawn_once_server(
+        r#"{"results":[
+            {"title":"Rust 异步运行时调度官方文档","url":"https://doc.rust-lang.org/book/","content":"调度器说明。"},
+            {"title":"Rust 异步运行时调度媒体文章","url":"https://media.example.com/post","content":"媒体文章。"}
+        ]}"#
+        .to_string(),
+    );
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            search_endpoint: Some(format!("http://{host}/search?q={{query}}&limit={{limit}}")),
+            // 检索源本身也要在白名单内，否则一个请求都发不出去
+            domain_allowlist: Some(vec!["127.0.0.1".to_string(), "doc.rust-lang.org".to_string()]),
+            ..Default::default()
+        })
+        .expect("打开联网档位并设置白名单");
+
+    let research = fixture.research();
+    let session = research.start(request("Rust 异步运行时调度")).expect("立项");
+    let collected = research.collect(&session.id, true).expect("收集（含联网）");
+    assert!(
+        collected
+            .sources
+            .iter()
+            .all(|source| !source.url.clone().unwrap_or_default().contains("media.example.com")),
+        "白名单之外的来源不得进入列表：{:?}",
+        collected.sources
+    );
+    assert_eq!(collected.dropped_sources.len(), 1);
+    assert_eq!(collected.dropped_sources[0].reason, "notAllowed");
+    assert!(collected.dropped_sources[0].host.contains("media.example.com"));
+}
+
 #[test]
 fn search_endpoint_itself_is_subject_to_the_domain_allowlist() {
     let fixture = Fixture::new();

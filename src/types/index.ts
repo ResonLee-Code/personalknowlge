@@ -710,7 +710,9 @@ export type ResearchWarningKind =
   | 'externalNotAvailable'
   | 'noLocalEvidence'
   | 'templateGenerated'
-  | 'modelGenerated';
+  | 'modelGenerated'
+  /** 有检索结果被域名策略（黑名单 / 白名单）丢弃，未进入来源列表 */
+  | 'droppedSources';
 
 /** 研究请求（`research_start` 输入；只有课题必填） */
 export interface ResearchRequest {
@@ -853,6 +855,15 @@ export interface ResearchSession {
   elapsedMs: number;
   abortReason?: string | null;
   writtenNoteId?: string | null;
+  /** 被域名策略丢弃的检索结果（黑名单强制 / 白名单之外）：报告附录里会点名 */
+  droppedSources?: ResearchDroppedSource[];
+}
+
+/** 被域名策略丢弃的一条检索结果（`reason`：`denylist` | `notAllowed`） */
+export interface ResearchDroppedSource {
+  url: string;
+  host: string;
+  reason: string;
 }
 
 export interface ResearchSessionSummary {

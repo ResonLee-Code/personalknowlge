@@ -246,6 +246,18 @@ pub enum WarningKind {
     TemplateGenerated,
     /// 报告/推测段由本地模型生成（未经人工核对）
     ModelGenerated,
+    /// 有检索结果被域名策略（黑名单 / 白名单）丢弃，未进入来源列表
+    DroppedSources,
+}
+
+/// 被域名策略丢弃的检索结果（§9.3：黑名单强制丢弃，且要在报告里可见）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DroppedSource {
+    pub url: String,
+    pub host: String,
+    /// `denylist`（命中黑名单）或 `notAllowed`（白名单非空且不含该域名）
+    pub reason: String,
 }
 
 /// 一条警告。
@@ -424,6 +436,10 @@ pub struct ResearchSession {
     /// 本次打分用的决策模型标识（规则档 `rule` / `local.ollama:<模型>`）
     #[serde(default)]
     pub decision_provider: Option<String>,
+    /// 被域名策略丢弃的检索结果（黑名单强制 / 白名单之外）：来源列表里没有它们，
+    /// 但必须在报告附录（警告块）里能看到，避免「悄悄少了东西」
+    #[serde(default)]
+    pub dropped_sources: Vec<DroppedSource>,
 }
 
 impl ResearchSession {
@@ -509,6 +525,7 @@ mod tests {
             abort_reason: None,
             written_note_id: None,
             decision_provider: None,
+            dropped_sources: Vec::new(),
         };
         assert!(session.summary_line().contains("Rust 异步"));
         let summary = ResearchSessionSummary::from(&session);

@@ -24,6 +24,16 @@ pub struct AiPolicyService {
     ctx: Arc<WorkspaceContext>,
 }
 
+/// 单个域名相对当前策略的裁决结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostVerdict {
+    Allowed,
+    /// 命中黑名单：强制丢弃
+    DeniedByBlacklist,
+    /// 白名单非空且不含该域名：丢弃
+    NotInAllowlist,
+}
+
 impl AiPolicyService {
     pub fn new(ctx: Arc<WorkspaceContext>) -> Self {
         Self { ctx }
@@ -56,6 +66,9 @@ impl AiPolicyService {
     }
 
     /// 闸门二：联网动作（档位 + 本次确认 + 域名白/黑名单）。
+    ///
+    /// 检索结果里的**每一条候选**也要按同一套域名规则过一遍（见 `host_verdict`）：
+    /// 抓正文时会被拦，但默认不抓正文（只用检索摘要），所以候选本身必须单独判定。
     ///
     /// `confirmed` 表示调用方已拿到用户的**单次确认**；档位为 `allowNetwork` 且已确认才放行。
     pub fn ensure_network_allowed(
@@ -109,6 +122,33 @@ impl AiPolicyService {
     }
 
     /// 闸门三：抓取正文（默认关闭时只允许搜索摘要）。
+    ///
+    /// 与闸门二共用同一套域名规则（`domain_matches`），供**检索结果的逐条过滤**使用：
+    /// 黑名单强制丢弃；白名单非空时只放行白名单内域名。
+    pub fn host_verdict(&self, url: &str) -> HostVerdict {
+        let policy = self.policy();
+        let Some(host) = host_of(url) else {
+            // 地址解析不出主机（本地文件、相对路径等）：不参与域名规则判定
+            return HostVerdict::Allowed;
+        };
+        if policy
+            .domain_denylist
+            .iter()
+            .any(|rule| domain_matches(rule, &host))
+        {
+            return HostVerdict::DeniedByBlacklist;
+        }
+        if !policy.domain_allowlist.is_empty()
+            && !policy
+                .domain_allowlist
+                .iter()
+                .any(|rule| domain_matches(rule, &host))
+        {
+            return HostVerdict::NotInAllowlist;
+        }
+        HostVerdict::Allowed
+    }
+
     pub fn ensure_fetch_body_allowed(&self, capability: &str) -> Result<()> {
         let policy = self.policy();
         if !policy.allow_fetch_body {

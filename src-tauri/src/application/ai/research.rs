@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::application::ai::policy::AiPolicyService;
+use crate::application::ai::policy::{AiPolicyService, HostVerdict};
 use crate::application::ai::source_grade::{self, grade_local_note, Grade};
 use crate::application::ai::template_provider::TemplateGenerativeModel;
 use crate::application::ai::tools::AiTools;
@@ -40,7 +40,7 @@ use crate::domain::research::{
     ResearchReport, ResearchRequest, ResearchSession, ResearchSessionSummary, ResearchSource,
     ResearchStatus, ResearchStepLog, ResearchWarning, SourceLevel, SourceOrigin, SubQuestion,
     WarningKind, ResearchWriteInput, ResearchWriteResult, WRITE_MODE_ABANDON, WRITE_MODE_APPEND,
-    WRITE_MODE_CREATE,
+    WRITE_MODE_CREATE, DroppedSource,
 };
 
 /// 每个子问题最多采纳的本地材料条数。
@@ -260,6 +260,7 @@ impl ResearchService {
             abort_reason: None,
             written_note_id: None,
             decision_provider: None,
+            dropped_sources: Vec::new(),
         };
         self.save(&session)?;
         self.policy().audit(
@@ -382,9 +383,29 @@ impl ResearchService {
                 }
                 Ok(hits) => {
                     let mut web_seen: Vec<String> = Vec::new();
+                    let mut dropped: Vec<DroppedSource> = Vec::new();
                     for hit in hits {
                         if sources.len() >= MAX_SOURCES || started.elapsed() >= deadline {
                             break;
+                        }
+                        // 域名策略逐条生效（§9.3「黑名单强制」）：抓正文默认关闭时
+                        // 走的不是 web_fetch，因此候选本身必须在这里判定，
+                        // 否则黑名单域名会以「检索摘要」的形式混进来源列表。
+                        match self.policy().host_verdict(&hit.url) {
+                            HostVerdict::Allowed => {}
+                            verdict => {
+                                let host = source_grade::host_of(&hit.url)
+                                    .unwrap_or_else(|| hit.url.clone());
+                                dropped.push(DroppedSource {
+                                    url: hit.url.clone(),
+                                    host,
+                                    reason: match verdict {
+                                        HostVerdict::DeniedByBlacklist => "denylist".to_string(),
+                                        _ => "notAllowed".to_string(),
+                                    },
+                                });
+                                continue;
+                            }
                         }
                         let index = assign_sub_question(&hit.title, &hit.snippet, &plan.sub_questions);
                         let question_id = plan.sub_questions[index].id.clone();
@@ -446,6 +467,18 @@ impl ResearchService {
                             "；丢弃疑似注入页面 {web_injected} 个（网页内容是数据，不是指令）"
                         ));
                     }
+                    if !dropped.is_empty() {
+                        let blacklisted = dropped
+                            .iter()
+                            .filter(|item| item.reason == "denylist")
+                            .count();
+                        web_note.push_str(&format!(
+                            "；丢弃域名策略命中的来源 {} 个（黑名单 {blacklisted} 个 / 不在白名单 {} 个）",
+                            dropped.len(),
+                            dropped.len() - blacklisted
+                        ));
+                    }
+                    session.dropped_sources = dropped;
                 }
             }
         }
@@ -1452,6 +1485,30 @@ fn collect_warnings(
         .sources
         .iter()
         .any(|source| source.origin == SourceOrigin::Web);
+    if !session.dropped_sources.is_empty() {
+        let blacklisted = session
+            .dropped_sources
+            .iter()
+            .filter(|item| item.reason == "denylist")
+            .count();
+        let hosts: Vec<String> = session
+            .dropped_sources
+            .iter()
+            .map(|item| item.host.clone())
+            .take(3)
+            .collect();
+        warnings.push(ResearchWarning {
+            kind: WarningKind::DroppedSources,
+            message: format!(
+                "有 {} 条检索结果被域名策略丢弃（黑名单 {} 条 / 不在白名单 {} 条）：{}——它们没有进入来源列表，也不会进入结论。",
+                session.dropped_sources.len(),
+                blacklisted,
+                session.dropped_sources.len() - blacklisted,
+                hosts.join("、")
+            ),
+            references: Vec::new(),
+        });
+    }
     if network_allowed && !has_web_source {
         warnings.push(ResearchWarning {
             kind: WarningKind::ExternalNotAvailable,
