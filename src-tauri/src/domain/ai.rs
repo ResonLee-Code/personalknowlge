@@ -95,6 +95,20 @@ pub struct AiPolicy {
     pub local_model_compose: bool,
     /// 用本地模型**打分**（决策侧近似；未校准，默认关闭，仅用于与规则档 A/B）
     pub local_model_score: bool,
+    /// 在线模型：OpenAI 兼容端点的基地址（例如 `https://api.example.com/v1`）；为空 = 不启用
+    pub remote_model_base_url: Option<String>,
+    /// 在线模型名（例如 `deepseek-chat`）；为空 = 不启用
+    pub remote_model_name: Option<String>,
+    /// 用在线模型**写报告**（生成侧）
+    pub remote_model_compose: bool,
+    /// 用在线模型**打分**（决策侧近似）
+    pub remote_model_score: bool,
+    /// 在线模型是否已获授权（首次确认时间）。地址或模型名变更后会被清空，需要重新确认。
+    pub remote_model_authorized_at: Option<String>,
+    /// 是否已配置 API Key（**只回显「有没有」，不回显 Key 本身**；
+    /// Key 存在应用数据目录的 `ai-credentials.json`，不进工作区与备份）
+    #[serde(default)]
+    pub remote_model_key_set: bool,
     /// 审计日志条数上限（超出后截断最旧的记录）
     pub audit_max_entries: u32,
 }
@@ -114,6 +128,12 @@ impl Default for AiPolicy {
             local_model_name: None,
             local_model_compose: false,
             local_model_score: false,
+            remote_model_base_url: None,
+            remote_model_name: None,
+            remote_model_compose: false,
+            remote_model_score: false,
+            remote_model_authorized_at: None,
+            remote_model_key_set: false,
             audit_max_entries: 500,
         }
     }
@@ -136,10 +156,30 @@ pub struct UpdateAiPolicyInput {
     pub local_model_name: Option<String>,
     pub local_model_compose: Option<bool>,
     pub local_model_score: Option<bool>,
+    /// 在线模型（OpenAI 兼容端点）：基地址；传空字符串表示清除
+    pub remote_model_base_url: Option<String>,
+    /// 在线模型名；传空字符串表示清除
+    pub remote_model_name: Option<String>,
+    pub remote_model_compose: Option<bool>,
+    pub remote_model_score: Option<bool>,
+    /// 首次授权确认（开启某一侧开关后置 true 才会真正外发）
+    pub confirm_remote_model: Option<bool>,
+    /// API Key：**只写不读**（读路径只返回 `remote_model_key_set`）；传空串表示清除
+    pub remote_model_api_key: Option<String>,
     pub budget: Option<ResearchBudget>,
 }
 
 impl AiPolicy {
+    /// 在线模型是否配置完整（基地址与模型名都填了才算）。
+    pub fn remote_model(&self) -> Option<(&str, &str)> {
+        let base = self.remote_model_base_url.as_deref()?.trim();
+        let name = self.remote_model_name.as_deref()?.trim();
+        if base.is_empty() || name.is_empty() {
+            return None;
+        }
+        Some((base, name))
+    }
+
     /// 本地模型是否可用（地址与模型名都填了才算配置完成）。
     pub fn local_model(&self) -> Option<(&str, &str)> {
         let endpoint = self.local_model_endpoint.as_deref()?.trim();

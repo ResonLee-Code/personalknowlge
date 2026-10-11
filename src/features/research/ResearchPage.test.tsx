@@ -29,6 +29,12 @@ const enabledPolicy: AiPolicy = {
   localModelName: null,
   localModelCompose: false,
   localModelScore: false,
+  remoteModelBaseUrl: null,
+  remoteModelName: null,
+  remoteModelCompose: false,
+  remoteModelScore: false,
+  remoteModelAuthorizedAt: null,
+  remoteModelKeySet: false,
   budget: { maxSubquestions: 5, maxPages: 12, maxDurationSecs: 480 },
   auditMaxEntries: 500,
 };

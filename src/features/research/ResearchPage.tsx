@@ -596,7 +596,9 @@ export function ResearchPage() {
                       </Badge>
                     ) : null}
                     <span className="text-xs text-[var(--ink-subtle)]">
-                      生成方式 {report.composer}（未接入模型）
+                      生成方式 {report.composer}
+                      {/* 只有真的走模板时才标注「未接入模型」：模型写的报告不能顶着模板的名头 */}
+                      {report.composer === 'template.draft' ? '（未接入模型）' : '（模型生成，未经核对）'}
                     </span>
                     <span className="text-xs text-[var(--ink-subtle)]">
                       打分 {report.decisionProvider ?? 'rule'}（规则档；Jev 接入后同口径替换）
@@ -690,7 +692,9 @@ export function ResearchPage() {
                       className="mt-4 rounded-lg border border-[var(--border-subtle)] p-3 text-xs text-[var(--ink-muted)]"
                     >
                       <summary className="cursor-pointer text-[var(--ink)]">
-                        模型推测段（默认折叠，未接入模型，不是结论）
+                        模型推测段（默认折叠，
+                        {report.composer === 'template.draft' ? '未接入模型' : '由模型生成'}，
+                        不是结论）
                       </summary>
                       <pre className="mt-2 whitespace-pre-wrap font-sans">
                         {report.speculation.join('\n')}

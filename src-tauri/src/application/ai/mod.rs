@@ -11,6 +11,7 @@
 pub mod policy;
 pub mod host;
 pub mod local_model;
+pub mod remote_model;
 pub mod research;
 pub mod rule_provider;
 pub mod source_grade;
@@ -21,6 +22,7 @@ pub mod web_search;
 
 pub use policy::AiPolicyService;
 pub use local_model::OllamaModel;
+pub use remote_model::RemoteModel;
 pub use research::ResearchService;
 pub use rule_provider::RuleDecisionProvider;
 pub use template_provider::TemplateGenerativeModel;

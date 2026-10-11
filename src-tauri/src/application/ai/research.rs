@@ -21,9 +21,10 @@ use crate::application::ai::template_provider::TemplateGenerativeModel;
 use crate::application::ai::tools::AiTools;
 use crate::application::ai::rule_provider::RuleDecisionProvider;
 use crate::application::ai::local_model::OllamaModel;
+use crate::application::ai::remote_model::RemoteModel;
 use crate::application::ai::traits::{
-    DecisionCandidate, DecisionKind, DecisionModel, DecisionState, GenerationRequest,
-    GenerativeModel, RetrievalOrigin, RetrievedChunk,
+    DecisionCandidate, DecisionKind, DecisionModel, DecisionResult, DecisionState,
+    GenerationRequest, GenerativeModel, RetrievalOrigin, RetrievedChunk,
 };
 use super::web_search;
 use crate::application::context::WorkspaceContext;
@@ -207,23 +208,61 @@ impl ResearchService {
         Ok(persisted)
     }
 
-    /// 本次打分该用哪个决策模型：策略里显式开启本地模型打分且地址/模型名齐全时用它，
-    /// 否则用注入的默认模型（规则档）。Jev 接入时同样只改这里。
-    fn decision_model(&self) -> Arc<dyn DecisionModel> {
+    /// 本次打分可用的决策模型，**按优先级排队**（§9.6 的三档降级链）：
+    ///
+    /// ① 在线模型——前提是这一侧开关打开、配置完整、并且**过了授权闸门**
+    ///    （没授权就根本不构造它，笔记片段也就永远不会离开本机）；
+    /// ② 本地模型——装了 Ollama 且开关打开；
+    /// ③ 注入的默认模型（规则档，永远可用）。
+    ///
+    /// 「本地机器跑不动模型」是常态（应用是本地软件、跨平台部署），所以在线这一档必须存在；
+    /// 但它**永远排在闸门之后**，不是自动生效的。
+    fn decision_candidates(&self) -> Vec<Arc<dyn DecisionModel>> {
         let policy = self.ctx.settings().ai;
-        if policy.local_model_score {
-            // 走服务层：读取时再校验一次地址（只允许本机），不只依赖写入时的规范化
-            if let Some((endpoint, model)) = self.policy().local_model() {
-                return Arc::new(OllamaModel::new(&endpoint, &model));
+        let service = self.policy();
+        let mut candidates: Vec<Arc<dyn DecisionModel>> = Vec::new();
+        if policy.remote_model_score && service.ensure_remote_model_allowed("research_score").is_ok() {
+            if let Some((base, model, key)) = service.remote_model() {
+                candidates.push(Arc::new(RemoteModel::new(&base, &model, &key)));
             }
         }
-        Arc::clone(&self.decision)
+        if policy.local_model_score {
+            // 走服务层：读取时再校验一次地址（只允许本机），不只依赖写入时的规范化
+            if let Some((endpoint, model)) = service.local_model() {
+                candidates.push(Arc::new(OllamaModel::new(&endpoint, &model)));
+            }
+        }
+        candidates.push(Arc::clone(&self.decision));
+        candidates
+    }
+
+    /// 生成侧可用的模型，同样**按优先级排队**：在线（已授权）→ 本地 → 模板实现（调用方兜底）。
+    ///
+    /// 与打分侧同一套闸门口径：在线这一档没配好或没授权时**根本不构造**，
+    /// 所以「没有授权 → 一个字节都不会外发」是靠结构保证的，不是靠调用时记得判断。
+    fn composer_candidates(&self) -> Vec<Arc<dyn GenerativeModel>> {
+        let policy = self.ctx.settings().ai;
+        let service = self.policy();
+        let mut candidates: Vec<Arc<dyn GenerativeModel>> = Vec::new();
+        if policy.remote_model_compose
+            && service.ensure_remote_model_allowed("research_compose").is_ok()
+        {
+            if let Some((base, model, key)) = service.remote_model() {
+                candidates.push(Arc::new(RemoteModel::new(&base, &model, &key)));
+            }
+        }
+        if policy.local_model_compose {
+            if let Some((endpoint, model)) = service.local_model() {
+                candidates.push(Arc::new(OllamaModel::new(&endpoint, &model)));
+            }
+        }
+        candidates
     }
 
     /// 用决策层给来源打可信度分（一次调用，批量打分）。
     ///
-    /// 返回**实际生效的** provider 标识：本地模型出错时自动降级到默认（规则档），
-    /// 并把降级原因写进审计与报告，绝不让研究流程卡住。
+    /// 返回**实际生效的** provider 标识：排在前面的一档出错（没装模型 / 超时 / 输出不合规）就
+    /// 自动降到下一档，并把降级原因写进审计与报告，绝不让研究流程卡住。
     fn score_sources(&self, topic: &str, sources: &mut [ResearchSource]) -> (String, Option<String>) {
         if sources.is_empty() {
             return (self.decision.id().to_string(), None);
@@ -249,22 +288,30 @@ impl ResearchService {
                 })
                 .collect(),
         };
-        let model = self.decision_model();
-        let mut provider = model.id().to_string();
+        let candidates = self.decision_candidates();
+        let mut provider = self.decision.id().to_string();
+        let mut scores: Option<Vec<DecisionResult>> = None;
         let mut fallback_note = None;
-        // 本地模型不可用（没装 / 没 pull / 超时 / 输出不合规）→ 退回默认模型，流程不中断
-        let scores = match model.decide(DecisionKind::Relevance, &state) {
-            Ok(results) => Some(results),
-            Err(error) => {
-                fallback_note = Some(format!(
-                    "本地模型打分失败（{}），已退回 {}",
-                    error.message,
-                    self.decision.id()
-                ));
-                provider = self.decision.id().to_string();
-                self.decision.decide(DecisionKind::Relevance, &state).ok()
+        // 从高到低试：某一档不可用（没装 / 没 pull / 超时 / 输出不合规）就换下一档，流程不中断
+        for (index, model) in candidates.iter().enumerate() {
+            match model.decide(DecisionKind::Relevance, &state) {
+                Ok(results) => {
+                    provider = model.id().to_string();
+                    scores = Some(results);
+                    break;
+                }
+                Err(error) => {
+                    if index + 1 < candidates.len() {
+                        fallback_note = Some(format!(
+                            "{} 打分失败（{}），已退回 {}",
+                            model.id(),
+                            error.message,
+                            candidates[index + 1].id()
+                        ));
+                    }
+                }
             }
-        };
+        }
         for source in sources.iter_mut() {
             let key = key_of(source);
             let model_score = scores.as_ref().and_then(|results| {
@@ -846,8 +893,8 @@ impl ResearchService {
             .clone()
             .ok_or_else(|| AppError::internal("会话缺少验证结果。"))?;
 
-        // 生成侧：开了本地模型就用它写推测段，否则用模板实现（文本自带「未接模型」标注）。
-        // 本地模型失败时**自动降级**到模板，并把原因写进审计与警告块。
+        // 生成侧：在线（已授权）→ 本地 → 模板实现（文本自带「未接模型」标注）。
+        // 前面一档失败就**自动降级**到下一档，并把原因写进审计与警告块。
         let template = TemplateGenerativeModel::new();
         let evidence: Vec<RetrievedChunk> = session
             .sources
@@ -865,25 +912,45 @@ impl ResearchService {
                 origin: RetrievalOrigin::Bm25,
             })
             .collect();
+        let composers: Vec<Arc<dyn GenerativeModel>> = self.composer_candidates();
+        let mut model_fallback: Option<String> = None;
+        let mut response = None;
+        for (index, model) in composers.iter().enumerate() {
+            // 外发标记只对在线这一档为真：本地模型不需要，模板更不需要
+            let request = GenerationRequest {
+                prompt: format!("为课题「{}」写推测段", plan.topic),
+                evidence: evidence.clone(),
+                max_tokens: Some(512),
+                allow_remote: !model.is_local(),
+            };
+            match model.complete(&request) {
+                Ok(done) => {
+                    response = Some(done);
+                    break;
+                }
+                Err(error) => {
+                    model_fallback = Some(format!(
+                        "{} 生成失败（{}），本次退回{}",
+                        model.id(),
+                        error.message,
+                        if index + 1 < composers.len() {
+                            composers[index + 1].id()
+                        } else {
+                            "模板实现"
+                        }
+                    ));
+                }
+            }
+        }
         let request = GenerationRequest {
             prompt: format!("为课题「{}」写推测段", plan.topic),
             evidence,
             max_tokens: Some(512),
             allow_remote: false,
         };
-        let composer: Option<Arc<dyn GenerativeModel>> = composer_model(&self.policy());
-        let mut model_fallback: Option<String> = None;
-        let response = match composer.as_ref() {
-            Some(model) => match model.complete(&request) {
-                Ok(response) => response,
-                Err(error) => {
-                    model_fallback = Some(format!(
-                        "本地模型生成失败（{}），本次已退回模板实现",
-                        error.message
-                    ));
-                    template.complete(&request)?
-                }
-            },
+        // 模型档全部不可用（或压根没配）时用模板实现——**永远有产出**，不假装是模型写的
+        let response = match response {
+            Some(done) => done,
             None => template.complete(&request)?,
         };
         if let Some(note) = &model_fallback {
@@ -910,7 +977,8 @@ impl ResearchService {
             &session,
             &report,
             policy.network == NetworkMode::AllowNetwork,
-            composer_label.starts_with("local.ollama"),
+            // 「是谁写的」以实际生效的 composer 为准：模板之外（本地或在线模型）都算模型生成
+            composer_label != TemplateGenerativeModel::new().id(),
         );
         if let Some(note) = model_fallback {
             report.warnings.push(ResearchWarning {
@@ -1379,18 +1447,6 @@ pub fn confidence_label(value: f32) -> &'static str {
     }
 }
 
-/// 生成侧模型：策略里开启「用本地模型写报告」且地址/模型名齐全时返回它，否则 `None`（用模板）。
-///
-/// 地址同样经服务层校验（读取时再确认一次「只连本机」）。
-fn composer_model(service: &AiPolicyService) -> Option<Arc<dyn GenerativeModel>> {
-    let policy = service.policy();
-    if !policy.local_model_compose {
-        return None;
-    }
-    let (endpoint, model) = service.local_model()?;
-    Some(Arc::new(OllamaModel::new(&endpoint, &model)))
-}
-
 /// 校验并归一化课题（过于宽泛时要求补充范围）。
 pub fn validate_topic(topic: &str) -> Result<String> {
     let trimmed = topic.trim();
@@ -1697,12 +1753,10 @@ fn collect_warnings(
         });
     }
     warnings.push(if model_generated {
+        // 「在线」这一档必须**明说内容已离开本机**：这是隐私上唯一不能含糊的地方
         ResearchWarning {
             kind: WarningKind::ModelGenerated,
-            message: format!(
-                "推测段由**本地模型** `{}` 生成（未经人工核对，也未经交叉验证）：结论段仍是来源原句摘录。",
-                report.composer
-            ),
+            message: model_generated_message(&report.composer),
             references: Vec::new(),
         }
     } else {
@@ -1717,13 +1771,37 @@ fn collect_warnings(
     warnings
 }
 
+/// 「模型生成」的人读说明：在线模型必须**明说材料已经离开本机**（本地模型则只提示未核对）。
+///
+/// 两种模型对隐私的含义完全不同（一个只在本机算，一个把片段发到了服务商），
+/// 报告里不能写成同一句话。
+pub(crate) fn model_generated_message(composer: &str) -> String {
+    if composer.starts_with("remote.") {
+        format!(
+            "推测段由**在线模型** `{composer}` 生成：材料片段已离开本机、可能被服务商留存；\
+             内容未经人工核对，也未经交叉验证——结论段仍是来源原句摘录。"
+        )
+    } else {
+        format!(
+            "推测段由**本地模型** `{composer}` 生成（未经人工核对，也未经交叉验证）：\
+             结论段仍是来源原句摘录。"
+        )
+    }
+}
+
 /// 渲染固定六段的 Markdown（顺序不可变，便于测试与用户形成预期）。
 fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &ResearchReport) -> String {
     let mut out = String::new();
     out.push_str(&format!("# 调研报告：{}\n\n", plan.topic));
+    // 只有真的没接模型时才写「未接入模型」——不能让一份模型写的报告顶着模板的名头
+    let composer_note = if report.composer == TemplateGenerativeModel::new().id() {
+        "（未接入模型）"
+    } else {
+        ""
+    };
     out.push_str(&format!(
-        "> **资料截至 {}** · 生成方式 `{}`（未接入模型） · 打分 `{}`\n",
-        report.data_cutoff, report.composer, report.decision_provider
+        "> **资料截至 {}** · 生成方式 `{}`{} · 打分 `{}`\n",
+        report.data_cutoff, report.composer, composer_note, report.decision_provider
     ));
     out.push_str(&format!(
         "> 会话 `{}` · 子问题 {} 个 · 来源 {} 条\n\n",
@@ -1904,7 +1982,7 @@ fn normalize_title_key(title: &str) -> String {
 
 /// 落库正文：提案正文 +（可选）附录形式的「模型推测」段。
 ///
-/// 六段报告结构不变；推测段只在用户显式勾选时追加，且作为**附录**、明确标注未接模型。
+/// 六段报告结构不变；推测段只在用户显式勾选时追加，且作为**附录**、明确标注是谁生成的。
 fn write_body(
     proposal: &ResearchProposal,
     session: &ResearchSession,
@@ -1920,9 +1998,21 @@ fn write_body(
     if report.speculation.is_empty() {
         return body;
     }
-    body.push_str(
-        "\n\n## 附：模型推测（未验证）\n\n> 以下内容由模板实现生成（**未接入模型**），不是结论，仅供参考。\n\n",
-    );
+    // 附录里的来源必须与报告主体一致：模板就说模板，模型就说清是本地还是**在线**
+    let origin = if report.composer == TemplateGenerativeModel::new().id() {
+        "以下内容由**模板实现**生成（未接入模型），不是结论，仅供参考。".to_string()
+    } else if report.composer.starts_with("remote.") {
+        format!(
+            "以下内容由**在线模型** `{}` 生成（材料片段已离开本机、可能被服务商留存），不是结论，仅供参考。",
+            report.composer
+        )
+    } else {
+        format!(
+            "以下内容由**本地模型** `{}` 生成（未经人工核对），不是结论，仅供参考。",
+            report.composer
+        )
+    };
+    body.push_str(&format!("\n\n## 附：模型推测（未验证）\n\n> {origin}\n\n"));
     for line in &report.speculation {
         body.push_str(line);
         body.push('\n');

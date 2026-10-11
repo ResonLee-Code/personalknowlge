@@ -352,6 +352,7 @@ impl WorkspaceService {
             storage,
             settings,
             Arc::clone(&self.app.events),
+            self.app.data_dir.clone(),
         ))
     }
 

@@ -136,7 +136,10 @@ impl DecisionModel for OllamaModel {
 }
 
 /// 生成侧提示词：沿用 §9.6 的分工（模型只写文字，不做决策），并要求可引用的写法。
-fn build_generation_prompt(request: &GenerationRequest) -> String {
+///
+/// 本地与在线模型**共用同一份提示词**：否则「换模型后报告口径变了」会变成
+/// 一件说不清的事（同一份材料，两个模型两套规则）。
+pub(crate) fn build_generation_prompt(request: &GenerationRequest) -> String {
     let mut prompt = String::from(
         "你在一个「本地优先」的个人知识库里撰写调研材料。要求：\n\
          1) 只根据给定材料说话，不要编造事实或来源；\n\
@@ -168,7 +171,7 @@ fn build_generation_prompt(request: &GenerationRequest) -> String {
 }
 
 /// 决策侧提示词（近似 Jev 的类型化决策，未校准——界面必须如实标注）。
-fn build_decision_prompt(kind: DecisionKind, state: &DecisionState) -> String {
+pub(crate) fn build_decision_prompt(kind: DecisionKind, state: &DecisionState) -> String {
     let mut prompt = format!(
         "你是检索结果的判定器。判定类型：{kind:?}。\n\
          用户问题：{}\n\n候选：\n",

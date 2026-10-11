@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { backupService } from '@/services/backupService';
+import { aiService } from '@/services/aiService';
 import { clipService } from '@/services/clipService';
 import { linkService } from '@/services/linkService';
 import { graphService } from '@/services/graphService';
@@ -810,6 +811,70 @@ describe('浏览器预览后端 · 列表/检索的边界夹取（与 Rust 对�
 // 预览模式没有真实工作区：备份 **不能伪造成功**。以前 `backup_create` 会返回一个假路径、
 // 假体积，`backup_validate` 恒为 `valid: true`，界面显示「备份完成」——
 // 用户会以为盘上真有一个备份包。与导出 / 恢复同口径：明确说「请到桌面应用里做」。
+// 在线模型的地址规范化与授权口径必须与 Rust 端 `normalize_remote_base_url` / `apply_policy` 同规则：
+// 预览里能配、装完配不了（或反过来）是比「不能用」更糟的体验。
+describe('浏览器预览后端 · AI 策略中的在线模型（与 Rust 对齐）', () => {
+  it('只接受 https 的公网域名（本机可 localhost），裸 IP 与数字写法一律视为未配置', async () => {
+    await workspaceService.create('在线模型库', '/tmp/mock-ai');
+
+    for (const accepted of [
+      'https://api.example.com/v1',
+      'https://api.deepseek.com/v1/',
+      'http://localhost:1234/v1',
+    ]) {
+      const policy = await aiService.setPolicy({ remoteModelBaseUrl: accepted });
+      expect(policy.remoteModelBaseUrl).toBe(accepted.replace(/\/+$/, ''));
+    }
+
+    for (const rejected of [
+      'http://api.example.com/v1',
+      'https://10.0.0.5/v1',
+      'http://127.0.0.1:11434/v1',
+      'https://2130706433/v1',
+      'https://intranet-api/v1',
+      'https://user:pass@api.example.com/v1',
+    ]) {
+      const policy = await aiService.setPolicy({ remoteModelBaseUrl: rejected });
+      expect(policy.remoteModelBaseUrl).toBeNull();
+    }
+  });
+
+  it('换地址或模型名会让授权作废；确认后才写授权时间戳', async () => {
+    await workspaceService.create('在线模型授权库', '/tmp/mock-ai-auth');
+
+    // 配置没填全时，确认也不该留下「已授权」的假状态
+    let policy = await aiService.setPolicy({
+      remoteModelBaseUrl: 'https://api.example.com/v1',
+      confirmRemoteModel: true,
+    });
+    expect(policy.remoteModelAuthorizedAt ?? null).toBeNull();
+
+    policy = await aiService.setPolicy({
+      remoteModelName: 'deepseek-chat',
+      remoteModelCompose: true,
+      confirmRemoteModel: true,
+    });
+    expect(policy.remoteModelAuthorizedAt).not.toBeNull();
+    expect(policy.remoteModelCompose).toBe(true);
+
+    // 换地址 → 授权作废（开关仍开着，但不授权就不外发）
+    policy = await aiService.setPolicy({ remoteModelBaseUrl: 'https://other.example.com/v1' });
+    expect(policy.remoteModelAuthorizedAt ?? null).toBeNull();
+    expect(policy.remoteModelCompose).toBe(true);
+  });
+
+  it('API Key 只回显「配没配」，预览端不落盘 Key', async () => {
+    await workspaceService.create('在线模型 Key 库', '/tmp/mock-ai-key');
+
+    let policy = await aiService.setPolicy({ remoteModelApiKey: 'sk-secret-value' });
+    expect(policy.remoteModelKeySet).toBe(true);
+    expect(JSON.stringify(policy)).not.toContain('sk-secret-value');
+
+    policy = await aiService.setPolicy({ remoteModelApiKey: '' });
+    expect(policy.remoteModelKeySet).toBe(false);
+  });
+});
+
 describe('浏览器预览后端 · 备份不支持时如实报错', () => {
   it('创建 / 校验备份都返回「请到桌面应用」而不是伪造成功', async () => {
     await workspaceService.create('备份预览库', '/tmp/mock-backup');

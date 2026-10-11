@@ -187,6 +187,12 @@ const defaultAiPolicy: AiPolicy = {
   localModelName: null,
   localModelCompose: false,
   localModelScore: false,
+  remoteModelBaseUrl: null,
+  remoteModelName: null,
+  remoteModelCompose: false,
+  remoteModelScore: false,
+  remoteModelAuthorizedAt: null,
+  remoteModelKeySet: false,
   auditMaxEntries: 500,
 };
 
@@ -358,6 +364,41 @@ function toDetail(note: Note): NoteDetail {
       noteCount: 1,
     })),
   };
+}
+
+/**
+ * 在线模型基地址规范化（与 Rust 端 `normalize_remote_base_url` 同规则）。
+ *
+ * 默认只接受 https 的公网域名；本机（localhost）可放宽到 http。
+ * 裸 IP、数字写法（十进制/十六进制）、单标签主机名、带 userinfo 的地址一律视为未配置——
+ * 预览模式必须与桌面端同规则，否则「预览里能用、装完用不了」比不能用更糟。
+ */
+function normalizeRemoteBaseUrl(value: string): string | null {
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (trimmed.length === 0) return null;
+  const lowered = trimmed.toLowerCase();
+  const scheme = lowered.startsWith('https://') ? 'https' : lowered.startsWith('http://') ? 'http' : null;
+  if (!scheme) return null;
+  const rest = lowered.slice(scheme.length + 3);
+  const authority = rest.split(/[/?#]/)[0]!;
+  if (authority.includes('@')) return null;
+  const host = authority
+    .replace(/^\[/, '')
+    .split(']')[0]!
+    .split(':')[0]!
+    .replace(/^www\./, '');
+  if (host.length === 0) return null;
+  const labels = host.split('.');
+  const ipLiteral =
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(host) ||
+    host.includes(':') ||
+    /^[0-9.]+$/.test(host);
+  const numericTld = /^[0-9]+$/.test(labels[labels.length - 1]!);
+  if (ipLiteral || numericTld) return null;
+  const loopback = host === 'localhost';
+  if (labels.length < 2 && !loopback) return null;
+  if (scheme === 'http' && !loopback) return null;
+  return trimmed;
 }
 
 /** 域名规范化（与 Rust 端 `normalize_domains` 一致）。 */
@@ -2531,6 +2572,27 @@ export async function handleMockInvoke(
       }
       if (typeof input.localModelCompose === 'boolean') next.localModelCompose = input.localModelCompose;
       if (typeof input.localModelScore === 'boolean') next.localModelScore = input.localModelScore;
+      if (input.remoteModelBaseUrl !== undefined) {
+        const endpoint = normalizeRemoteBaseUrl(input.remoteModelBaseUrl ?? '');
+        // 地址变更 = 换了收件人：旧授权立刻作废（与后端 apply_policy 同规则）
+        if (endpoint !== next.remoteModelBaseUrl) next.remoteModelAuthorizedAt = null;
+        next.remoteModelBaseUrl = endpoint;
+      }
+      if (input.remoteModelName !== undefined) {
+        const name = (input.remoteModelName ?? '').trim();
+        const resolved = name.length > 0 ? name : null;
+        if (resolved !== next.remoteModelName) next.remoteModelAuthorizedAt = null;
+        next.remoteModelName = resolved;
+      }
+      if (typeof input.remoteModelCompose === 'boolean') next.remoteModelCompose = input.remoteModelCompose;
+      if (typeof input.remoteModelScore === 'boolean') next.remoteModelScore = input.remoteModelScore;
+      if (input.confirmRemoteModel === true && next.remoteModelBaseUrl && next.remoteModelName) {
+        next.remoteModelAuthorizedAt = now();
+      }
+      if (input.remoteModelApiKey !== undefined) {
+        // 只回显「配没配」；预览模式不落盘 Key（真机上它写在应用数据目录，不进工作区）
+        next.remoteModelKeySet = (input.remoteModelApiKey ?? '').trim().length > 0;
+      }
       if (input.budget) {
         next.budget = {
           maxSubquestions: Math.min(10, Math.max(1, Math.round(input.budget.maxSubquestions))),

@@ -32,6 +32,11 @@ export function AiSettingsPanel() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [denylistDraft, setDenylistDraft] = useState('');
   const [allowlistDraft, setAllowlistDraft] = useState('');
+  /** API Key 是「只写不读」的：输入框只在本次编辑期间存在，保存后立刻清空 */
+  const [remoteKeyDraft, setRemoteKeyDraft] = useState('');
+  const [remoteConfirmOpen, setRemoteConfirmOpen] = useState(false);
+  /** 触发授权对话框的那个开关：用户确认后要把它一起打开 */
+  const [pendingRemoteSwitch, setPendingRemoteSwitch] = useState<'compose' | 'score' | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   /** 读取策略；失败要**说清楚**（原来会一直显示「正在读取…」，看起来像卡住） */
@@ -230,8 +235,120 @@ export function AiSettingsPanel() {
           />
         </Row>
         <p className="text-[11px] text-[var(--ink-subtle)]">
-          只连本机地址（localhost / 127.0.0.1）；远程模型需要单独授权，本版不做。
-          两项开关都关闭时一个请求都不会发；浏览器预览模式不会真的调用本地模型。
+          只连本机地址（localhost / 127.0.0.1 / ::1）；两项开关都关闭时一个请求都不会发；
+          浏览器预览模式不会真的调用本地模型。装不上模型时用下面的「在线模型」。
+        </p>
+      </div>
+
+      {/* 在线模型：给「跑不动本地模型」的机器留的一档（本地软件、跨平台部署是常态） */}
+      <div className="space-y-2 px-3 py-2.5">
+        <div className="flex items-center justify-between">
+          <Label>在线模型（OpenAI 兼容端点，可选；默认关闭）</Label>
+          <span
+            data-testid="ai-remote-key-badge"
+            className={
+              policy.remoteModelKeySet
+                ? 'rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-600'
+                : 'rounded-full bg-[var(--surface-sunken)] px-2 py-0.5 text-[11px] text-[var(--ink-subtle)]'
+            }
+          >
+            {policy.remoteModelKeySet ? '已配置 Key' : '未配置 Key'}
+          </span>
+        </div>
+        <div className="space-y-1">
+          <Input
+            aria-label="在线模型地址"
+            data-testid="ai-remote-endpoint"
+            defaultValue={policy.remoteModelBaseUrl ?? ''}
+            placeholder="https://api.example.com/v1（必须是 https 的公网域名）"
+            onBlur={(event) =>
+              void apply({ remoteModelBaseUrl: event.target.value }, '已保存在线模型地址')
+            }
+          />
+          <Input
+            aria-label="在线模型名称"
+            data-testid="ai-remote-model"
+            defaultValue={policy.remoteModelName ?? ''}
+            placeholder="deepseek-chat（服务商提供的模型名）"
+            onBlur={(event) => void apply({ remoteModelName: event.target.value }, '已保存模型名')}
+          />
+          <div className="flex items-center gap-2">
+            <Input
+              aria-label="在线模型 API Key"
+              data-testid="ai-remote-key"
+              type="password"
+              autoComplete="off"
+              value={remoteKeyDraft}
+              placeholder="API Key（只写不读，保存后无法再查看）"
+              onChange={(event) => setRemoteKeyDraft(event.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="ai-remote-key-save"
+              disabled={busy || remoteKeyDraft.trim().length === 0}
+              onClick={() => {
+                const key = remoteKeyDraft;
+                setRemoteKeyDraft('');
+                void apply({ remoteModelApiKey: key }, '已保存 API Key（存储在本机应用数据目录）');
+              }}
+            >
+              保存
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="ai-remote-key-clear"
+              disabled={busy || !policy.remoteModelKeySet}
+              onClick={() => {
+                setRemoteKeyDraft('');
+                void apply({ remoteModelApiKey: '' }, '已清除 API Key');
+              }}
+            >
+              清除
+            </Button>
+          </div>
+        </div>
+        <Row
+          label="用在线模型写报告"
+          hint="材料片段会离开本机；失败自动降级到本地模型或模板实现"
+        >
+          <Switch
+            data-testid="ai-remote-compose"
+            checked={policy.remoteModelCompose}
+            onCheckedChange={(checked) => {
+              if (checked && !policy.remoteModelAuthorizedAt) {
+                setPendingRemoteSwitch('compose');
+                setRemoteConfirmOpen(true);
+                return;
+              }
+              void apply({ remoteModelCompose: checked });
+            }}
+          />
+        </Row>
+        <Row label="用在线模型打分" hint="与规则档 A/B 用；同样只在授权后外发">
+          <Switch
+            data-testid="ai-remote-score"
+            checked={policy.remoteModelScore}
+            onCheckedChange={(checked) => {
+              if (checked && !policy.remoteModelAuthorizedAt) {
+                setPendingRemoteSwitch('score');
+                setRemoteConfirmOpen(true);
+                return;
+              }
+              void apply({ remoteModelScore: checked });
+            }}
+          />
+        </Row>
+        <p data-testid="ai-remote-authorized" className="text-[11px] text-[var(--ink-subtle)]">
+          {policy.remoteModelAuthorizedAt
+            ? `已授权外发（${formatDateTime(policy.remoteModelAuthorizedAt)}）；换地址或模型名后需要重新确认。`
+            : '尚未授权：这一档不会向任何地址发送内容。'}
+        </p>
+        <p className="text-[11px] text-[var(--ink-subtle)]">
+          给「本机跑不动本地模型」的机器留的一档：地址只接受 https 的公网域名（本机可写
+          localhost），裸 IP 与非加密地址会被拒绝。Key 存在本机应用数据目录（不进工作区、
+          不进备份）；本节的外发由独立授权控制，与上面的「联网检索」档位互不影响。
         </p>
       </div>
 
@@ -331,6 +448,72 @@ export function AiSettingsPanel() {
           </ul>
         )}
       </div>
+
+      <Dialog
+        open={remoteConfirmOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setRemoteConfirmOpen(true);
+            return;
+          }
+          setRemoteConfirmOpen(false);
+          setPendingRemoteSwitch(null);
+        }}
+      >
+        <DialogContent
+          className="w-[min(560px,calc(100vw-2rem))]"
+          data-testid="ai-remote-confirm"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4 text-[var(--brand)]" />
+              启用「在线模型」
+            </DialogTitle>
+            <DialogDescription>
+              开启后，研究助手在生成报告与打分时，会把该步骤用到的材料片段发送到你填写的地址
+              （不会上传整篇知识库）。内容会离开本机，可能被服务商留存或按其政策使用；
+              请事先确认该服务商的条款与所在地法规要求。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5 text-xs text-[var(--ink-muted)]">
+            <p>· 需要先填好基地址、模型名与 API Key，否则这一档不会生效；</p>
+            <p>· 换地址或模型名后授权自动作废，需要重新确认一次；</p>
+            <p>· 每次外发都会记入审计（不含正文），可在下方「最近行为」里查看；</p>
+            <p>· 随时可以关闭这两个开关，或清除 API Key。</p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setRemoteConfirmOpen(false);
+                setPendingRemoteSwitch(null);
+                toast.info('已取消：在线模型保持关闭');
+              }}
+            >
+              暂不启用
+            </Button>
+            <Button
+              data-testid="ai-remote-confirm-ok"
+              disabled={busy}
+              onClick={() => {
+                const target = pendingRemoteSwitch;
+                setRemoteConfirmOpen(false);
+                setPendingRemoteSwitch(null);
+                void apply(
+                  {
+                    confirmRemoteModel: true,
+                    ...(target === 'score' ? { remoteModelScore: true } : {}),
+                    ...(target === 'compose' ? { remoteModelCompose: true } : {}),
+                  },
+                  '已授权在线模型外发（换地址或模型名后需重新确认）',
+                );
+              }}
+            >
+              确认启用
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirmOpen} onOpenChange={(open) => setConfirmOpen(!open ? false : true)}>
         <DialogContent className="w-[min(560px,calc(100vw-2rem))]" data-testid="ai-network-confirm">

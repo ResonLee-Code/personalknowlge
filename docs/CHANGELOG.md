@@ -132,6 +132,39 @@
   活跃状态下批量「删除」走回收站（可撤销）；
 - 表格自带全选 / 单选，点击标题直接打开对应笔记。
 
+### 在线模型（OpenAI 兼容）：给「跑不动本地模型」的机器留的一档（2026-10-11）
+
+前提是用户提的那句实话：**应用是本地软件、跨平台部署，但不是每台机器都跑得动本地模型**
+（没有独显、内存不够、公司机器不允许装 Ollama）。于是一代的模型档位做成三层降级链：
+**模板实现（永远可用）→ 本地模型 → 在线模型**，调用点只有两处
+（`decision_candidates()` 打分 / `composer_candidates()` 写报告），任何一档失败自动降级，
+研究流程不会因为模型不可用而卡住。
+
+- **在线 provider**（`application/ai/remote_model.rs`）：OpenAI 兼容端点 `POST {base}/chat/completions`，
+  生成与打分共用一份提示词（与本地模型**同一份**，避免「换模型后报告口径变了」）；
+  失败信息只带主机名与状态码，**绝不回显 API Key**；
+- **独立授权闸门**：`ensure_remote_model_allowed`（总开关 → 配置完整 → 地址合法 → 已授权），
+  未授权时**根本不构造 provider**，所以「未授权 = 一个字节都不外发」是结构保证；
+  拒绝同样记 `outbound=false` 审计（`REMOTE_MODEL_UNCONFIGURED` / `REMOTE_MODEL_UNCONFIRMED`）；
+- **换收件人即作废**：基地址或模型名变更会清空 `remoteModelAuthorizedAt`，需要重新确认一次
+  （与「切联网档位清确认」同一规则）；
+- **地址两层校验**：写入侧 `normalize_remote_base_url` 只放行 `https://` 公网域名
+  （本机可写 `localhost`），拒绝裸 IP、十进制/十六进制写法（`2130706433`）、单标签主机名、
+  带 userinfo 的地址；读取侧在构造 provider 之前再校验一次，直接改库也发不出去；
+- **API Key 只写不读**：新增 `infrastructure/credential_store.rs`，Key 存应用数据目录的
+  `ai-credentials.json`（Unix `0600`）——**不进工作区**（否则会被备份包与导出的 Markdown 带走），
+  IPC 响应 / 审计 / 日志里只回显 `remoteModelKeySet` 布尔值，输入框保存后立即清空；
+  清除 Key 会连文件一起删掉；
+- **报告如实标注**：用在线模型生成的报告与附录写明「在线模型 + 材料片段已离开本机、
+  可能被服务商留存」，不再与本地模型共用同一句「模型生成」；
+  报告的 Markdown 头与界面也不再对模型写的报告标注「未接入模型」；
+- **设置页**新增「在线模型（OpenAI 兼容端点）」区块：地址 / 模型名 / API Key（保存、清除、
+  已配置徽标）/ 两个开关 / 授权状态行 / 首次授权说明对话框；
+  预览端（`src/services/mock.ts`）按同一套规则实现地址规范化与授权作废，避免「预览里能配、装完配不了」；
+- 测试：`src-tauri/tests/remote_model_flow.rs` 7 个集成测试（授权后真的调用且请求头带 Key、
+  未授权零请求且拒绝有审计、在线失败降级到本地模型再降到模板、换地址后停止外发、
+  改库塞裸 IP 也发不出去、Key 不进工作区 / 不进响应 / 不进审计）+ 策略层与 provider 单测。
+
 ### AI 闸门与审计（阶段 D1 前置 A1，2026-10-11）
 
 按 [AI_ARCHITECTURE_PLAN.md](./AI_ARCHITECTURE_PLAN.md) §6 / §9.7 落地**策略闸门层**（不接任何模型、

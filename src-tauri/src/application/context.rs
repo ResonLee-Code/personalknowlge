@@ -3,6 +3,7 @@
 //! 保存一个已打开工作区的全部依赖：数据库、文件存储、监听器、事件与设置。
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::core::error::{AppError, ErrorCode, Result};
@@ -27,6 +28,9 @@ use super::lookup::CategoryLookup;
 
 pub struct WorkspaceContext {
     pub workspace: Workspace,
+    /// 应用数据目录（在工作区之外）：只放**不能进工作区**的东西——
+    /// 目前是在线模型的 API Key（放进工作区就会被备份包、导出的 Markdown 带走）。
+    pub data_dir: PathBuf,
     pub paths: WorkspacePaths,
     pub db: Arc<Db>,
     pub storage: Arc<MarkdownStorage>,
@@ -45,9 +49,11 @@ impl WorkspaceContext {
         storage: Arc<MarkdownStorage>,
         settings: AppSettings,
         events: Arc<dyn EventSink>,
+        data_dir: PathBuf,
     ) -> Arc<Self> {
         Arc::new(Self {
             workspace,
+            data_dir,
             paths,
             db,
             storage,

@@ -21,6 +21,12 @@ const conservative: AiPolicy = {
   localModelName: null,
   localModelCompose: false,
   localModelScore: false,
+  remoteModelBaseUrl: null,
+  remoteModelName: null,
+  remoteModelCompose: false,
+  remoteModelScore: false,
+  remoteModelAuthorizedAt: null,
+  remoteModelKeySet: false,
   budget: { maxSubquestions: 5, maxPages: 12, maxDurationSecs: 480 },
   auditMaxEntries: 500,
 };
@@ -174,6 +180,143 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ localModelCompose: true }));
     await userEvent.click(screen.getByTestId('ai-local-score'));
     await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ localModelScore: true }));
+  });
+
+  it('在线模型默认不启用：地址/模型名为空、两个开关关着、Key 未配置', async () => {
+    render(<AiSettingsPanel />);
+
+    expect(await screen.findByTestId('ai-remote-endpoint')).toHaveValue('');
+    expect(screen.getByTestId('ai-remote-model')).toHaveValue('');
+    expect(screen.getByTestId('ai-remote-compose')).not.toBeChecked();
+    expect(screen.getByTestId('ai-remote-score')).not.toBeChecked();
+    expect(screen.getByTestId('ai-remote-key-badge')).toHaveTextContent('未配置 Key');
+    expect(screen.getByTestId('ai-remote-authorized')).toHaveTextContent('尚未授权');
+    // 预览/桌面同一口径：说明里讲清「本机可写 localhost」「裸 IP 会被拒绝」
+    expect(screen.getByText(/裸 IP 与非加密地址会被拒绝/)).toBeInTheDocument();
+  });
+
+  it('在线模型地址与模型名分别提交（丢失规范化由后端负责）', async () => {
+    const setPolicy = vi
+      .spyOn(aiService, 'setPolicy')
+      .mockImplementation(async (input) => ({ ...conservative, enabled: true, ...input }));
+    render(<AiSettingsPanel />);
+
+    await userEvent.type(
+      await screen.findByTestId('ai-remote-endpoint'),
+      'https://api.example.com/v1',
+    );
+    await userEvent.tab();
+    await waitFor(() =>
+      expect(setPolicy).toHaveBeenCalledWith({ remoteModelBaseUrl: 'https://api.example.com/v1' }),
+    );
+
+    await userEvent.type(screen.getByTestId('ai-remote-model'), 'deepseek-chat');
+    await userEvent.tab();
+    await waitFor(() =>
+      expect(setPolicy).toHaveBeenCalledWith({ remoteModelName: 'deepseek-chat' }),
+    );
+  });
+
+  /**
+   * API Key 是「只写不读」：输入框保存后必须立刻清空，界面只回显「已配置 / 未配置」。
+   * 如果这里把 Key 留在输入框里，截图、录屏、共享屏幕都会把它带出去。
+   */
+  it('API Key 只写不读：保存后清空输入框、只回显「已配置」', async () => {
+    const setPolicy = vi.spyOn(aiService, 'setPolicy').mockImplementation(async (input) => ({
+      ...conservative,
+      enabled: true,
+      ...input,
+      // 后端不会回显 Key，只会把 keySet 置为真
+      remoteModelApiKey: undefined,
+      remoteModelKeySet: (input.remoteModelApiKey ?? '').trim().length > 0,
+    }));
+    render(<AiSettingsPanel />);
+
+    const keyInput = await screen.findByTestId('ai-remote-key');
+    await userEvent.type(keyInput, 'sk-secret-value');
+    await userEvent.click(screen.getByTestId('ai-remote-key-save'));
+
+    await waitFor(() =>
+      expect(setPolicy).toHaveBeenCalledWith({ remoteModelApiKey: 'sk-secret-value' }),
+    );
+    expect(keyInput).toHaveValue('');
+    expect(await screen.findByTestId('ai-remote-key-badge')).toHaveTextContent('已配置 Key');
+    expect(screen.queryByDisplayValue('sk-secret-value')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('ai-remote-key-clear'));
+    await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ remoteModelApiKey: '' }));
+    expect(await screen.findByTestId('ai-remote-key-badge')).toHaveTextContent('未配置 Key');
+  });
+
+  it('打开「用在线模型写报告」先弹授权说明，确认后才提交开关', async () => {
+    const setPolicy = vi
+      .spyOn(aiService, 'setPolicy')
+      .mockImplementation(async (input) => ({
+        ...conservative,
+        enabled: true,
+        ...input,
+        // 后端在收到确认后写入授权时间戳（界面据此显示「已授权」）
+        remoteModelAuthorizedAt: input.confirmRemoteModel
+          ? '2026-10-11T10:00:00+08:00'
+          : conservative.remoteModelAuthorizedAt,
+      }));
+    render(<AiSettingsPanel />);
+
+    await userEvent.click(await screen.findByTestId('ai-remote-compose'));
+    // 未授权：只弹说明，不提交
+    expect(await screen.findByTestId('ai-remote-confirm')).toBeInTheDocument();
+    expect(setPolicy).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId('ai-remote-confirm-ok'));
+    await waitFor(() =>
+      expect(setPolicy).toHaveBeenCalledWith({
+        confirmRemoteModel: true,
+        remoteModelCompose: true,
+      }),
+    );
+    expect(await screen.findByTestId('ai-remote-compose')).toBeChecked();
+    expect(screen.getByTestId('ai-remote-authorized')).toHaveTextContent('已授权外发');
+  });
+
+  it('取消授权对话框时保持关闭，一个字段都不提交', async () => {
+    const setPolicy = vi.spyOn(aiService, 'setPolicy');
+    render(<AiSettingsPanel />);
+
+    await userEvent.click(await screen.findByTestId('ai-remote-score'));
+    await userEvent.click(await screen.findByRole('button', { name: '暂不启用' }));
+
+    expect(setPolicy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('ai-remote-score')).not.toBeChecked();
+  });
+
+  it('已授权后切换开关直接提交（不再重复弹窗）', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      remoteModelBaseUrl: 'https://api.example.com/v1',
+      remoteModelName: 'deepseek-chat',
+      remoteModelKeySet: true,
+      remoteModelAuthorizedAt: '2026-10-11T10:00:00+08:00',
+    });
+    const setPolicy = vi
+      .spyOn(aiService, 'setPolicy')
+      .mockImplementation(async (input) => ({
+        ...conservative,
+        enabled: true,
+        remoteModelBaseUrl: 'https://api.example.com/v1',
+        remoteModelName: 'deepseek-chat',
+        remoteModelKeySet: true,
+        remoteModelAuthorizedAt: '2026-10-11T10:00:00+08:00',
+        ...input,
+      }));
+    render(<AiSettingsPanel />);
+
+    expect(await screen.findByTestId('ai-remote-authorized')).toHaveTextContent('已授权外发');
+    await userEvent.click(screen.getByTestId('ai-remote-score'));
+
+    await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ remoteModelScore: true }));
+    expect(screen.queryByTestId('ai-remote-confirm')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('ai-remote-score')).toBeChecked();
   });
 
   it('读取策略失败时给出明确提示与「重试」，而不是一直显示正在读取', async () => {

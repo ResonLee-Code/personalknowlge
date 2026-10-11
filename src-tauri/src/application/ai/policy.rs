@@ -14,6 +14,7 @@ use std::sync::Arc;
 use crate::core::error::{AppError, ErrorCode, Result};
 use crate::core::time::now_iso;
 use crate::domain::ai::{AiAuditEntry, AiPolicy, NetworkMode, UpdateAiPolicyInput};
+use crate::infrastructure::credential_store;
 
 use super::host::host_of;
 use super::super::context::WorkspaceContext;
@@ -41,8 +42,13 @@ impl AiPolicyService {
     }
 
     /// 当前策略。
+    ///
+    /// 回显时补上「是否已配置 API Key」——Key 本身存在应用数据目录（`credential_store`），
+    /// **任何 IPC 响应、日志与审计里都不会出现 Key**。
     pub fn policy(&self) -> AiPolicy {
-        self.ctx.settings().ai
+        let mut policy = self.ctx.settings().ai;
+        policy.remote_model_key_set = credential_store::remote_model_key_set(&self.ctx.data_dir);
+        policy
     }
 
     /// 更新策略；`confirmNetwork = true` 时记录确认时间（用于「首次使用再确认」）。
@@ -50,7 +56,9 @@ impl AiPolicyService {
         let updated = self.ctx.update_settings(|settings| {
             apply_policy(&mut settings.ai, &input);
         })?;
-        Ok(updated.ai)
+        let mut policy = updated.ai;
+        policy.remote_model_key_set = credential_store::remote_model_key_set(&self.ctx.data_dir);
+        Ok(policy)
     }
 
     /// 闸门一：AI 总开关（关闭时所有能力直接拒绝）。
@@ -174,6 +182,46 @@ impl AiPolicyService {
         Some((normalized, model.to_string()))
     }
 
+    /// 可用的在线模型配置（基地址 + 模型名 + API Key）。
+    ///
+    /// **读的时候再校验一次地址**（纵深防御，口径与本地模型一致）：即使有人绕过写入路径
+    /// 直接改了设置库，也不会把笔记片段发到一个没被规范化过的地址上。
+    /// 三项缺一不可：缺地址/模型名 = 没配置，缺 Key = 调不动（不算「可用」）。
+    pub fn remote_model(&self) -> Option<(String, String, String)> {
+        let policy = self.ctx.settings().ai;
+        let (base, model) = policy.remote_model()?;
+        let normalized = normalize_remote_base_url(base)?;
+        let key = credential_store::remote_model_key(&self.ctx.data_dir)?;
+        Some((normalized, model.to_string(), key))
+    }
+
+    /// 闸门四：在线模型外发（总开关 + 配置完整 + 已授权）。
+    ///
+    /// **与「联网检索」档位是两件事**：档位管的是「去外面抓东西」（搜索与抓正文、按域名白黑名单
+    /// 判定）；这一条管的是「把笔记片段交给外部模型」。所以它有自己的首次授权，
+    /// 而且**基地址或模型名一变就作废**（见 `apply_policy`）——换了收件人就要重新确认。
+    ///
+    /// 每次拒绝都记 `outbound=false` 的审计：拒绝本身也必须是可追溯的。
+    pub fn ensure_remote_model_allowed(&self, capability: &str) -> Result<AiPolicy> {
+        let policy = self.ensure_enabled(capability)?;
+        if self.remote_model().is_none() {
+            self.audit(capability, false, "denied", 0, Some("REMOTE_MODEL_UNCONFIGURED"));
+            return Err(AppError::new(
+                ErrorCode::AiDisabled,
+                "在线模型未配置完整：请到「设置 → AI → 在线模型」填写基地址、模型名与 API Key。",
+            ));
+        }
+        if policy.remote_model_authorized_at.is_none() {
+            self.audit(capability, false, "denied", 0, Some("REMOTE_MODEL_UNCONFIRMED"));
+            return Err(AppError::new(
+                ErrorCode::NetworkDisabled,
+                "在线模型尚未授权：内容会离开本机，需在「设置 → AI → 在线模型」里确认一次；\
+                 换地址或模型名后要重新确认。",
+            ));
+        }
+        Ok(policy)
+    }
+
     /// 追加一条审计（失败不影响主流程，只记 debug 日志）。
     pub fn audit(
         &self,
@@ -287,6 +335,37 @@ pub fn apply_policy(policy: &mut AiPolicy, input: &UpdateAiPolicyInput) {
     if let Some(enabled) = input.local_model_score {
         policy.local_model_score = enabled;
     }
+    if let Some(base) = &input.remote_model_base_url {
+        let next = normalize_remote_base_url(base);
+        // 地址变更 = 换了个「内容会发给谁」的收件人：旧授权立即作废
+        if policy.remote_model_base_url != next {
+            policy.remote_model_authorized_at = None;
+        }
+        policy.remote_model_base_url = next;
+    }
+    if let Some(name) = &input.remote_model_name {
+        let trimmed = name.trim();
+        let next = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+        if policy.remote_model_name != next {
+            policy.remote_model_authorized_at = None;
+        }
+        policy.remote_model_name = next;
+    }
+    if let Some(enabled) = input.remote_model_compose {
+        policy.remote_model_compose = enabled;
+    }
+    if let Some(enabled) = input.remote_model_score {
+        policy.remote_model_score = enabled;
+    }
+    if input.confirm_remote_model == Some(true) && policy.remote_model().is_some() {
+        // 首次（或换地址后）授权：地址与模型名都填好才允许记时间戳，
+        // 否则会出现「授权了一个空配置」的假状态。
+        policy.remote_model_authorized_at = Some(now_iso());
+    }
     if let Some(budget) = &input.budget {
         policy.budget = budget.clamped();
     }
@@ -325,6 +404,63 @@ pub fn normalize_search_endpoint(value: &str) -> Option<String> {
         return None;
     }
     if !trimmed.contains("{query}") {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+/// 在线模型基地址规范化（OpenAI 兼容端点，例如 `https://api.example.com/v1`）。
+///
+/// 接受：
+/// - `https://` 的公网域名（含子域、可选端口与路径）；
+/// - 本机地址放宽到 `http://`（`localhost` / `127.0.0.1` / `::1`）——本地起的兼容网关（LM Studio 等）。
+///
+/// 拒绝（每一条都对应一种真实的外发风险）：
+/// - 非 http(s) 协议（`file://` 会读本机文件、`ftp://` 不是我们支持的形状）；
+/// - **裸 IP 直连**（`https://10.0.0.5/v1`、`http://127.0.0.1:8080`）：配置里写 IP 就等于
+///   把「笔记片段发给谁」交给一个容易写错、也难以在界面上复核的地址；要用本机请写 `localhost`；
+/// - **数字写法的 IP**（`https://2130706433/v1`、`https://0x7f000001/v1`、`https://foo.2130706433/v1`）：
+///   十进制 / 十六进制写法的回环地址同样指向本机或内网，而这些形状在界面上完全看不出问题；
+/// - **单标签主机名**（`https://intranet-api/v1`）：公网不可解析，实际只会指向内网；
+/// - 带 userinfo 的地址（`https://user:pass@host`）：口令会随调试输出、错误信息泄漏；
+/// - 非 https 的远程主机：默认加密，避免中间人读到笔记片段。
+pub fn normalize_remote_base_url(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    let scheme = if lowered.starts_with("https://") {
+        "https"
+    } else if lowered.starts_with("http://") {
+        "http"
+    } else {
+        return None;
+    };
+    // 先看 authority 段：`user:pass@host` 这类带凭据的地址一律不要
+    let rest = &lowered[scheme.len() + 3..];
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    if rest[..authority_end].contains('@') {
+        return None;
+    }
+    // 主机名解析与闸门/分级共用一份实现（IPv6 字面量会去掉方括号）
+    let host = host_of(trimmed)?;
+    let labels: Vec<&str> = host.split('.').collect();
+    let loopback = host == "localhost";
+    let numeric_only = host.chars().all(|ch| ch.is_ascii_digit() || ch == '.');
+    let numeric_tld = labels
+        .last()
+        .map(|label| label.chars().all(|ch| ch.is_ascii_digit()))
+        .unwrap_or(false);
+    if host.parse::<std::net::IpAddr>().is_ok() || numeric_only || numeric_tld {
+        // 裸 IP（点分 / IPv6 字面量）与各种数字写法一律拒绝：本机地址请写 localhost
+        return None;
+    }
+    if labels.len() < 2 && !loopback {
+        // 单标签主机名在公网上解析不了，实际只会落到内网（或某个编码写法）
+        return None;
+    }
+    if scheme == "http" && !loopback {
         return None;
     }
     Some(trimmed.to_string())
@@ -471,5 +607,141 @@ mod tests {
             host_of("https://docs.example.com/a/b?c=1").as_deref(),
             Some("docs.example.com")
         );
+    }
+
+    /// 在线模型的基地址是**第二个外发通道**，放行清单必须真的只放行「https 的域名」。
+    ///
+    /// 之前本地模型那条测试的教训：只断言「是/不是 IP」这种弱条件，写错了也看不出来；
+    /// 这里逐条列出接受与拒绝的具体地址。
+    #[test]
+    fn remote_base_url_accepts_https_domains_and_rejects_everything_risky() {
+        for accepted in [
+            "https://api.openai.com/v1",
+            "https://api.deepseek.com/v1/",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "https://proxy.corp.example.com:8443/v1",
+            "HTTPS://API.Example.COM/v1",
+            // 本机起的兼容网关（LM Studio / vLLM）：http 只在本机这一档放宽
+            "http://localhost:1234/v1",
+            "https://localhost:1234/v1",
+        ] {
+            assert!(
+                normalize_remote_base_url(accepted).is_some(),
+                "应当接受：{accepted}"
+            );
+        }
+        for rejected in [
+            "",
+            "   ",
+            "api.openai.com/v1",
+            "ftp://api.example.com/v1",
+            "file:///etc/passwd",
+            // 裸 IP 一律拒绝（含回环：要用本机写 localhost）
+            "https://10.0.0.5/v1",
+            "https://192.168.1.20:8080/v1",
+            "http://127.0.0.1:11434/v1",
+            "http://[::1]:1234/v1",
+            // 十进制 / 十六进制写法与单标签主机名：都是「看起来像域名、其实指向内网」的形状
+            "https://2130706433/v1",
+            "https://foo.2130706433/v1",
+            "https://0x7f000001/v1",
+            "https://intranet-api/v1",
+            // 非 https 的远程主机：默认必须加密
+            "http://api.example.com/v1",
+            // 带 userinfo：口令会随错误信息与调试输出泄漏
+            "https://user:pass@api.example.com/v1",
+            "https://token@api.example.com/v1",
+        ] {
+            assert!(
+                normalize_remote_base_url(rejected).is_none(),
+                "必须拒绝：{rejected}"
+            );
+        }
+        // 规范化：尾部斜杠去掉，其余原样保留（大小写不影响调用）
+        assert_eq!(
+            normalize_remote_base_url(" https://api.example.com/v1/// ").as_deref(),
+            Some("https://api.example.com/v1")
+        );
+    }
+
+    /// 换了地址或模型名 = 换了收件人：旧授权必须立刻作废，否则「换个地址继续外发」就是静默的。
+    #[test]
+    fn changing_remote_endpoint_or_model_revokes_the_authorization() {
+        let mut policy = AiPolicy::default();
+        apply_policy(
+            &mut policy,
+            &UpdateAiPolicyInput {
+                remote_model_base_url: Some("https://api.example.com/v1".into()),
+                remote_model_name: Some("chat-model".into()),
+                confirm_remote_model: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(policy.remote_model_authorized_at.is_some(), "配置完整 + 确认才记时间戳");
+        let authorized_at = policy.remote_model_authorized_at.clone();
+
+        // 只是重复保存同一个地址/模型名：授权不受影响（否则每次保存都要重新确认）
+        apply_policy(
+            &mut policy,
+            &UpdateAiPolicyInput {
+                remote_model_base_url: Some("https://api.example.com/v1".into()),
+                remote_model_name: Some("chat-model".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(policy.remote_model_authorized_at, authorized_at);
+
+        // 换地址 → 作废
+        apply_policy(
+            &mut policy,
+            &UpdateAiPolicyInput {
+                remote_model_base_url: Some("https://other.example.com/v1".into()),
+                ..Default::default()
+            },
+        );
+        assert!(
+            policy.remote_model_authorized_at.is_none(),
+            "换地址后必须重新确认"
+        );
+
+        // 重新授权后，换模型名同样作废
+        apply_policy(&mut policy, &UpdateAiPolicyInput { confirm_remote_model: Some(true), ..Default::default() });
+        assert!(policy.remote_model_authorized_at.is_some());
+        apply_policy(
+            &mut policy,
+            &UpdateAiPolicyInput { remote_model_name: Some("another-model".into()), ..Default::default() },
+        );
+        assert!(policy.remote_model_authorized_at.is_none(), "换模型名后必须重新确认");
+
+        // 非法地址写进去只会变成「未配置」，不会留下半截状态
+        apply_policy(
+            &mut policy,
+            &UpdateAiPolicyInput { remote_model_base_url: Some("http://evil.example.com/v1".into()), ..Default::default() },
+        );
+        assert!(policy.remote_model_base_url.is_none(), "非 https 的远程地址不得被保存");
+        assert!(policy.remote_model().is_none());
+    }
+
+    /// 确认一个**空配置**不能留下「已授权」的假状态（否则界面会显示已授权但实际没配好）。
+    #[test]
+    fn confirming_an_incomplete_remote_configuration_does_not_authorize() {
+        let mut policy = AiPolicy::default();
+        apply_policy(
+            &mut policy,
+            &UpdateAiPolicyInput { confirm_remote_model: Some(true), ..Default::default() },
+        );
+        assert!(policy.remote_model_authorized_at.is_none());
+
+        // 只有地址、没有模型名 → 仍不算配置完整
+        apply_policy(
+            &mut policy,
+            &UpdateAiPolicyInput {
+                remote_model_base_url: Some("https://api.example.com/v1".into()),
+                confirm_remote_model: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(policy.remote_model_authorized_at.is_none(), "缺模型名就不算配置完整");
+        assert!(policy.remote_model().is_none());
     }
 }

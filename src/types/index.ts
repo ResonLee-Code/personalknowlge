@@ -640,6 +640,18 @@ export interface AiPolicy {
   localModelCompose: boolean;
   /** 用本地模型打分（决策侧近似；未校准，默认关闭，仅用于与规则档 A/B） */
   localModelScore: boolean;
+  /** 在线模型基地址（OpenAI 兼容端点，例如 `https://api.example.com/v1`）；为空 = 不启用 */
+  remoteModelBaseUrl?: string | null;
+  /** 在线模型名（例如 `deepseek-chat`）；为空 = 不启用 */
+  remoteModelName?: string | null;
+  /** 用在线模型写报告（生成侧；内容会离开本机） */
+  remoteModelCompose: boolean;
+  /** 用在线模型打分（决策侧近似；内容会离开本机） */
+  remoteModelScore: boolean;
+  /** 在线模型的首次授权时间；地址或模型名变更后会被清空，需要重新确认 */
+  remoteModelAuthorizedAt?: string | null;
+  /** 是否已配置 API Key（**只回显「有没有」，Key 本身不返回**） */
+  remoteModelKeySet: boolean;
   budget: AiResearchBudget;
   auditMaxEntries: number;
 }
@@ -658,6 +670,16 @@ export interface UpdateAiPolicyInput {
   localModelName?: string | null;
   localModelCompose?: boolean;
   localModelScore?: boolean;
+  /** 在线模型基地址；传空字符串表示清除 */
+  remoteModelBaseUrl?: string | null;
+  /** 在线模型名；传空字符串表示清除 */
+  remoteModelName?: string | null;
+  remoteModelCompose?: boolean;
+  remoteModelScore?: boolean;
+  /** 置 true 表示用户确认了「内容会离开本机」（写入授权时间戳） */
+  confirmRemoteModel?: boolean;
+  /** API Key：**只写不读**；传空字符串表示清除 */
+  remoteModelApiKey?: string | null;
   budget?: AiResearchBudget;
 }
 

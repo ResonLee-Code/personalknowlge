@@ -426,6 +426,16 @@ interface ReviewDueNote {
   本地模型（Ollama HTTP）。地址**只接受本机**（`localhost` / `127.0.0.1` / `::1`，其余清空），
   两个开关**默认关闭**，都关时一个请求都不发；开启后模型不可用会**自动降级**到规则档 / 模板实现。
   复用 `ai_policy_get` / `ai_policy_set`，无新增命令；
+- `AiPolicy.remoteModel*`（V1.2.1 补充，在线模型 / OpenAI 兼容端点）：
+  `remoteModelBaseUrl` / `remoteModelName` / `remoteModelCompose` / `remoteModelScore` /
+  `remoteModelAuthorizedAt` / `remoteModelKeySet`。地址**只接受 `https://` 公网域名**
+  （本机可写 `localhost`），裸 IP、数字写法、单标签主机名、带 userinfo 的地址一律清空；
+  换地址或模型名会清空 `remoteModelAuthorizedAt`（需重新确认）；
+  `UpdateAiPolicyInput.confirmRemoteModel: true` 且基地址 + 模型名齐全时写入授权时间戳；
+  **API Key 只写不读**：`UpdateAiPolicyInput.remoteModelApiKey` 写入应用数据目录的
+  `ai-credentials.json`（不进工作区、不进备份），响应里只有 `remoteModelKeySet` 布尔回显，
+  传空字符串表示清除；`settings_get` / `settings_update` 的 `settings.ai` 同样只回显布尔值；
+  复用 `ai_policy_get` / `ai_policy_set`，无新增命令；
 - 切换联网档位会清空既有的确认时间戳（切回「仅本地」后再切到联网需重新确认一次）；
 - 审计写在 `.knowledge/logs/ai-audit.jsonl`，仅记录行为元数据（时间 / 能力 / 是否外发 / 结果 / 耗时 / 备注）。
 

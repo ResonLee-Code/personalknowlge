@@ -1,6 +1,7 @@
 //! 基础设施层：数据库、Markdown 存储、搜索索引、文件监听、备份。
 
 pub mod backup;
+pub mod credential_store;
 pub mod db;
 pub mod docx;
 pub mod fts;

@@ -1,5 +1,7 @@
 //! 工作区相关命令（设计文档 14.2）。
 
+use std::sync::Arc;
+
 use tauri::State;
 
 use crate::application::workspace_service::WorkspaceService;
@@ -87,7 +89,14 @@ pub async fn workspace_forget(state: State<'_, AppState>, id: String) -> Result<
 #[tauri::command]
 pub async fn settings_get(state: State<'_, AppState>) -> Result<AppSettings> {
     let app = state.inner.clone();
-    run(move || Ok(app.context()?.settings())).await
+    run(move || {
+        let mut settings = app.context()?.settings();
+        // 与「设置 → AI」同口径：只回显「API Key 配没配」，Key 本身不出现在任何响应里
+        settings.ai.remote_model_key_set =
+            crate::infrastructure::credential_store::remote_model_key_set(&app.data_dir);
+        Ok(settings)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -96,7 +105,13 @@ pub async fn settings_update(
     input: UpdateSettingsInput,
 ) -> Result<AppSettings> {
     let app = state.inner.clone();
-    run(move || WorkspaceService::new(app).update_settings(input)).await
+    run(move || {
+        let mut settings = WorkspaceService::new(Arc::clone(&app)).update_settings(input)?;
+        settings.ai.remote_model_key_set =
+            crate::infrastructure::credential_store::remote_model_key_set(&app.data_dir);
+        Ok(settings)
+    })
+    .await
 }
 
 /// 已注册工作区（含当前活动标记）。
