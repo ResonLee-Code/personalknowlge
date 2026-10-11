@@ -285,12 +285,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         tags: input.tags ?? null,
       });
       const detail = await noteService.get(input.id);
-      set({
-        detail,
+      set((state) => ({
+        // 保存的若是「界面上已经不在这一篇」的笔记（切笔记时滞后的保存），**不能**把 detail 拉回它：
+        // 路由要打开 B、detail 却被改回 A，`NotesSection` 的 effect 紧接着又去打开 B —— 来回切换，
+        // 真机表现就是「编辑区在 A 与 B 之间频闪」；更糟的是这个循环里每一轮都可能把
+        // 另一篇的内容写进当前笔记（真机验收里已经出现过：四篇笔记的正文被写空）。
+        ...(state.detail?.note.id === input.id ? { detail } : {}),
         saveStatus: 'saved',
         saveError: result.indexWarning ?? null,
         conflict: null,
-      });
+      }));
       await get().refresh();
       return true;
     } catch (error) {

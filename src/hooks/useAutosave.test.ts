@@ -61,4 +61,27 @@ describe('useAutosave（防抖自动保存 + 立即落盘）', () => {
     await result.current.flush();
     expect(onSave).toHaveBeenCalledTimes(1);
   });
+
+  /**
+   * 回归（2026-10-11 真机验收，P0）：**没改动就不许落盘**。
+   *
+   * 以前 flush 无条件写：每切一次笔记就发一次保存请求。它把「切笔记的中间帧」放大成了
+   * 数据风险——那一帧里编辑器状态可能还停在上一篇（甚至为空），把空内容写进别的笔记
+   * （真机上四篇笔记的正文被写空）。
+   */
+  it('没有改动时 flush 不发保存请求（切笔记不再无条件落盘）', async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    const { result } = renderHook(() =>
+      useAutosave({ enabled: true, delay: 100, onSave, signature: 'a' }),
+    );
+
+    // 首次渲染只是建立基线：不算改动
+    await result.current.flush();
+    expect(onSave).not.toHaveBeenCalled();
+
+    // 落盘过的内容再 flush 一次也不该重复写
+    result.current.resetBaseline('a');
+    await result.current.flush();
+    expect(onSave).not.toHaveBeenCalled();
+  });
 });

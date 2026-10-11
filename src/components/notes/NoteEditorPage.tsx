@@ -72,7 +72,9 @@ import { noteService } from '@/services/noteService';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { isTauriRuntime } from '@/services/api';
 import { useNotesStore } from '@/stores/notesStore';
+import { editorContentBelongsTo } from '@/components/notes/editorContentGuard';
 import { registerEditorFlush } from '@/stores/notesStore';
+
 import { LAYOUT_DEFAULTS, useUiStore } from '@/stores/uiStore';
 import { persistLayoutPreferences, useWorkspaceStore } from '@/stores/workspaceStore';
 import type { LinkCounts, RelationView } from '@/types';
@@ -266,6 +268,10 @@ export function NoteEditorPage() {
     signature: detail ? signature : null,
     onSave: async () => {
       if (!detail) return false;
+      // 切笔记的中间帧里会短暂出现「detail 已经是新笔记、content/title 还停在上一篇」：
+      // 此时若落盘，就会把上一篇的内容写进**新笔记**（真机验收里四篇笔记被写空就是这条路径）。
+      // 只有编辑器确实装载过这篇的内容（loadedId 与之相等）才允许保存。
+      if (!editorContentBelongsTo(loadedId.current, detail.note.id)) return false;
       // 磁盘内容已被别处改动（历史版本还原 / 外部编辑器）时不要盲目覆盖：
       // 让下面的同步 effect 把界面拉回磁盘内容，否则会把刚还原的版本又写回旧内容
       const latest = useNotesStore.getState().detail;
