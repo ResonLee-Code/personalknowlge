@@ -22,8 +22,8 @@ export type ErrorCode =
   | 'SEARCH_INDEX_ERROR'
   | 'BACKUP_FAILED'
   | 'EXPORT_FAILED'
-  | 'IO_ERROR'
   | 'INTERNAL_ERROR'
+  | 'IO_ERROR'
   /** AI 能力总开关关闭 */
   | 'AI_DISABLED'
   /** 联网档位为「仅本地」或本次外发未确认 */

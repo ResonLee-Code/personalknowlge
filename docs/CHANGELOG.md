@@ -319,6 +319,20 @@
 
 至此 `research_flow.rs` 14 项、`web_search_flow.rs` 4 项；Rust 全量仍是 29 个测试目标全绿。
 
+### 新增守卫：事件名与错误码契约（2026-10-11）
+
+把「IPC 契约」的两条静默失效路径也纳入守卫（`tests/dto_contract.rs` 现 13 项）：
+
+- **事件名**：Rust `core/events.rs` 的三个事件（`workspace://files-changed` / `notes://changed` /
+  `search://index-status`）必须与前端 `src/lib/constants.ts` 的 `EVENTS` **完全一致**——
+  写错一个字符，实时刷新与「外部修改提示」就静默失效（界面照常能用，只是永远不刷新）；
+- **错误码**：Rust `ErrorCode` 的映射表必须与 TS 的 `ErrorCode` 联合类型**集合相等**
+  （当前 22 个）。少一个，前端里 `code === 'NOTE_CONFLICT'` 这类分支就永远不会命中；
+  多一个，类型就在撒谎。
+
+两条守卫都做了**反向验证**：临时把前端事件名改成 `notes://changed-typo`、并删掉 TS 里的
+`IO_ERROR` → 两条测试分别报出「事件名不一致」「TS 缺少 ["IO_ERROR"]」，还原后恢复通过。
+
 ### 缺陷修复：原生文件监听启动失败时**没有**真的降级为轮询（2026-10-11）
 
 **症状**：文档承诺「受限环境无法接收原生文件事件时会**自动降级为轮询**（3 秒）」。

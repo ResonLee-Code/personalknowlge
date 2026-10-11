@@ -312,3 +312,76 @@ fn typescript_interfaces_only_reference_existing_rust_fields() {
         problems.join("\n")
     );
 }
+
+// ---------------------------------------------------------------- 事件名与错误码契约
+
+#[test]
+fn error_codes_match_the_frontend_union() {
+    let rust_source = std::fs::read_to_string(repo_path("src-tauri/src/core/error.rs"))
+        .expect("读 error.rs");
+    // `=> "CODE"` 的映射表就是对外契约
+    let mut rust_codes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for line in rust_source.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("ErrorCode::") {
+            if let Some((_, tail)) = rest.split_once("=>") {
+                let code = tail.trim().trim_end_matches(',').trim_matches('"');
+                if !code.is_empty() && code.chars().all(|ch| ch.is_ascii_uppercase() || ch == '_') {
+                    rust_codes.insert(code.to_string());
+                }
+            }
+        }
+    }
+
+    let ts_source = std::fs::read_to_string(repo_path("src/types/index.ts")).expect("读 types");
+    let start = ts_source.find("export type ErrorCode =").expect("找不到 ErrorCode 类型");
+    let body_end = ts_source[start..].find(';').map(|offset| start + offset).unwrap_or(ts_source.len());
+    let body = &ts_source[start..body_end];
+    let ts_codes: std::collections::BTreeSet<String> =
+        body.split('\'')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_string)
+            .collect();
+
+    assert!(rust_codes.len() >= 20, "错误码解析异常：{}", rust_codes.len());
+    assert!(ts_codes.len() >= 20, "TS 错误码解析异常：{}", ts_codes.len());
+    let missing_in_ts: Vec<&String> = rust_codes.difference(&ts_codes).collect();
+    let missing_in_rust: Vec<&String> = ts_codes.difference(&rust_codes).collect();
+    assert!(
+        missing_in_ts.is_empty() && missing_in_rust.is_empty(),
+        "错误码不一致：TS 缺少 {missing_in_ts:?}；Rust 缺少 {missing_in_rust:?}"
+    );
+}
+
+#[test]
+fn event_names_match_the_frontend_constants() {
+    let rust_source =
+        std::fs::read_to_string(repo_path("src-tauri/src/core/events.rs")).expect("读 events.rs");
+    let mut rust_events: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for line in rust_source.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("pub const ") {
+            if let Some((_, value)) = rest.split_once('=') {
+                let name = value.trim().trim_end_matches(';').trim().trim_matches('"');
+                if name.contains("://") {
+                    rust_events.insert(name.to_string());
+                }
+            }
+        }
+    }
+
+    let ts_source = std::fs::read_to_string(repo_path("src/lib/constants.ts")).expect("读 constants");
+    let start = ts_source.find("export const EVENTS").expect("找不到 EVENTS");
+    let body_end = ts_source[start..].find("} as const").map(|offset| start + offset).unwrap_or(ts_source.len());
+    let ts_events: std::collections::BTreeSet<String> = ts_source[start..body_end]
+        .split('\'')
+        .skip(1)
+        .step_by(2)
+        .filter(|value| value.contains("://"))
+        .map(str::to_string)
+        .collect();
+
+    assert_eq!(rust_events.len(), 3, "Rust 事件名解析异常：{rust_events:?}");
+    assert_eq!(ts_events, rust_events, "事件名不一致（写错就是实时刷新静默失效）");
+}
