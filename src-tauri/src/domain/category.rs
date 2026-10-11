@@ -11,7 +11,8 @@ pub struct Category {
     pub name: String,
     pub sort_order: i64,
     pub created_at: String,
-    /// 目录名（相对工作区根目录）
+    /// **单级**目录名（含 `01_` 之类排序前缀，只对根分类有意义）；
+    /// 完整目录路径要沿祖先链拼接（见 `CategoryLookup::directory_of`）
     pub dir_name: String,
     pub note_count: i64,
 }

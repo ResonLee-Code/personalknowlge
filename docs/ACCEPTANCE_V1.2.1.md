@@ -14,7 +14,7 @@
 
 | 项目 | 结果 | 证据 |
 | --- | --- | --- |
-| Rust 全量测试 | ✅ 31 个测试目标全绿（库单测 109 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
+| Rust 全量测试 | ✅ 32 个测试目标全绿（库单测 109 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
 | 前端单元 / 组件测试 | ✅ 41 个文件、217 用例全通过 | `CI=true pnpm test` |
@@ -40,6 +40,8 @@
 | 文档与代码一致性 | README / ARCHITECTURE / 安装指南 / 发布流程的版本、能力表、命令与体积都按当前代码校正；文档内引用的相对路径全部存在（脚本化检查） | 本文件 + `git log` 的 docs 提交 |
 | 命令契约 | 前端 104 条命令与 `lib.rs` 注册表、mock 分支三方对齐；守卫的反向验证（插入未注册命令 → 立即失败） | `tests/command_contract.rs`（2 项） |
 | 元数据保全 | `note_save` / `note_set_source` / AI 追加写入之后，frontmatter 的来源、时效、父子层级、手动顺序、置顶、类型化关系、自定义字段、标签全部保留；创建时间不被改写 | `tests/metadata_preservation_flow.rs`（3 项） |
+| 分类移动（挪目录 + 改路径） | 带孙分类的子树移到顶层 / 移回：完整目录路径正确、老目录消失、子目录随行、直属与子分类里的笔记路径改写且文件真实存在、归属 id 不变、移动后仍可检索、重开扫描后一致；防环与目标不存在被拒绝且不改数据 | `tests/category_move_flow.rs`（2 项） |
+| 分类目录展示 | 分类管理页副标题显示**完整**相对路径（子分类不再被误读为根目录）；未建目录时沿用父目录 | `src/lib/categoryDirectory.test.ts`（3 项） |
 
 ## B. 性能（✅ 已自动验证，本机 2026-10-11 实测）
 

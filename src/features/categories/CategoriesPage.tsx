@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useCategoriesStore } from '@/stores/categoriesStore';
-import type { CategoryNode } from '@/types';
+import { flattenCategoriesWithDirectories } from '@/lib/categoryDirectory';
 
 /** 分类管理页面。 */
 export function CategoriesPage() {
@@ -26,14 +26,9 @@ export function CategoriesPage() {
     | null
   >(null);
 
-  const rows: CategoryNode[] = [];
-  const walk = (nodes: CategoryNode[]) => {
-    nodes.forEach((node) => {
-      rows.push(node);
-      walk(node.children);
-    });
-  };
-  walk(tree);
+  // 沿树拼出**完整**目录路径：后端 dirName 只是单级目录名，
+  // 直接显示会让子分类看起来像在根目录（见 flattenCategoriesWithDirectories 的说明）
+  const rows = flattenCategoriesWithDirectories(tree);
 
   return (
     <div className="h-full w-full overflow-auto p-6">
@@ -64,7 +59,7 @@ export function CategoriesPage() {
           />
         ) : (
           <ul className="divide-y divide-[var(--border-subtle)] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)]">
-            {rows.map((node) => (
+            {rows.map(({ node, directory }) => (
               <li
                 key={node.category.id}
                 className="flex items-center gap-2 px-3 py-2"
@@ -75,7 +70,7 @@ export function CategoriesPage() {
                     {node.category.name}
                   </span>
                   <span className="block truncate text-[11px] text-[var(--ink-subtle)]">
-                    {node.category.dirName || '（无目录）'} · {node.category.noteCount} 篇
+                    {directory || '（无目录）'} · {node.category.noteCount} 篇
                   </span>
                 </span>
                 <Button
