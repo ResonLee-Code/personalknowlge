@@ -510,16 +510,35 @@ impl ResearchService {
         // 同一子问题下出现对立表述 → 并列呈现、不进结论段（D4 规则档）
         let mut conflicting: Vec<String> = Vec::new();
         for question in &plan.sub_questions {
-            let evidence: Vec<&ResearchSource> = session
+            let all_evidence: Vec<&ResearchSource> = session
                 .sources
                 .iter()
                 .filter(|source| source.sub_question_id == question.id)
                 .collect();
+            // E 级（不可用：社交平台 / AI 生成 / 无法判定出处）**只作线索**：
+            // 不参与引用、交叉验证、时效与冲突判定，否则「一条 A 级 + 一条 E 级」
+            // 会被算成「两个独立来源」而进入结论段——这正是规格 §9.3 明确要避免的。
+            let evidence: Vec<&ResearchSource> = all_evidence
+                .iter()
+                .copied()
+                .filter(|source| source.level != SourceLevel::E)
+                .collect();
             if evidence.is_empty() {
+                let clues: Vec<usize> = all_evidence
+                    .iter()
+                    .map(|source| source.reference)
+                    .collect();
                 claims.push(ResearchClaim {
                     sub_question_id: question.id.clone(),
-                    text: format!("「{}」：本地知识库暂无材料。", question.question),
-                    citations: Vec::new(),
+                    text: if clues.is_empty() {
+                        format!("「{}」：本地知识库暂无材料。", question.question)
+                    } else {
+                        format!(
+                            "「{}」：只有不可用来源（E 级）作线索，未形成可引用结论。",
+                            question.question
+                        )
+                    },
+                    citations: clues,
                     best_level: SourceLevel::E,
                     cross_verified: false,
                     fresh: true,
@@ -1570,8 +1589,17 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
         out.push_str("_没有待验证项。_\n\n");
     } else {
         for claim in &report.pending {
+            // 引用里只要还有可用来源，就是「单一来源」；全都是 E 级时如实说明「不可用线索」
             let why = if claim.citations.is_empty() {
                 "本地没有材料：建议补充或（阶段 D3 起）联网检索".to_string()
+            } else if claim.citations.iter().all(|reference| {
+                report
+                    .references
+                    .iter()
+                    .find(|source| source.reference == *reference)
+                    .is_none_or(|source| source.level == SourceLevel::E)
+            }) {
+                "只有不可用来源（E 级）作线索，建议补充可信来源".to_string()
             } else {
                 "只有单一来源，未交叉验证".to_string()
             };

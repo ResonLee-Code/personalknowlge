@@ -730,12 +730,19 @@ function researchConfidenceLabel(value: number): '高' | '中' | '低' {
 function researchVerifyClaims(session: ResearchSession): ResearchClaim[] {
   const questions = session.plan?.subQuestions ?? [];
   return questions.map((question) => {
-    const evidence = session.sources.filter((source) => source.subQuestionId === question.id);
+    const allEvidence = session.sources.filter((source) => source.subQuestionId === question.id);
+    // E 级（不可用）只作线索：不参与引用、交叉验证与时效判定。
+    // 与 Rust 同规则——否则「一条 A 级 + 一条 E 级」会被算成两个独立来源而进入结论段。
+    const evidence = allEvidence.filter((source) => source.level !== 'E');
     if (evidence.length === 0) {
+      const clues = allEvidence.map((source) => source.reference);
       return {
         subQuestionId: question.id,
-        text: `「${question.question}」：本地知识库暂无材料。`,
-        citations: [],
+        text:
+          clues.length === 0
+            ? `「${question.question}」：本地知识库暂无材料。`
+            : `「${question.question}」：只有不可用来源（E 级）作线索，未形成可引用结论。`,
+        citations: clues,
         bestLevel: 'E',
         crossVerified: false,
         fresh: true,
@@ -786,7 +793,10 @@ function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]):
   // 同一子问题下同时出现支持与反对/限制表述 → 并列呈现、不选边（D4 规则档）
   const conflicted: string[] = [];
   (session.plan?.subQuestions ?? []).forEach((question) => {
-    const evidence = session.sources.filter((source) => source.subQuestionId === question.id);
+    // 冲突判定同样只看可用来源（E 级只作线索，不能左右「是否矛盾」的结论）
+    const evidence = session.sources.filter(
+      (source) => source.subQuestionId === question.id && source.level !== 'E',
+    );
     if (evidence.length < 2) return;
     const polarities = evidence.map((source) => {
       const haystack = `${source.title} ${source.snippet}`.toLowerCase();
@@ -998,10 +1008,19 @@ function researchRenderMarkdown(session: ResearchSession, report: ResearchReport
     out.push('_没有待验证项。_', '');
   } else {
     report.pending.forEach((claim) => {
+      // 与 Rust 同规则：引用全是 E 级（不可用）时如实说明，而不是含糊地写「单一来源」
+      const onlyUnusable =
+        claim.citations.length > 0 &&
+        claim.citations.every((reference) => {
+          const source = report.references.find((item) => item.reference === reference);
+          return !source || source.level === 'E';
+        });
       const why =
         claim.citations.length === 0
           ? '本地没有材料：建议补充或（阶段 D3 起）联网检索'
-          : '只有单一来源，未交叉验证';
+          : onlyUnusable
+            ? '只有不可用来源（E 级）作线索，建议补充可信来源'
+            : '只有单一来源，未交叉验证';
       out.push(`- ${claim.text} ${researchCitations(claim)} —— ${why}`);
     });
     out.push('');

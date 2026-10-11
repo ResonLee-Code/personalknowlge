@@ -23,7 +23,9 @@ use personal_knowledge_os_lib::domain::ai::{ResearchBudget, UpdateAiPolicyInput}
 use personal_knowledge_os_lib::domain::note::{
     CreateNoteInput, NoteListQuery, SetSourceInput,
 };
-use personal_knowledge_os_lib::domain::research::{ResearchRequest, SourceOrigin};
+use personal_knowledge_os_lib::domain::research::{
+    ResearchRequest, SourceLevel, SourceOrigin, WarningKind,
+};
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -319,6 +321,132 @@ fn report_references_stay_clickable_for_web_sources() {
             references_section
         );
     }
+}
+
+/// §9.3 / §9.9 验收 6：**不可用来源（E 级）只作线索，绝不进入结论段与关键事实段**。
+///
+/// 场景：同一个子问题下同时有「A 级官方文档」与「E 级社交平台帖子」两条外部来源。
+/// 两条来源不能凑成「交叉验证」，E 级那条只能出现在待验证清单 / 参考来源里。
+#[test]
+fn unusable_grade_e_sources_never_reach_the_conclusion_sections() {
+    let fixture = Fixture::new();
+    let (host, _touched) = spawn_once_server(
+        r#"{"results":[
+            {"title":"Rust 异步运行时调度官方文档","url":"https://doc.rust-lang.org/book/","content":"调度器说明。"},
+            {"title":"Rust 异步运行时调度的论坛讨论","url":"https://twitter.com/someone/status/1","content":"帖子里聊调度器。"},
+            {"title":"Rust 异步运行时调度的风险吐槽","url":"https://twitter.com/someone/status/2","content":"风险很大。"}
+        ]}"#
+        .to_string(),
+    );
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            search_endpoint: Some(format!("http://{host}/search?q={{query}}&limit={{limit}}")),
+            ..Default::default()
+        })
+        .expect("打开联网档位");
+
+    let research = fixture.research();
+    let session = research
+        .start(ResearchRequest {
+            topic: "Rust 异步运行时调度".to_string(),
+            ..Default::default()
+        })
+        .expect("立项");
+    research.collect(&session.id, true).expect("收集（含联网）");
+    let verified = research.verify(&session.id).expect("验证");
+    let composed = research.compose(&session.id).expect("汇总");
+    let report = composed.report.as_ref().expect("报告");
+
+    let unusable: Vec<usize> = verified
+        .sources
+        .iter()
+        .filter(|source| source.level == SourceLevel::E)
+        .map(|source| source.reference)
+        .collect();
+    assert_eq!(unusable.len(), 2, "本用例应有两条 E 级来源：{:?}", verified.sources);
+    let warning = report
+        .warnings
+        .iter()
+        .find(|warning| warning.kind == WarningKind::UnverifiedSources)
+        .unwrap_or_else(|| panic!("E 级来源必须在警告块里显式提醒：{:?}", report.warnings));
+    assert!(
+        unusable.iter().all(|reference| warning.references.contains(reference)),
+        "警告块要指明是哪几条来源作线索：{:?}",
+        warning.references
+    );
+
+    // 结论段与关键事实段：E 级来源不得作为引用出现
+    for (section, claim) in report
+        .conclusions
+        .iter()
+        .map(|claim| ("结论先行", claim))
+        .chain(report.key_facts.iter().map(|claim| ("关键事实", claim)))
+    {
+        assert!(
+            !claim.citations.iter().any(|value| unusable.contains(value)),
+            "E 级来源不得进入「{section}」段：{} {:?}",
+            claim.text,
+            claim.citations
+        );
+    }
+    // 也不能靠「A 级 + E 级」凑成交叉验证
+    for claim in report.conclusions.iter().chain(report.key_facts.iter()) {
+        let question = claim.sub_question_id.clone();
+        let usable = verified
+            .sources
+            .iter()
+            .filter(|source| source.sub_question_id == question && source.level != SourceLevel::E)
+            .count();
+        if usable >= 2 {
+            continue;
+        }
+        assert!(
+            !claim.cross_verified,
+            "可交叉验证的来源不足 2 条（E 级不算）：{}",
+            claim.text
+        );
+    }
+
+    // 但作为「线索」仍然可见：警告块点名 + 参考来源里能核对
+    assert!(
+        report
+            .references
+            .iter()
+            .any(|source| unusable.contains(&source.reference)),
+        "E 级来源仍要列在参考来源里（可核对）"
+    );
+    // 第 5 段（待验证清单）如实说明「只剩单一可用来源」，不能因为 E 级凑数而变成结论
+    let q1_pending = report
+        .pending
+        .iter()
+        .find(|claim| claim.sub_question_id == "q1")
+        .expect("q1 应落在待验证清单里");
+    assert_eq!(
+        q1_pending.citations,
+        vec![1],
+        "q1 只剩一条可用来源（E 级不算），引用里不应该出现它"
+    );
+    // 只有 E 级线索的子问题：仍然可见，但要如实说明「不可用来源作线索」而不是含糊的「单一来源」
+    let q4 = report
+        .pending
+        .iter()
+        .find(|claim| claim.sub_question_id == "q4")
+        .expect("只有 E 级线索的子问题也要留在清单里");
+    assert_eq!(q4.citations, vec![3], "E 级线索要带上它的引用编号");
+    assert!(
+        q4.text.contains("只有不可用来源"),
+        "结论正文要点明是「不可用来源作线索」：{}",
+        q4.text
+    );
+    assert!(
+        report.markdown.contains("只有不可用来源（E 级）作线索，建议补充可信来源"),
+        "报告第 5 段要如实说明原因：\n{}",
+        report.markdown
+    );
 }
 
 #[test]
