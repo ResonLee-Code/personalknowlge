@@ -14,7 +14,7 @@
 
 | 项目 | 结果 | 证据 |
 | --- | --- | --- |
-| Rust 全量测试 | ✅ 38 个测试目标全绿（库单测 116 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
+| Rust 全量测试 | ✅ 39 个测试目标全绿（库单测 116 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
 | 前端单元 / 组件测试 | ✅ 47 个文件、250 用例全通过 | `CI=true pnpm test` |
