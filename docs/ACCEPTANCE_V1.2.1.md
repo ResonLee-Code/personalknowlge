@@ -17,7 +17,7 @@
 | Rust 全量测试 | ✅ 34 个测试目标全绿（库单测 109 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
-| 前端单元 / 组件测试 | ✅ 41 个文件、217 用例全通过 | `CI=true pnpm test` |
+| 前端单元 / 组件测试 | ✅ 43 个文件、225 用例全通过 | `CI=true pnpm test` |
 | 前端生产构建 | ✅ 构建成功 | `CI=true pnpm build` |
 | 端到端主流程 | ✅ 1 条 34 步流程通过（浏览器预览后端） | `CI=true pnpm test:e2e`（截图见 `docs/screenshots/`）；重负载下时序敏感，配置了 1 次重试与 10s 断言超时（原因写在 `playwright.config.ts` 注释里） |
 
@@ -44,6 +44,7 @@
 | 分类目录展示 | 分类管理页副标题显示**完整**相对路径（子分类不再被误读为根目录）；未建目录时沿用父目录 | `src/lib/categoryDirectory.test.ts`（3 项） |
 | 「从最近列表移除」的安全性 | `workspace_forget` 只改注册表：笔记文件、数据库、目录结构都不动，还能重新打开且笔记仍在 | `tests/workspace_registry_flow.rs`（1 项） |
 | 本地只读工具边界 | `kb_search` / `note_read` 在 AI 总开关关闭时仍可用（纯本地检索），且**永不产生 `outbound=true`** 审计；空关键词报 `INVALID_INPUT`、`limit` 夹取 1–50；`quick_search` 夹取 1–30 且看不到回收站里的笔记 | `tests/local_tools_flow.rs`（3 项） |
+| 前端动作反馈诚实性 | 写操作失败时**不再提示成功**：笔记条目/编辑器菜单的六类动作、删除确认（含子文档撤销按实际成功数报）、标签删除、三处「重建索引」；批量撤销如实计数（`已恢复 1/2 篇…`） | `src/lib/actionFeedback.test.ts`（3 项）+ `notesStore.filters.test.ts` 增 2 项 |
 
 ## B. 性能（✅ 已自动验证，本机 2026-10-11 实测）
 

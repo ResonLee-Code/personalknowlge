@@ -36,6 +36,7 @@ import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
 import { SaveTemplateDialog } from '@/components/editor/SaveTemplateDialog';
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { SourceDialog } from '@/components/editor/SourceDialog';
+import { reportAction } from '@/lib/actionFeedback';
 import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
 import { TagEditor } from '@/components/editor/TagEditor';
 import { ResizeHandle } from '@/components/layout/ResizeHandle';
@@ -579,7 +580,11 @@ export function NoteEditorPage() {
                 重命名 / 重命名文件
               </DropdownMenuItem>
               <DropdownMenuItem
-                onSelect={() => void duplicate(note.id).then(() => toast.success('已创建副本'))}
+                onSelect={() =>
+                  void duplicate(note.id).then((ok) =>
+                    reportAction(ok, '已创建副本', useNotesStore.getState().error, '创建副本失败'),
+                  )
+                }
               >
                 创建副本
               </DropdownMenuItem>
@@ -606,9 +611,9 @@ export function NoteEditorPage() {
                 <>
                   <DropdownMenuItem
                     onSelect={() =>
-                      void restore(note.id).then(() => {
-                        toast.success('已恢复');
-                        void refreshScope();
+                      void restore(note.id).then((ok) => {
+                        reportAction(ok, '已恢复', useNotesStore.getState().error, '恢复失败');
+                        if (ok) void refreshScope();
                       })
                     }
                   >
@@ -617,9 +622,9 @@ export function NoteEditorPage() {
                   <DropdownMenuItem
                     destructive
                     onSelect={() =>
-                      void purge(note.id).then(() => {
-                        toast.success('已永久删除');
-                        navigate('/trash');
+                      void purge(note.id).then((ok) => {
+                        reportAction(ok, '已永久删除', useNotesStore.getState().error, '永久删除失败');
+                        if (ok) navigate('/trash');
                       })
                     }
                   >
@@ -630,9 +635,9 @@ export function NoteEditorPage() {
                 <DropdownMenuItem
                   destructive
                   onSelect={() =>
-                    void remove(note.id).then(() => {
-                      toast.success('已移入回收站');
-                      navigate('/notes');
+                    void remove(note.id).then((ok) => {
+                      reportAction(ok, '已移入回收站', useNotesStore.getState().error, '移入回收站失败');
+                      if (ok) navigate('/notes');
                     })
                   }
                 >

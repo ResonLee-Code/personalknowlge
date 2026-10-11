@@ -22,6 +22,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
+import { reportAction } from '@/lib/actionFeedback';
 import { CopyNoteDialog } from '@/components/notes/CopyNoteDialog';
 import { CreateChildNoteDialog } from '@/components/notes/CreateChildNoteDialog';
 import { DeleteNoteDialog } from '@/components/notes/DeleteNoteDialog';
@@ -232,13 +233,18 @@ export function NoteListItem({
   const snippet = note.snippet ?? [];
   const deleted = note.status === 'deleted';
 
+  /** 失败时读 store 里的错误原因（写操作把错误收敛到 store，而不是抛出） */
+  const notesError = () => useNotesStore.getState().error;
+
   const handleFavorite = () => {
-    void toggleFavorite(note.id).then(() => toast.success(note.favorite ? '已取消收藏' : '已收藏'));
+    const success = note.favorite ? '已取消收藏' : '已收藏';
+    void toggleFavorite(note.id).then((ok) => reportAction(ok, success, notesError(), '收藏操作失败'));
   };
 
   const handlePin = () => {
-    void setPinned(note.id, !note.pinned).then(() =>
-      toast.success(note.pinned ? '已取消置顶' : '已置顶（会一直排在最前）'),
+    const success = note.pinned ? '已取消置顶' : '已置顶（会一直排在最前）';
+    void setPinned(note.id, !note.pinned).then((ok) =>
+      reportAction(ok, success, notesError(), '置顶操作失败'),
     );
   };
 
@@ -252,15 +258,16 @@ export function NoteListItem({
   };
 
   const handlePromote = () => {
-    void setParent(note.id, null).then((ok) => {
-      if (ok) toast.success('已升级为顶层文档');
-      else toast.error(useNotesStore.getState().error ?? '操作失败');
-    });
+    void setParent(note.id, null).then((ok) =>
+      reportAction(ok, '已升级为顶层文档', notesError()),
+    );
   };
 
   const handleDelete = () => {
     if (deleted) {
-      void restore(note.id).then(() => toast.success('已从回收站恢复'));
+      void restore(note.id).then((ok) =>
+        reportAction(ok, '已从回收站恢复', notesError(), '恢复失败'),
+      );
       return;
     }
     // 有子文档时先确认（子文档默认保留，可勾选一起删除）
@@ -268,12 +275,19 @@ export function NoteListItem({
       setDeleteOpen(true);
       return;
     }
-    void remove(note.id).then(() => {
+    void remove(note.id).then((ok) => {
+      if (!ok) {
+        toast.error(notesError() ?? '移入回收站失败');
+        return;
+      }
       // 对标语雀：删除后可随即撤销（回收站是软删除，恢复即撤销）
       toast.success('已移入回收站', {
         action: {
           label: '撤销',
-          onClick: () => void restore(note.id).then(() => toast.success('已恢复笔记')),
+          onClick: () =>
+            void restore(note.id).then((restored) =>
+              reportAction(restored, '已恢复笔记', notesError(), '恢复失败'),
+            ),
         },
       });
       if (basePath !== '/trash') navigate(basePath);
@@ -292,10 +306,15 @@ export function NoteListItem({
     onMove: () => setMoveOpen(true),
     onCopyTo: () => setCopyOpen(true),
     onExport: () => setExportOpen(true),
-    onDuplicate: () => void duplicate(note.id).then(() => toast.success('已创建副本')),
+    onDuplicate: () =>
+      void duplicate(note.id).then((ok) => reportAction(ok, '已创建副本', notesError(), '创建副本失败')),
     onDelete: handleDelete,
-    onRestore: () => void restore(note.id).then(() => toast.success('已从回收站恢复')),
-    onPurge: () => void purge(note.id).then(() => toast.success('已永久删除')),
+    onRestore: () =>
+      void restore(note.id).then((ok) =>
+        reportAction(ok, '已从回收站恢复', notesError(), '恢复失败'),
+      ),
+    onPurge: () =>
+      void purge(note.id).then((ok) => reportAction(ok, '已永久删除', notesError(), '永久删除失败')),
   };
 
   return (

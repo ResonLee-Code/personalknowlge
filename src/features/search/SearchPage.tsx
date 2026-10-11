@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { reportAction } from '@/lib/actionFeedback';
 import { formatRelative } from '@/lib/format';
 import {
   describeSearch,
@@ -370,7 +371,9 @@ export function SearchPage() {
             variant="ghost"
             className="ml-auto"
             onClick={() =>
-              void rebuildIndex().then(() => toast.success('索引已重建'))
+              void rebuildIndex().then((ok) =>
+                reportAction(ok, '索引已重建', useSearchStore.getState().error, '重建索引失败'),
+              )
             }
           >
             <RefreshCw className="h-3.5 w-3.5" />

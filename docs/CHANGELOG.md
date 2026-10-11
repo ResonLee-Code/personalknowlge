@@ -153,6 +153,28 @@
 - 新命令：`ai_policy_get` / `ai_policy_set` / `ai_audit_tail` / `ai_kb_search` / `ai_web_fetch` / `ai_web_search`；
   错误码新增 `AI_DISABLED` / `NETWORK_DISABLED`（前后端一致）。
 
+### 缺陷修复：动作失败却提示「成功」（2026-10-11）
+
+**症状**：一批写操作在失败时会**弹出成功提示**。例如「移到回收站」失败仍提示「已移入回收站」、
+「永久删除」失败仍提示「已永久删除」、「重建索引」失败仍提示「索引已重建」、
+批量删除的「撤销」里有一半恢复失败仍提示「已恢复 2 篇笔记」。用户会以为数据已经按他点的做了。
+
+**根因**：各 zustand store 的写操作把错误收敛进自己的 `error` 状态而不是抛出（这样界面不会崩），
+但调用处普遍写成 `void action(id).then(() => toast.success(...))`——`.then` 在失败时照样执行。
+
+**修复**（约定化，避免复发）：
+
+1. store 的写操作改为返回 `boolean`（`notesStore` 的 remove/restore/purge/duplicate/toggleFavorite/setPinned、
+   `tagsStore.remove`、`workspaceStore.rebuildIndex`、`searchStore.rebuildIndex`）；
+2. 新增 `src/lib/actionFeedback.ts` 的 `reportAction(ok, success, errorMessage, fallbackError)`：
+   成功报成功、失败报错并带上 store 里的原因；
+3. 逐个修正调用点：笔记条目菜单（收藏/置顶/恢复/删除/副本/永久删除）、编辑器菜单（同样六处）、
+   删除确认对话框（含「含子文档」的撤销计数）、标签删除、三处「重建索引」；
+4. **批量撤销如实计数**：`已恢复 1/2 篇，1 篇失败：笔记不存在。`——不再把一半失败报成全部成功。
+
+**测试**：`src/lib/actionFeedback.test.ts` 3 项（成功/失败带原因/无原因兜底）；
+`notesStore.filters.test.ts` 增 2 项（撤销部分失败 → 报错且含数量与原因、不报成功；单篇恢复失败返回 false）。
+
 ### 覆盖补齐：注册表安全、本地只读工具边界、快速切换（2026-10-11）
 
 继续按「哪些命令背后的服务方法没进过测试」补齐，挑的都是**名字听起来可能动数据**或**边界容易含糊**的：

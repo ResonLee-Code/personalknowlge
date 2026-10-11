@@ -41,13 +41,16 @@ export function DeleteNoteDialog({
   const submit = async () => {
     setBusy(true);
     try {
-      await remove(note.id);
+      const removedOk = await remove(note.id);
+      if (!removedOk) {
+        toast.error(useNotesStore.getState().error ?? '移入回收站失败');
+        return;
+      }
       if (withChildren) {
         for (const child of children) {
           await remove(child.id);
         }
       }
-      const removed = withChildren ? children.length + 1 : 1;
       toast.success(
         withChildren ? `已移入回收站（含 ${children.length} 篇子文档）` : '已移入回收站',
         {
@@ -55,11 +58,23 @@ export function DeleteNoteDialog({
             label: '撤销',
             onClick: () =>
               void (async () => {
-                await restore(note.id);
-                if (withChildren) {
-                  for (const child of children) await restore(child.id);
+                const targets = [note.id, ...(withChildren ? children.map((child) => child.id) : [])];
+                let restored = 0;
+                let firstError: string | null = null;
+                for (const id of targets) {
+                  const ok = await restore(id);
+                  if (ok) restored += 1;
+                  else firstError ??= useNotesStore.getState().error ?? '恢复失败';
                 }
-                toast.success(`已恢复 ${removed} 篇笔记`);
+                if (restored === targets.length) {
+                  toast.success(`已恢复 ${restored} 篇笔记`);
+                } else {
+                  toast.error(
+                    `已恢复 ${restored}/${targets.length} 篇，${
+                      targets.length - restored
+                    } 篇失败${firstError ? `：${firstError}` : ''}`,
+                  );
+                }
               })(),
           },
         },

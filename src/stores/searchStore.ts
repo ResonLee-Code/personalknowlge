@@ -23,7 +23,7 @@ interface SearchState {
   resetFilters: () => void;
   run: () => Promise<void>;
   refreshStatus: () => Promise<void>;
-  rebuildIndex: () => Promise<void>;
+  rebuildIndex: () => Promise<boolean>;
 }
 
 export const useSearchStore = create<SearchState>((set, get) => ({
@@ -95,12 +95,14 @@ export const useSearchStore = create<SearchState>((set, get) => ({
     set({ loading: true });
     try {
       const status = await searchService.rebuildIndex();
-      set({ status });
+      set({ status, error: null });
       await get().run();
     } catch (error) {
-      set({ error: errorMessage(error) });
+      set({ error: errorMessage(error), loading: false });
+      return false;
     } finally {
       set({ loading: false });
     }
+    return true;
   },
 }));

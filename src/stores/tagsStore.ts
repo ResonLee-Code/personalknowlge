@@ -11,7 +11,7 @@ interface TagsState {
   refresh: () => Promise<void>;
   create: (name: string) => Promise<Tag | null>;
   rename: (id: string, name: string) => Promise<void>;
-  remove: (id: string) => Promise<void>;
+  remove: (id: string) => Promise<boolean>;
 }
 
 export const useTagsStore = create<TagsState>((set, get) => ({
@@ -57,6 +57,8 @@ export const useTagsStore = create<TagsState>((set, get) => ({
       await get().refresh();
     } catch (error) {
       set({ error: errorMessage(error) });
+      return false;
     }
+    return true;
   },
 }));

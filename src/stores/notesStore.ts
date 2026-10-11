@@ -56,19 +56,19 @@ interface NotesState {
   create: (input: CreateNoteInput) => Promise<NoteDetail | null>;
   save: (input: { id: string; content: string; baseContentHash?: string | null; title?: string; categoryId?: string | null; tags?: string[] }) => Promise<boolean>;
   markDirty: () => void;
-  remove: (id: string) => Promise<void>;
-  restore: (id: string) => Promise<void>;
-  purge: (id: string) => Promise<void>;
+  remove: (id: string) => Promise<boolean>;
+  restore: (id: string) => Promise<boolean>;
+  purge: (id: string) => Promise<boolean>;
   rename: (id: string, title: string, renameFile?: boolean) => Promise<void>;
   move: (id: string, categoryId: string | null) => Promise<void>;
-  duplicate: (id: string) => Promise<void>;
+  duplicate: (id: string) => Promise<boolean>;
   /** 设置父文档（子文档层级）；`parentId = null` 移到顶层 */
   setParent: (id: string, parentId: string | null) => Promise<boolean>;
   /** 手动排序：按传入顺序改写同层笔记的顺序（配合「自定义顺序」排序） */
   reorder: (ids: string[]) => Promise<boolean>;
-  toggleFavorite: (id: string) => Promise<void>;
+  toggleFavorite: (id: string) => Promise<boolean>;
   /** 置顶 / 取消置顶 */
-  setPinned: (id: string, pinned: boolean) => Promise<void>;
+  setPinned: (id: string, pinned: boolean) => Promise<boolean>;
   setTags: (id: string, tags: string[]) => Promise<void>;
   clearConflict: () => void;
   reset: () => void;
@@ -276,7 +276,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       await get().refresh();
     } catch (error) {
       set({ error: errorMessage(error) });
+      return false;
     }
+    return true;
   },
 
   restore: async (id) => {
@@ -285,7 +287,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       await get().refresh();
     } catch (error) {
       set({ error: errorMessage(error) });
+      return false;
     }
+    return true;
   },
 
   purge: async (id) => {
@@ -295,7 +299,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       await get().refresh();
     } catch (error) {
       set({ error: errorMessage(error) });
+      return false;
     }
+    return true;
   },
 
   rename: async (id, title, renameFile = true) => {
@@ -325,7 +331,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       set({ detail, selectedId: detail.note.id });
     } catch (error) {
       set({ error: errorMessage(error) });
+      return false;
     }
+    return true;
   },
 
   setParent: async (id, parentId) => {
@@ -360,7 +368,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       await get().refresh();
     } catch (error) {
       set({ error: errorMessage(error) });
+      return false;
     }
+    return true;
   },
 
   toggleFavorite: async (id) => {
@@ -371,7 +381,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       await get().refresh();
     } catch (error) {
       set({ error: errorMessage(error) });
+      return false;
     }
+    return true;
   },
 
   setTags: async (id, tags) => {
@@ -483,11 +495,27 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         label: '撤销',
         run: () =>
           void (async () => {
+            let restored = 0;
+            let firstError: string | null = null;
             for (const id of removed) {
-              await noteService.restore(id).catch(() => undefined);
+              try {
+                await noteService.restore(id);
+                restored += 1;
+              } catch (error) {
+                firstError ??= errorMessage(error);
+              }
             }
             await get().refresh();
-            toast.success(`已恢复 ${removed.length} 篇笔记`);
+            // 失败必须如实说：不能把「恢复了一半」报成全部成功
+            if (restored === removed.length) {
+              toast.success(`已恢复 ${restored} 篇笔记`);
+            } else {
+              toast.error(
+                `已恢复 ${restored}/${removed.length} 篇，${
+                  removed.length - restored
+                } 篇失败${firstError ? `：${firstError}` : ''}`,
+              );
+            }
           })(),
       });
       set({ selection: [], selectionMode: false, detail: null, selectedId: null });

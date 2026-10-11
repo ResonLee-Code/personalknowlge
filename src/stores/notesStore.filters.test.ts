@@ -166,4 +166,52 @@ describe('单篇复制到指定分类（C4）', () => {
     await useNotesStore.getState().copyTo('note_1', null);
     expect(move).not.toHaveBeenCalled();
   });
+
+  it('撤销时若恢复失败，必须如实报错（不能报成功）', async () => {
+    vi.clearAllMocks();
+    vi.spyOn(noteService, 'list').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 300,
+    });
+    vi.spyOn(noteService, 'deleteMany').mockResolvedValue({ succeeded: 2, failures: [] });
+    vi.spyOn(noteService, 'restore')
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce({ code: 'NOTE_NOT_FOUND', message: '笔记不存在。' });
+
+    useNotesStore.setState({ selection: ['note_1', 'note_2'], selectionMode: true });
+    await useNotesStore.getState().deleteMany();
+
+    const [, options] = vi.mocked(toast.success).mock.calls.at(-1) as [
+      string,
+      { action?: { onClick: () => void } },
+    ];
+    vi.clearAllMocks();
+    options!.action!.onClick();
+
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalled();
+    const message = vi.mocked(toast.error).mock.calls.at(-1)?.[0] as string;
+    expect(message).toContain('已恢复 1/2 篇');
+    expect(message).toContain('笔记不存在');
+  });
+
+  it('单篇恢复失败时返回 false（调用处据此报错）', async () => {
+    vi.clearAllMocks();
+    vi.spyOn(noteService, 'list').mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 300,
+    });
+    vi.spyOn(noteService, 'restore').mockRejectedValue({
+      code: 'NOTE_NOT_FOUND',
+      message: '笔记不存在。',
+    });
+
+    const ok = await useNotesStore.getState().restore('note_missing');
+    expect(ok).toBe(false);
+    expect(useNotesStore.getState().error).toContain('笔记不存在');
+  });
 });

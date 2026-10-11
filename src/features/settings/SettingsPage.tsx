@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { AiSettingsPanel } from '@/features/settings/AiSettingsPanel';
+import { reportAction } from '@/lib/actionFeedback';
 import { AUTOSAVE_DELAY_OPTIONS, FONT_SIZE_OPTIONS, ROUTES, THEME_OPTIONS } from '@/lib/constants';
 import { errorMessage, formatBytes, formatDateTime } from '@/lib/format';
 import { backupService } from '@/services/backupService';
@@ -189,7 +190,11 @@ export function SettingsPage() {
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => void rebuildIndex().then(() => toast.success('索引已重建'))}
+              onClick={() =>
+                void rebuildIndex().then((ok) =>
+                  reportAction(ok, '索引已重建', useWorkspaceStore.getState().error, '重建索引失败'),
+                )
+              }
             >
               <RefreshCw className="h-3.5 w-3.5" />
               重建

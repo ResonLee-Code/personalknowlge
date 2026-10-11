@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { reportAction } from '@/lib/actionFeedback';
 import { useTagsStore } from '@/stores/tagsStore';
 
 /** 标签管理页面（设计文档 16.2）。 */
@@ -87,7 +88,9 @@ export function TagsPage() {
                   variant="ghost"
                   title="删除标签"
                   onClick={() =>
-                    void remove(tag.id).then(() => toast.success('标签已删除'))
+                    void remove(tag.id).then((ok) =>
+                      reportAction(ok, '标签已删除', useTagsStore.getState().error, '删除失败'),
+                    )
                   }
                 >
                   <Trash2 className="h-3.5 w-3.5" />

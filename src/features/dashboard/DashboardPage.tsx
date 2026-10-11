@@ -14,13 +14,13 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/badge';
 import { UnresolvedLinksCard } from '@/components/notes/UnresolvedLinksCard';
 import { ReviewDueCard } from '@/features/dashboard/ReviewDueCard';
+import { reportAction } from '@/lib/actionFeedback';
 import { formatRelative } from '@/lib/format';
 import { ROUTES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
@@ -295,7 +295,11 @@ export function DashboardPage() {
                 size="sm"
                 variant="secondary"
                 className="mt-3"
-                onClick={() => void rebuildIndex().then(() => toast.success('索引已重建'))}
+                onClick={() =>
+                  void rebuildIndex().then((ok) =>
+                    reportAction(ok, '索引已重建', useWorkspaceStore.getState().error, '重建索引失败'),
+                  )
+                }
               >
                 <RefreshCw className="h-3.5 w-3.5" />
                 重建索引

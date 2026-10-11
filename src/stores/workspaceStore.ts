@@ -32,7 +32,7 @@ interface WorkspaceState {
   forgetWorkspace: (id: string) => Promise<void>;
   refreshStats: () => Promise<void>;
   scan: () => Promise<ScanReport | null>;
-  rebuildIndex: () => Promise<void>;
+  rebuildIndex: () => Promise<boolean>;
   updateSettings: (input: UpdateSettingsInput) => Promise<void>;
   refreshIndexStatus: () => Promise<IndexStatus | null>;
 }
@@ -197,9 +197,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   rebuildIndex: async () => {
     try {
       const status = await workspaceService.rebuildIndex();
-      set({ indexStatus: status });
+      set({ indexStatus: status, error: null });
+      return true;
     } catch (error) {
       set({ error: errorMessage(error) });
+      return false;
     }
   },
 
