@@ -50,6 +50,7 @@ export const THEME_OPTIONS = [
 export const SHORTCUTS = [
   { keys: '⌘/Ctrl + N', action: '新建笔记' },
   { keys: '⌘/Ctrl + K', action: '全局搜索' },
+  { keys: '⌘/Ctrl + P', action: '快速切换笔记（按标题模糊匹配）' },
   { keys: '⌘/Ctrl + S', action: '立即保存' },
   { keys: '⌘/Ctrl + E', action: '聚焦编辑器' },
   { keys: '⌘/Ctrl + W', action: '关闭当前笔记' },
