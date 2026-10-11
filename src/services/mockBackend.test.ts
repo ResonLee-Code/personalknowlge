@@ -628,4 +628,107 @@ describe('浏览器预览后端 · 拖拽排序（与 Rust 对齐）', () => {
       code: 'INVALID_INPUT',
     });
   });
+
+});
+
+// 分类的改名 / 搬层 / 删除都会**动目录与笔记路径**，后端为此有一套规则
+// （重名与非法名拦截、防环、三种删除策略语义不同）。预览端以前只改字符串，
+// 于是「界面显示的相对路径」与桌面端分叉。这里逐条对齐并钉住。
+describe('浏览器预览后端 · 分类重命名 / 移动 / 删除（与 Rust 对齐）', () => {
+  let round = 0;
+  async function setup() {
+    // 同一个用例里可能要跑多轮（三种删除策略各一轮）：分类名带上轮次，避免同级重名被拒
+    round += 1;
+    await workspaceService.create('分类规则库', '/tmp/mock-category-rules');
+    const tech = await categoryService.create(`技术群${round}`, null);
+    const database = await categoryService.create(`数据库群${round}`, tech.id);
+    // 同级兄弟：用来验证「同级重名」被拒（重名只在**同一父级**下算冲突）
+    const sibling = await categoryService.create(`后端群${round}`, tech.id);
+    const note = await noteService.create({ title: `索引设计${round}`, categoryId: database.id });
+    return { tech, database, sibling, note };
+  }
+
+  it('重命名会改目录名并搬迁子树里的笔记路径；空名 / 斜杠 / 同级重名都被拒', async () => {
+    const { tech, database, sibling, note } = await setup();
+    // 注意：mock 返回的是 state 里的**同一个对象**，改名后引用上的字段也会变，
+    // 因此先把旧值取成字符串再比较
+    const techDir = tech.dirName;
+    const oldDir = database.dirName;
+    const oldPath = note.note.filePath;
+    expect(oldPath.startsWith(`${techDir}/${oldDir}/`)).toBe(true);
+
+    const renamed = await categoryService.rename(database.id, '存储引擎');
+    expect(renamed.name).toBe('存储引擎');
+    expect(renamed.dirName).not.toBe(oldDir);
+    expect(renamed.dirName).toContain('存储引擎');
+
+    const after = await noteService.get(note.note.id);
+    expect(after.note.filePath.startsWith(`${techDir}/${renamed.dirName}/`)).toBe(true);
+    expect(after.note.filePath).not.toBe(oldPath);
+    expect(after.note.filePath.endsWith('.md')).toBe(true);
+
+    // 同级重名（不区分大小写）→ CATEGORY_NAME_CONFLICT
+    await expect(categoryService.rename(database.id, sibling.name.toUpperCase())).rejects.toMatchObject({
+      code: 'CATEGORY_NAME_CONFLICT',
+    });
+    // 空名 / 带斜杠 → INVALID_INPUT
+    await expect(categoryService.rename(database.id, '   ')).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    });
+    await expect(categoryService.rename(database.id, 'a/b')).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    });
+  });
+
+  it('移动到自己的子分类之下被拒；移到顶层会重算目录名前缀并搬迁笔记路径', async () => {
+    const { tech, database, note } = await setup();
+
+    await expect(categoryService.move(tech.id, database.id)).rejects.toMatchObject({
+      code: 'CATEGORY_MOVE_INVALID',
+    });
+    await expect(categoryService.move(tech.id, tech.id)).rejects.toMatchObject({
+      code: 'CATEGORY_MOVE_INVALID',
+    });
+    await expect(categoryService.move(tech.id, 'cat_不存在')).rejects.toMatchObject({
+      code: 'CATEGORY_NOT_FOUND',
+    });
+
+    const moved = await categoryService.move(database.id, null);
+    expect(moved.parentId).toBeNull();
+    const after = await noteService.get(note.note.id);
+    expect(after.note.filePath.startsWith(`${moved.dirName}/`)).toBe(true);
+    expect(after.note.filePath).not.toContain(`${tech.dirName}/${database.dirName}/`);
+  });
+
+  it('删除分类的三种策略语义不同：归 Inbox / 归父分类 / 不属任何分类', async () => {
+    // 归父分类：笔记应挂到父分类，路径也跟着搬过去
+    const first = await setup();
+    const toParent = await categoryService.remove(first.database.id, 'moveToParent');
+    expect(toParent.movedNotes).toBe(1);
+    expect(toParent.unassignedNotes).toBe(0);
+    const afterParent = await noteService.get(first.note.note.id);
+    expect(afterParent.note.categoryId).toBe(first.tech.id);
+    expect(afterParent.note.filePath.startsWith(`${first.tech.dirName}/`)).toBe(true);
+
+    // 归 Inbox（未分类）
+    const second = await setup();
+    const toInbox = await categoryService.remove(second.database.id, 'moveToInbox');
+    expect(toInbox.movedNotes).toBe(1);
+    expect(toInbox.unassignedNotes).toBe(0);
+    const afterInbox = await noteService.get(second.note.note.id);
+    expect(afterInbox.note.categoryId).toBeNull();
+    expect(afterInbox.note.filePath.startsWith('00_Inbox/')).toBe(true);
+
+    // 不属任何分类（与 Inbox 的区别只在报告计数，语义上是「不再归属分类」）
+    const third = await setup();
+    const unassigned = await categoryService.remove(third.database.id, 'unassign');
+    expect(unassigned.unassignedNotes).toBe(1);
+    expect(unassigned.movedNotes).toBe(0);
+    expect((await noteService.get(third.note.note.id)).note.categoryId).toBeNull();
+
+    // 分类不存在 → CATEGORY_NOT_FOUND
+    await expect(categoryService.remove('cat_不存在', 'moveToInbox')).rejects.toMatchObject({
+      code: 'CATEGORY_NOT_FOUND',
+    });
+  });
 });

@@ -106,6 +106,18 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 | `tag_delete` | `{ id }` | `void` |
 | `note_set_tag_names` | `{ id, tags }` | `Tag[]` |
 
+分类三条命令的规则（浏览器预览端同规则，2026-10-11 对齐）：
+
+- `category_update`（重命名）：名字去空（空 → `INVALID_INPUT`）、不许含 `/` 或 `\`（同上）、
+  **同级**重名（不区分大小写）→ `CATEGORY_NAME_CONFLICT`；目录名跟着改（原本没有目录的保持没有），
+  **子树里笔记的相对路径按前缀一并搬迁**；
+- `category_move`：移动到自身 → `CATEGORY_MOVE_INVALID`「不能把分类移动到自身之下。」；
+  移动到自己的子分类之下 → 同码「不能把分类移动到其子分类之下。」；目标父分类不存在 → `CATEGORY_NOT_FOUND`；
+  成功后**在新父级重算 `sortOrder` 与目录名前缀**（`NN_名称`），并搬迁子树里笔记的路径；
+- `category_delete`：三种策略语义不同——`moveToInbox` 与 `moveToParent` 计入 `movedNotes`
+  （前者归未分类、后者归被删分类的父级），`unassign` 计入 `unassignedNotes`（不再归属任何分类）；
+  处理的是子树内**非 deleted** 的笔记；分类不存在 → `CATEGORY_NOT_FOUND`。
+
 `strategy` ∈ `moveToInbox | moveToParent | unassign`；删除分类会连带删除子分类，
 但可选择如何处置其中的笔记，且不会删除笔记正文。
 

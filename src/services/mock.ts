@@ -1442,6 +1442,42 @@ function renamedFileStem(relative: string, title: string): string {
   return noteFileStem(title, new Date());
 }
 
+/** 分类子树 id（含自身）——与后端 `descendants + self` 同口径。 */
+function categorySubtreeIds(rootId: string): Set<string> {
+  const ids = new Set<string>([rootId]);
+  let added = true;
+  while (added) {
+    added = false;
+    state.categories.forEach((category) => {
+      if (category.parentId && ids.has(category.parentId) && !ids.has(category.id)) {
+        ids.add(category.id);
+        added = true;
+      }
+    });
+  }
+  return ids;
+}
+
+/** 目标父级下的下一个 `sortOrder`（与后端 `next_sort_order` 同规则）。 */
+function nextCategorySortOrder(parentId: string | null): number {
+  const siblings = state.categories.filter((item) => (item.parentId ?? null) === parentId);
+  return siblings.reduce((max, item) => Math.max(max, item.sortOrder), 0) + 1;
+}
+
+/**
+ * 目录改名 / 搬层后改写笔记路径（与后端 `rename_directory` 同规则：按**路径前缀**替换，
+ * 不看分类 id——因为「文件路径」才是事实来源）。
+ */
+function relayoutCategoryPaths(oldDirectory: string, newDirectory: string) {
+  if (!oldDirectory || !newDirectory || oldDirectory === newDirectory) return;
+  const prefix = `${oldDirectory}/`;
+  state.notes.forEach((note) => {
+    if (note.status === 'deleted') return; // 回收站里的笔记不参与（后端同样只看非 deleted）
+    if (!note.filePath.startsWith(prefix)) return;
+    note.filePath = `${newDirectory}/${note.filePath.slice(prefix.length)}`;
+  });
+}
+
 /** 分类对应的目录（与 Rust `CategoryLookup::directory_of` 同规则：无目录时回落到 Inbox）。 */
 function categoryDirectory(categoryId?: string | null): string {
   const segments: string[] = [];
@@ -3069,22 +3105,60 @@ export async function handleMockInvoke(
       return category;
     }
     case 'category_update': {
+      // 与后端 `CategoryService::rename` 同规则：去空 / 不许斜杠 / 同级重名（不区分大小写）
+      // / 目录名跟着改（原本没有目录的保持没有）/ 子树里的笔记路径一并搬迁。
       const category = state.categories.find((item) => item.id === payload.id);
       if (!category) fail('CATEGORY_NOT_FOUND', '分类不存在。');
-      category.name = String(payload.name);
-      category.dirName = nextCategoryDirectory(category.name, category.sortOrder);
+      const name = String(payload.name ?? '').trim();
+      if (!name) fail('INVALID_INPUT', '分类名称不能为空。');
+      if (name.includes('/') || name.includes('\\')) {
+        fail('INVALID_INPUT', '分类名称不能包含斜杠。');
+      }
+      const duplicated = state.categories.some(
+        (item) =>
+          item.id !== category.id &&
+          (item.parentId ?? null) === (category.parentId ?? null) &&
+          item.name.toLowerCase() === name.toLowerCase(),
+      );
+      if (duplicated) fail('CATEGORY_NAME_CONFLICT', '同级下已存在同名分类。');
+
+      const oldDirectory = categoryDirectory(category.id);
+      category.name = name;
+      if (category.dirName.trim()) {
+        category.dirName = nextCategoryDirectory(name, category.sortOrder);
+      }
+      relayoutCategoryPaths(oldDirectory, categoryDirectory(category.id));
       persist();
       return category;
     }
     case 'category_move': {
+      // 与后端 `CategoryService::move_category` 同规则：防自指 / 防成环 / 目标必须存在；
+      // 搬到新父级后重新计算序号与目录名（目录名前缀会随序号变），并搬迁子树里的笔记路径。
       const category = state.categories.find((item) => item.id === payload.id);
       if (!category) fail('CATEGORY_NOT_FOUND', '分类不存在。');
-      category.parentId = (payload.parentId as string | null) ?? null;
+      const parentId = (payload.parentId as string | null) ?? null;
+      if (parentId === category.id) fail('CATEGORY_MOVE_INVALID', '不能把分类移动到自身之下。');
+      if (parentId && categorySubtreeIds(category.id).has(parentId)) {
+        fail('CATEGORY_MOVE_INVALID', '不能把分类移动到其子分类之下。');
+      }
+      if (parentId && !state.categories.some((item) => item.id === parentId)) {
+        fail('CATEGORY_NOT_FOUND', '目标父分类不存在。');
+      }
+
+      const oldDirectory = categoryDirectory(category.id);
+      category.parentId = parentId;
+      category.sortOrder = nextCategorySortOrder(parentId);
+      if (category.dirName.trim()) {
+        category.dirName = nextCategoryDirectory(category.name, category.sortOrder);
+      }
+      relayoutCategoryPaths(oldDirectory, categoryDirectory(category.id));
       persist();
       return category;
     }
     case 'category_delete': {
       const input = payload.input as { id: string; strategy: string };
+      const deleted = state.categories.find((item) => item.id === input.id);
+      if (!deleted) fail('CATEGORY_NOT_FOUND', '分类不存在。');
       const ids = new Set([input.id]);
       let added = true;
       while (added) {
@@ -3096,19 +3170,28 @@ export async function handleMockInvoke(
           }
         });
       }
+      // 与后端三种策略同语义（此前那句三元恒为 null，是个死分支）：
+      // moveToInbox → 归到未分类；moveToParent → 归到被删分类的父级；unassign → 不属任何分类。
+      const parentTarget = deleted.parentId ?? null;
       let movedNotes = 0;
+      let unassignedNotes = 0;
       state.notes.forEach((note) => {
-        if (note.categoryId && ids.has(note.categoryId)) {
-          note.categoryId = input.strategy === 'unassign' ? null : null;
-          movedNotes += 1;
-        }
+        if (!note.categoryId || !ids.has(note.categoryId) || note.status === 'deleted') return;
+        const target = input.strategy === 'moveToParent' ? parentTarget : null;
+        note.categoryId = target;
+        // 路径跟着走（与后端 `move_to_category` 一致）；unassign 也落到 Inbox 目录
+        const stem = (note.filePath.split('/').pop() ?? '').replace(/\.md$/, '');
+        note.filePath = notePathIn(categoryDirectory(target), stem, note.id);
+        note.updatedAt = now();
+        if (input.strategy === 'unassign') unassignedNotes += 1;
+        else movedNotes += 1;
       });
       state.categories = state.categories.filter((category) => !ids.has(category.id));
       persist();
       return {
         deletedCategories: ids.size,
         movedNotes,
-        unassignedNotes: input.strategy === 'unassign' ? movedNotes : 0,
+        unassignedNotes,
         warnings: [],
       };
     }
