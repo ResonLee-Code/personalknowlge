@@ -153,6 +153,18 @@
 - 新命令：`ai_policy_get` / `ai_policy_set` / `ai_audit_tail` / `ai_kb_search` / `ai_web_fetch` / `ai_web_search`；
   错误码新增 `AI_DISABLED` / `NETWORK_DISABLED`（前后端一致）。
 
+### 覆盖补齐：注册表安全、本地只读工具边界、快速切换（2026-10-11）
+
+继续按「哪些命令背后的服务方法没进过测试」补齐，挑的都是**名字听起来可能动数据**或**边界容易含糊**的：
+
+- `workspace_forget`（`tests/workspace_registry_flow.rs`）：只改注册表——笔记文件、数据库、
+  目录结构都不动，还能重新打开且笔记仍在（「从最近列表移除」不能被理解成删除数据）；
+- `kb_search` / `note_read`（`tests/local_tools_flow.rs`）：**AI 总开关关闭时仍然可用**
+  （纯本地检索，不该被闸门挡住），并且**永不产生 `outbound=true` 审计**；
+  空关键词返回 `INVALID_INPUT`、`limit` 夹取 1–50；`quick_search` 夹取 1–30 且看不到回收站里的笔记。
+
+至此 Rust 全量 34 个测试目标全绿。
+
 ### 覆盖补齐与修正：分类移动（会挪磁盘目录的操作）+ 分类目录展示（2026-10-11）
 
 按覆盖面盘点（哪些命令背后的服务方法从没进过测试）挑出了**未被覆盖的写数据操作**——

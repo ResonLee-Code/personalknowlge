@@ -14,7 +14,7 @@
 
 | 项目 | 结果 | 证据 |
 | --- | --- | --- |
-| Rust 全量测试 | ✅ 32 个测试目标全绿（库单测 109 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
+| Rust 全量测试 | ✅ 34 个测试目标全绿（库单测 109 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
 | 前端单元 / 组件测试 | ✅ 41 个文件、217 用例全通过 | `CI=true pnpm test` |
@@ -42,6 +42,8 @@
 | 元数据保全 | `note_save` / `note_set_source` / AI 追加写入之后，frontmatter 的来源、时效、父子层级、手动顺序、置顶、类型化关系、自定义字段、标签全部保留；创建时间不被改写 | `tests/metadata_preservation_flow.rs`（3 项） |
 | 分类移动（挪目录 + 改路径） | 带孙分类的子树移到顶层 / 移回：完整目录路径正确、老目录消失、子目录随行、直属与子分类里的笔记路径改写且文件真实存在、归属 id 不变、移动后仍可检索、重开扫描后一致；防环与目标不存在被拒绝且不改数据 | `tests/category_move_flow.rs`（2 项） |
 | 分类目录展示 | 分类管理页副标题显示**完整**相对路径（子分类不再被误读为根目录）；未建目录时沿用父目录 | `src/lib/categoryDirectory.test.ts`（3 项） |
+| 「从最近列表移除」的安全性 | `workspace_forget` 只改注册表：笔记文件、数据库、目录结构都不动，还能重新打开且笔记仍在 | `tests/workspace_registry_flow.rs`（1 项） |
+| 本地只读工具边界 | `kb_search` / `note_read` 在 AI 总开关关闭时仍可用（纯本地检索），且**永不产生 `outbound=true`** 审计；空关键词报 `INVALID_INPUT`、`limit` 夹取 1–50；`quick_search` 夹取 1–30 且看不到回收站里的笔记 | `tests/local_tools_flow.rs`（3 项） |
 
 ## B. 性能（✅ 已自动验证，本机 2026-10-11 实测）
 
