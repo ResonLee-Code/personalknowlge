@@ -160,3 +160,155 @@ fn research_request_accepts_a_bare_topic() {
     assert!(full.write_back);
     assert_eq!(full.target_category_id.as_deref(), Some("cat_1"));
 }
+
+// ---------------------------------------------------------------- 响应结构契约
+
+/// 这些是前端界面真正读取的 DTO：TS 接口里的每个字段都必须能在 Rust 结构里找到，
+/// 否则改名之后界面只会渲染 `undefined`（浏览器预览用 mock，看不出来）。
+const RESPONSE_SHAPES: &[(&str, &str, &str)] = &[
+    ("src-tauri/src/domain/note.rs", "Note", "Note"),
+    ("src-tauri/src/domain/note.rs", "NoteSummary", "NoteSummary"),
+    ("src-tauri/src/domain/note.rs", "NoteDetail", "NoteDetail"),
+    ("src-tauri/src/domain/note.rs", "ReviewDueNote", "ReviewDueNote"),
+    ("src-tauri/src/domain/category.rs", "Category", "Category"),
+    ("src-tauri/src/domain/category.rs", "CategoryNode", "CategoryNode"),
+    ("src-tauri/src/domain/tag.rs", "Tag", "Tag"),
+    ("src-tauri/src/domain/search.rs", "SearchResponse", "SearchResponse"),
+    ("src-tauri/src/domain/search.rs", "SearchHit", "SearchHit"),
+    ("src-tauri/src/domain/search.rs", "IndexStatus", "IndexStatus"),
+    ("src-tauri/src/domain/graph.rs", "GraphData", "GraphData"),
+    ("src-tauri/src/domain/graph.rs", "GraphNode", "GraphNode"),
+    ("src-tauri/src/domain/graph.rs", "GraphEdge", "GraphEdge"),
+    ("src-tauri/src/domain/link.rs", "Backlink", "Backlink"),
+    ("src-tauri/src/domain/link.rs", "OutgoingLink", "OutgoingLink"),
+    ("src-tauri/src/domain/link.rs", "LinkCounts", "LinkCounts"),
+    ("src-tauri/src/domain/ai.rs", "AiPolicy", "AiPolicy"),
+    ("src-tauri/src/domain/ai.rs", "AiAuditEntry", "AiAuditEntry"),
+    ("src-tauri/src/domain/ai.rs", "ResearchBudget", "AiResearchBudget"),
+    ("src-tauri/src/domain/research.rs", "ResearchSession", "ResearchSession"),
+    ("src-tauri/src/domain/research.rs", "ResearchPlan", "ResearchPlan"),
+    ("src-tauri/src/domain/research.rs", "ResearchSource", "ResearchSource"),
+    ("src-tauri/src/domain/research.rs", "ResearchClaim", "ResearchClaim"),
+    ("src-tauri/src/domain/research.rs", "ResearchReport", "ResearchReport"),
+    ("src-tauri/src/domain/research.rs", "ResearchProposal", "ResearchProposal"),
+    (
+        "src-tauri/src/domain/research.rs",
+        "ResearchSessionSummary",
+        "ResearchSessionSummary",
+    ),
+    ("src-tauri/src/domain/settings.rs", "AppSettings", "AppSettings"),
+    ("src-tauri/src/domain/workspace.rs", "Workspace", "Workspace"),
+    ("src-tauri/src/domain/backup.rs", "BackupInfo", "BackupInfo"),
+];
+
+fn repo_path(relative: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("仓库根目录")
+        .join(relative)
+}
+
+/// 取结构体字段名（转成 camelCase，与 serde `rename_all = "camelCase"` 对齐）。
+fn rust_struct_fields(relative: &str, struct_name: &str) -> std::collections::BTreeSet<String> {
+    let source = std::fs::read_to_string(repo_path(relative)).expect("读 Rust 领域文件");
+    let marker = format!("pub struct {struct_name} {{");
+    let start = source.find(&marker).unwrap_or_else(|| panic!("找不到 {struct_name}"));
+    let body_start = start + marker.len();
+    let body_end = source[body_start..]
+        .find("\n}")
+        .map(|offset| body_start + offset)
+        .unwrap_or(source.len());
+    let body = &source[body_start..body_end];
+    let mut fields = std::collections::BTreeSet::new();
+    for line in body.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("pub ") else {
+            continue;
+        };
+        let Some((name, _)) = rest.split_once(':') else {
+            continue;
+        };
+        let name = name.trim();
+        if !name.is_empty() {
+            fields.insert(to_camel(name));
+        }
+    }
+    fields
+}
+
+/// 取 TS 接口字段名（`name:` / `name?:` 两种写法）。
+fn ts_interface_fields(interface_name: &str) -> std::collections::BTreeSet<String> {
+    let source = std::fs::read_to_string(repo_path("src/types/index.ts")).expect("读 TS 类型");
+    let marker = format!("export interface {interface_name} {{");
+    let start = source.find(&marker).unwrap_or_else(|| panic!("找不到 {interface_name}"));
+    let body_start = start + marker.len();
+    let body_end = source[body_start..]
+        .find("\n}")
+        .map(|offset| body_start + offset)
+        .unwrap_or(source.len());
+    let body = &source[body_start..body_end];
+    let mut fields = std::collections::BTreeSet::new();
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") || trimmed.starts_with("*") {
+            continue;
+        }
+        let cleaned = trimmed.trim_end_matches(';').trim();
+        let Some((name, _)) = cleaned.split_once(':') else {
+            continue;
+        };
+        // 可选字段写成 `name?: T`：`?` 要在拆冒号之后再剥掉
+        let name = name.trim().trim_end_matches('?').trim();
+        if !name.is_empty()
+            && name
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            fields.insert(name.to_string());
+        }
+    }
+    fields
+}
+
+fn to_camel(name: &str) -> String {
+    let mut parts = name.split('_');
+    let mut out = parts.next().unwrap_or_default().to_string();
+    for part in parts {
+        let mut chars = part.chars();
+        if let Some(first) = chars.next() {
+            out.push(first.to_ascii_uppercase());
+            out.extend(chars);
+        }
+    }
+    out
+}
+
+#[test]
+fn typescript_interfaces_only_reference_existing_rust_fields() {
+    let mut problems: Vec<String> = Vec::new();
+    let mut total_fields = 0usize;
+    for (rust_file, rust_struct, ts_interface) in RESPONSE_SHAPES {
+        let rust_fields = rust_struct_fields(rust_file, rust_struct);
+        let ts_fields = ts_interface_fields(ts_interface);
+        total_fields += rust_fields.len();
+        assert!(
+            !rust_fields.is_empty() && !ts_fields.is_empty(),
+            "{rust_struct} / {ts_interface} 解析为空（结构变了？）"
+        );
+        for field in ts_fields.difference(&rust_fields) {
+            problems.push(format!(
+                "{ts_interface}.{field} 在 Rust `{rust_struct}`（{rust_file}）里不存在——界面会拿到 undefined"
+            ));
+        }
+    }
+    // 29 个结构目前合计 238 个字段；留一点余量，防止解析失效导致「空集合比空集合」的假绿
+    assert!(
+        total_fields >= 220,
+        "Rust 字段总数异常（{total_fields}），解析可能失效"
+    );
+    assert!(
+        problems.is_empty(),
+        "响应结构与前端类型不一致：\n{}",
+        problems.join("\n")
+    );
+}

@@ -319,6 +319,23 @@
 
 至此 `research_flow.rs` 14 项、`web_search_flow.rs` 4 项；Rust 全量仍是 29 个测试目标全绿。
 
+### 新增守卫：响应结构契约（Rust 字段 ↔ TS 接口，2026-10-11）
+
+同一个「mock 看不出来」的问题还有第三个维度：**返回结构**。Rust 把 `file_path` 改名成 `path`，
+前端 `filePath` 就永远是 `undefined`——桌面端才暴露，而 E2E 跑的是 mock（自己手写的形状）。
+
+于是加了 `dto_contract.rs` 的 `typescript_interfaces_only_reference_existing_rust_fields`：
+对界面真正读取的 **29 个 DTO**（Note / NoteSummary / NoteDetail / ReviewDueNote / Category /
+Search* / Graph* / Backlink / AiPolicy / Research* / AppSettings / Workspace / BackupInfo 等），
+逐一比对 TS 接口字段与 Rust 结构字段（snake↔camel 归一）。
+
+- 方向是单向的：**TS 里的每个字段都必须在 Rust 里存在**（否则界面 undefined）；
+  Rust 独有的内部字段（如 `fileSize` / `fileMtime`）允许存在；
+- 结论：238 个 Rust 字段、29 对结构，**0 处不一致**；
+- 解析器写了一版就发现**漏掉可选字段**（`name?: T` 的 `?` 没在拆冒号前剥离）——
+  用「故意加一个 `bogusFieldForGuardTest?: string`」验证守卫时暴露出来，修好后守卫立刻拦住，
+  还原后恢复通过。**这也说明守卫本身必须先被证明会失败**。
+
 ### 新增守卫：命令**参数名**契约（2026-10-11）
 
 上一轮的命令契约守卫只对齐了「命令名」，没管**参数名**。参数名写错（例如把 `id` 写成 `noteId`）
