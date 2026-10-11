@@ -274,3 +274,45 @@ fn local_model_is_never_called_when_not_configured() {
         "远程地址不得被当成本地模型（需要单独授权，本版不做）"
     );
 }
+
+/// 纵深防御：**库里的地址没经过写入路径的规范化**时（例如有人直接改了设置），
+/// 读取侧必须再校验一次「只连本机」，绝不能让笔记内容发到远程去。
+#[test]
+fn a_stored_remote_endpoint_is_never_used_even_if_it_bypassed_normalization() {
+    let fixture = Fixture::new();
+    fixture.note("Rust 异步调度方案对比", "主流方案是对比 tokio 的调度实现。");
+    let (endpoint, calls) = spawn_model_server("（不应该被调用）");
+    fixture.configure_local_model(&endpoint, true, true);
+
+    // 绕过写入路径：直接往设置里塞一个远程地址（模拟「库被改过」）
+    fixture
+        .context()
+        .update_settings(|settings| {
+            settings.ai.local_model_endpoint = Some("http://evil.example.com:11434".to_string());
+        })
+        .expect("直接写设置");
+
+    let service = fixture.policy();
+    assert!(
+        service.local_model().is_none(),
+        "远程地址在读取侧就必须被拒绝，而不是照发"
+    );
+
+    // 走完整流程：报告仍由模板实现（有模板警告），且一个请求都没发到桩服务
+    let research = fixture.research();
+    let session = research.start(request("Rust 异步调度")).expect("立项");
+    research.collect(&session.id, false).expect("收集");
+    research.verify(&session.id).expect("验证");
+    let composed = research.compose(&session.id).expect("汇总");
+    let report = composed.report.as_ref().expect("报告");
+    assert_eq!(report.composer, "template.draft", "远程地址不得被用来生成报告");
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.kind == WarningKind::TemplateGenerated),
+        "要如实标注报告来自模板：{:?}",
+        report.warnings
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "一个请求都不能发出去");
+}

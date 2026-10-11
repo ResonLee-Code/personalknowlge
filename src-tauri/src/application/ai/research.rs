@@ -25,7 +25,6 @@ use crate::application::ai::traits::{
     DecisionCandidate, DecisionKind, DecisionModel, DecisionState, GenerationRequest,
     GenerativeModel, RetrievalOrigin, RetrievedChunk,
 };
-use crate::domain::ai::AiPolicy;
 use super::web_search;
 use crate::application::context::WorkspaceContext;
 use crate::application::note_service::NoteService;
@@ -213,8 +212,9 @@ impl ResearchService {
     fn decision_model(&self) -> Arc<dyn DecisionModel> {
         let policy = self.ctx.settings().ai;
         if policy.local_model_score {
-            if let Some((endpoint, model)) = policy.local_model() {
-                return Arc::new(OllamaModel::new(endpoint, model));
+            // 走服务层：读取时再校验一次地址（只允许本机），不只依赖写入时的规范化
+            if let Some((endpoint, model)) = self.policy().local_model() {
+                return Arc::new(OllamaModel::new(&endpoint, &model));
             }
         }
         Arc::clone(&self.decision)
@@ -871,7 +871,7 @@ impl ResearchService {
             max_tokens: Some(512),
             allow_remote: false,
         };
-        let composer: Option<Arc<dyn GenerativeModel>> = composer_model(&policy);
+        let composer: Option<Arc<dyn GenerativeModel>> = composer_model(&self.policy());
         let mut model_fallback: Option<String> = None;
         let response = match composer.as_ref() {
             Some(model) => match model.complete(&request) {
@@ -1380,12 +1380,15 @@ pub fn confidence_label(value: f32) -> &'static str {
 }
 
 /// 生成侧模型：策略里开启「用本地模型写报告」且地址/模型名齐全时返回它，否则 `None`（用模板）。
-fn composer_model(policy: &AiPolicy) -> Option<Arc<dyn GenerativeModel>> {
+///
+/// 地址同样经服务层校验（读取时再确认一次「只连本机」）。
+fn composer_model(service: &AiPolicyService) -> Option<Arc<dyn GenerativeModel>> {
+    let policy = service.policy();
     if !policy.local_model_compose {
         return None;
     }
-    let (endpoint, model) = policy.local_model()?;
-    Some(Arc::new(OllamaModel::new(endpoint, model)))
+    let (endpoint, model) = service.local_model()?;
+    Some(Arc::new(OllamaModel::new(&endpoint, &model)))
 }
 
 /// 校验并归一化课题（过于宽泛时要求补充范围）。

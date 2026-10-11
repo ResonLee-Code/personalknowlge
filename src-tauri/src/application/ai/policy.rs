@@ -162,6 +162,18 @@ impl AiPolicyService {
         Ok(())
     }
 
+    /// 可用的本地模型配置（地址 + 模型名）。
+    ///
+    /// **读的时候再校验一次地址**：写入路径（`apply_policy`）已经规范化过，
+    /// 但设置是从工作区数据库读出来的——多一道防线，避免「某条未来的写入路径忘了规范化」
+    /// 或「有人直接改了库」时，笔记内容被发到远程地址上去。
+    pub fn local_model(&self) -> Option<(String, String)> {
+        let policy = self.policy();
+        let (endpoint, model) = policy.local_model()?;
+        let normalized = normalize_local_endpoint(endpoint)?;
+        Some((normalized, model.to_string()))
+    }
+
     /// 追加一条审计（失败不影响主流程，只记 debug 日志）。
     pub fn audit(
         &self,
