@@ -14,7 +14,7 @@ struct Route {
     status: &'static str,
     content_type: &'static str,
     location: Option<&'static str>,
-    body: String,
+    body: Vec<u8>,
 }
 
 impl Route {
@@ -23,16 +23,21 @@ impl Route {
             status: "200 OK",
             content_type: "text/html; charset=utf-8",
             location: None,
-            body: body.to_string(),
+            body: body.as_bytes().to_vec(),
         }
     }
 
+    /// 原始字节响应：用来构造非 UTF-8 的页面（例如 GBK 编码的站点）。
+    fn bytes(content_type: &'static str, body: Vec<u8>) -> Self {
+        Self { status: "200 OK", content_type, location: None, body }
+    }
+
     fn redirect(to: &'static str) -> Self {
-        Self { status: "302 Found", content_type: "text/html", location: Some(to), body: String::new() }
+        Self { status: "302 Found", content_type: "text/html", location: Some(to), body: Vec::new() }
     }
 
     fn raw(status: &'static str, content_type: &'static str, body: &str) -> Self {
-        Self { status, content_type, location: None, body: body.to_string() }
+        Self { status, content_type, location: None, body: body.as_bytes().to_vec() }
     }
 }
 
@@ -75,18 +80,19 @@ fn handle(mut stream: TcpStream, routes: &[(&'static str, Route)]) -> std::io::R
             route.location,
             route.body.clone(),
         ),
-        None => ("404 Not Found", "text/plain", None, "not found".to_string()),
+        None => ("404 Not Found", "text/plain", None, b"not found".to_vec()),
     };
 
-    let mut response = format!("HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\n");
+    let mut headers = format!("HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\n");
     if let Some(location) = location {
-        response.push_str(&format!("Location: {location}\r\n"));
+        headers.push_str(&format!("Location: {location}\r\n"));
     }
-    response.push_str(&format!(
-        "Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+    headers.push_str(&format!(
+        "Content-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     ));
-    stream.write_all(response.as_bytes())?;
+    stream.write_all(headers.as_bytes())?;
+    stream.write_all(&body)?;
     stream.flush()
 }
 
@@ -142,4 +148,71 @@ fn reports_clear_errors_for_non_html_and_missing_pages() {
     // 地址校验发生在发请求之前：非法地址不应触网
     assert!(clip("file:///etc/passwd").is_err());
     assert!(clip("不是地址").is_err());
+}
+
+/// GBK 页面（Content-Type 声明 charset=gbk）必须被正确解码：
+/// 这是 CHANGELOG 里「ureq + charset 以便正确解码 GBK 页面」那条承诺的证据。
+///
+/// 页面里「中文内容」四个字用 **GBK 字节**（D6 D0 CE C4 A4…）拼出来，
+/// 若按 UTF-8 硬解会变成乱码。
+#[test]
+fn decodes_gbk_page_declared_in_content_type() {
+    // "标题：" -> B1 EA CC E2 A3 BA ; "中文内容" -> D6 D0 CE C4 C4 DA C8 DD
+    let mut body: Vec<u8> = b"<html><head><title>\xB1\xEA\xCC\xE2\xA3\xBA\xD6\xD0\xCE\xC4</title></head><body><h1>\xB1\xEA\xCC\xE2\xA3\xBA\xD6\xD0\xCE\xC4</h1><p>\xD6\xD0\xCE\xC4\xC4\xDA\xC8\xDD</p></body></html>".to_vec();
+    let base = spawn_server(vec![(
+        "/gbk",
+        Route::bytes("text/html; charset=gbk", std::mem::take(&mut body)),
+    )]);
+
+    let page = clip(&format!("{base}/gbk")).expect("GBK 页面也应抓得到");
+    assert!(
+        page.markdown.contains("中文内容"),
+        "GBK 页面必须正确解码（否则是乱码）：\n{}",
+        page.markdown
+    );
+    assert!(
+        page.title.contains("标题") || page.markdown.contains("标题"),
+        "标题也要解码正确：{}",
+        page.title
+    );
+    assert!(
+        page.fetched_at.len() >= 10,
+        "抓取时间要记下来（时效口径）"
+    );
+}
+
+/// 只在 `<meta charset="gbk">` 里声明编码、Content-Type 不带 charset 的页面
+/// 同样必须正确解码：这种写法在中文站点里很常见。
+///
+/// 回归背景：此前整页直接按 UTF-8 读，遇到这类页面会**整页失败**，
+/// 而且错误信息把它误报成「超过 3 MB 的页面请改用其它方式保存」，误导用户。
+#[test]
+fn decodes_gbk_page_declared_only_in_meta() {
+    let body: Vec<u8> = b"<html><head><meta charset=\"gbk\"><title>\xB1\xEA\xCC\xE2</title></head><body><h1>\xB1\xEA\xCC\xE2</h1><p>\xD6\xD0\xCE\xC4\xC4\xDA\xC8\xDD</p></body></html>".to_vec();
+    let base = spawn_server(vec![("/meta-gbk", Route::bytes("text/html", body))]);
+
+    let page = clip(&format!("{base}/meta-gbk")).expect("声明了 meta charset 的页面必须能抓下来");
+    assert!(
+        page.markdown.contains("中文内容"),
+        "meta charset=gbk 的页面要正确解码：\n{}",
+        page.markdown
+    );
+    assert!(page.title.contains("标题"), "标题也要解码正确：{}", page.title);
+}
+
+/// 既没有 Content-Type charset、也没有 meta 声明：先试严格 UTF-8，
+/// 失败再按 GBK 兜底（中文网页最常见的非 UTF-8 编码），不能整页失败。
+#[test]
+fn falls_back_to_gbk_when_no_charset_is_declared_at_all() {
+    let body: Vec<u8> =
+        b"<html><head><title>\xB1\xEA\xCC\xE2</title></head><body><p>\xD6\xD0\xCE\xC4\xC4\xDA\xC8\xDD</p></body></html>"
+            .to_vec();
+    let base = spawn_server(vec![("/bare", Route::bytes("text/html", body))]);
+
+    let page = clip(&format!("{base}/bare")).expect("没有任何编码声明时也要尽力解出来");
+    assert!(
+        page.markdown.contains("中文内容"),
+        "无声明时应按 GBK 兜底解码：\n{}",
+        page.markdown
+    );
 }

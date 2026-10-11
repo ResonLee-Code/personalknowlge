@@ -66,6 +66,75 @@ pub struct ClippedPage {
     pub bytes: usize,
 }
 
+/// 解码网页字节。
+///
+/// 关键事实（读 ureq 源码确认过）：`ureq` 打开 `charset` 特性后，**只有在 Content-Type 里
+/// 声明了非 UTF-8 的 charset 时**才会把正文转成 UTF-8 再交给我们；没声明（或声明的是
+/// `charset=utf-8`）时是 **PassThrough**，我们拿到的是**原始字节**。
+/// 所以这里必须分两种情况处理，否则会对已经解好的文本再解一次（变成乱码）。
+///
+/// 无声明时的兜底顺序：BOM → HTML `<meta charset>` → 严格 UTF-8 → GBK。
+/// 中文站点里「只在 meta 里写 gbk」非常常见，而 GBK 解码能力已经在依赖树里
+/// （`ureq` 的 charset 特性带入 `encoding_rs`），这里直接复用，不新增第三方依赖。
+fn decode_html(bytes: &[u8], content_type: &str) -> String {
+    if ureq_already_decoded(content_type) {
+        // ureq 已转成 UTF-8：只做一次容错转换，绝不再按 charset 解一遍
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    if let Some((encoding, _)) = encoding_rs::Encoding::for_bom(bytes) {
+        let (text, _, _) = encoding.decode(bytes);
+        return text.into_owned();
+    }
+    if let Some(label) = charset_from_meta(bytes) {
+        if let Some(encoding) = encoding_rs::Encoding::for_label(label.as_bytes()) {
+            let (text, _, _) = encoding.decode(bytes);
+            return text.into_owned();
+        }
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(_) => {
+            // 严格 UTF-8 失败：按 GBK 解（中文网页最常见的非 UTF-8 编码）。
+            // 真解错时正文里会出现替换字符——那是「这里可能解错了」的可见信号，不会静默糊掉。
+            let (text, _, _) = encoding_rs::GBK.decode(bytes);
+            text.into_owned()
+        }
+    }
+}
+
+/// 与 `ureq` 内部同一套判断：Content-Type 里声明了**非 UTF-8** 的 charset 时它已经解码过。
+fn ureq_already_decoded(content_type: &str) -> bool {
+    charset_from_content_type(content_type)
+        .and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes()))
+        .is_some_and(|encoding| encoding != encoding_rs::UTF_8)
+}
+
+/// 从 `Content-Type` 里取 charset（值已小写）。
+fn charset_from_content_type(content_type: &str) -> Option<String> {
+    let (_, rest) = content_type.split_once("charset=")?;
+    let label = rest
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches(['"', '\''])
+        .to_string();
+    (!label.is_empty()).then_some(label)
+}
+
+/// 从前 4 KB 里找 `<meta charset=...>`（也覆盖 `content="text/html; charset=..."`）。
+fn charset_from_meta(bytes: &[u8]) -> Option<String> {
+    let head = &bytes[..bytes.len().min(4096)];
+    let text = String::from_utf8_lossy(head).to_ascii_lowercase();
+    let index = text.find("charset=")?;
+    let rest = &text[index + "charset=".len()..];
+    let label: String = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+        .collect();
+    (!label.is_empty()).then_some(label)
+}
+
 /// 抓取并转换一个网页。**只读**，不写库。
 pub fn clip(raw_url: &str) -> Result<ClippedPage> {
     let url = normalize_url(raw_url)?;
@@ -104,17 +173,29 @@ pub fn clip(raw_url: &str) -> Result<ClippedPage> {
     }
 
     let mut response = response;
-    let html = response
+    // 读**原始字节**再自己解码：Content-Type 不带 charset、只靠 `<meta charset="gbk">` 声明的
+    // 中文站点很常见，按 UTF-8 硬读会直接失败（而且旧错误信息把它误报成「超过 3 MB」）。
+    let bytes = response
         .body_mut()
         .with_config()
         .limit(MAX_BYTES)
-        .read_to_string()
+        .read_to_vec()
         .map_err(|error| {
-            AppError::new(
-                ErrorCode::ExportFailed,
-                format!("读取网页失败：{error}（超过 3 MB 的页面请改用其它方式保存）"),
-            )
+            let too_large = format!("{error}").contains("limit");
+            let hint = if too_large {
+                format!("页面超过 {} MB，请改用其它方式保存。", MAX_BYTES / 1024 / 1024)
+            } else {
+                "请检查网络与该地址是否可公开访问。".to_string()
+            };
+            AppError::new(ErrorCode::ExportFailed, format!("读取网页失败：{error}（{hint}）"))
         })?;
+    if bytes.is_empty() {
+        return Err(AppError::new(
+            ErrorCode::ExportFailed,
+            "读取网页失败：页面返回了空内容。".to_string(),
+        ));
+    }
+    let html = decode_html(&bytes, &content_type);
 
     let (title, markdown, site) = html_to_markdown(&html, &final_url)?;
     if markdown.trim().is_empty() {

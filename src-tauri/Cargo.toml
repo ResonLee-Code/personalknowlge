@@ -46,6 +46,8 @@ thiserror = "2.0.20"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ureq = { version = "3.4.2", features = ["charset"] }
+# GBK 等非 UTF-8 网页的解码（已在依赖树里：ureq 的 charset 特性带入）
+encoding_rs = "0.8"
 uuid = { version = "1.20.0", features = ["v4"] }
 walkdir = "2.5.0"
 zip = { version = "4.2.0", default-features = false, features = ["deflate"] }

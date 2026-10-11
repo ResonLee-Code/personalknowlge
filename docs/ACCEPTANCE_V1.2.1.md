@@ -28,6 +28,7 @@
 | 扫描 / 监听并发安全 | 扫描与监听同刻采纳同一批 400 篇、两线程同扫、边扫边建 120 篇：均无 UNIQUE 冲突 | `tests/concurrency_scan_flow.rs` |
 | 图谱大库 | 3 万篇全量查询 < 1.5s 红线；节点总数不再被截断；抽样保留 3708 条边 | `tests/graph_bench.rs`（断言）+ `tests/graph_flow.rs` |
 | 网页剪藏 | 抓取 → 转 Markdown → 写 `source_type: web` 与来源地址 | `tests/clip_flow.rs` |
+| 网页剪藏 · 非 UTF-8 页面 | Content-Type 声明 GBK / **只在 `<meta charset>` 声明** / 完全不声明（UTF-8 严格失败后按 GBK 兜底）三种情况都要正确解码；错误信息不再把「编码问题」误报成「超过 3 MB」；抓取→写笔记的 `source_type: web` + 来源地址由前端用例覆盖 | `tests/clip_flow.rs`（5 项，含反向验证）+ `NewNoteDialog.test.tsx` |
 | 版本历史命名版本 | 保存 / 命名 / 改名 / 清除与还原 | `tests/history_flow.rs` |
 | 单篇复制到分类 | 副本带「副本」后缀、原作保留、分类正确 | `tests/batch_flow.rs` |
 | AI 闸门 | 默认口径下 `web_fetch` 指向不可达地址只返回 `AI_DISABLED` / `NETWORK_DISABLED`（**未触网**）；放行后真实抓取并记 `outbound=true` | `tests/ai_policy_flow.rs` |
