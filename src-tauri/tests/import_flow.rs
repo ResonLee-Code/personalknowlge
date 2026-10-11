@@ -61,6 +61,16 @@ impl Fixture {
         std::fs::write(&path, content).expect("写入源文件");
         path.to_string_lossy().to_string()
     }
+
+    /// 写**原始字节**的源文件：用来构造非 UTF-8（GBK）的文本与 CSV。
+    fn write_source_bytes(&self, name: &str, content: &[u8]) -> String {
+        let path = self.source.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("创建源目录");
+        }
+        std::fs::write(&path, content).expect("写入源文件");
+        path.to_string_lossy().to_string()
+    }
 }
 
 #[test]
@@ -471,4 +481,92 @@ fn imports_docx_paragraphs_headings_and_lists() {
     assert!(stored.body.contains("# 方案概述"), "{}", stored.body);
     assert!(stored.body.contains("第一段 & 说明"), "实体要反转义：{}", stored.body);
     assert!(stored.body.contains("- 要点一"), "{}", stored.body);
+}
+
+/// GBK 的文本文件与 CSV 不能按 UTF-8 有损解码——那会**静默**变成乱码。
+/// Windows 记事本 / Excel 在中文环境下默认就是 GBK，这是导入时的高频场景。
+///
+/// 正确行为：按 GBK 解对，并在导入报告里如实说明「这份文件不是 UTF-8」。
+#[test]
+fn imports_gbk_text_and_csv_without_mojibake() {
+    let fixture = Fixture::new();
+
+    // 「标题：中文内容」的 GBK 字节
+    const GBK_LINE: &[u8] = &[
+        0xB1, 0xEA, 0xCC, 0xE2, 0xA3, 0xBA, 0xD6, 0xD0, 0xCE, 0xC4, 0xC4, 0xDA, 0xC8, 0xDD,
+    ];
+    let text = fixture.write_source_bytes("gbk-note.txt", GBK_LINE);
+
+    let mut csv: Vec<u8> = Vec::new();
+    csv.extend_from_slice(b"\xCA\xF4\xD0\xD4,\xD6\xB5\n"); // 表头「属性,值」
+    csv.extend_from_slice(GBK_LINE); // 一行 GBK 数据
+    csv.push(b'\n');
+    let csv_path = fixture.write_source_bytes("gbk-table.csv", &csv);
+
+    let report = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![text, csv_path],
+            mode: None,
+            preserve_structure: None,
+            category_id: None,
+        })
+        .expect("导入应成功");
+
+    assert_eq!(report.imported.len(), 2, "跳过项：{:?}", report.skipped);
+
+    let text_note = fixture
+        .notes()
+        .get(&report.imported[0].note_id)
+        .expect("读回文本笔记");
+    assert!(
+        text_note.content.contains("标题：中文内容"),
+        "GBK 文本要解对而不是乱码：\n{}",
+        text_note.content
+    );
+
+    let csv_note = fixture
+        .notes()
+        .get(&report.imported[1].note_id)
+        .expect("读回 CSV 笔记");
+    assert!(
+        csv_note.content.contains("中文内容"),
+        "GBK 的 CSV 表格也要解对：\n{}",
+        csv_note.content
+    );
+    assert!(csv_note.content.contains('|'), "CSV 要转成 Markdown 表格");
+
+    assert_eq!(
+        report.warnings.len(),
+        2,
+        "两个文件都不是 UTF-8，要各提醒一次：{:?}",
+        report.warnings
+    );
+    assert!(
+        report.warnings.iter().all(|line| line.contains("GBK")),
+        "提醒里要写明按什么编码解的：{:?}",
+        report.warnings
+    );
+}
+
+/// UTF-8 文件不该产生任何「已按 GBK 解码」的噪声提醒。
+#[test]
+fn utf8_imports_report_no_encoding_warning() {
+    let fixture = Fixture::new();
+    let source = fixture.write_source("utf8.txt", "标题：中文内容\n");
+    let report = fixture
+        .imports()
+        .import(ImportNotesInput {
+            paths: vec![source],
+            mode: None,
+            preserve_structure: None,
+            category_id: None,
+        })
+        .expect("导入应成功");
+    assert_eq!(report.imported.len(), 1);
+    assert!(
+        report.warnings.is_empty(),
+        "UTF-8 文件不该有编码提醒：{:?}",
+        report.warnings
+    );
 }

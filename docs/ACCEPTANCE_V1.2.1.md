@@ -17,7 +17,7 @@
 | Rust 全量测试 | ✅ 39 个测试目标全绿（库单测 116 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
-| 前端单元 / 组件测试 | ✅ 47 个文件、250 用例全通过 | `CI=true pnpm test` |
+| 前端单元 / 组件测试 | ✅ 47 个文件、255 用例全通过 | `CI=true pnpm test` |
 | 前端生产构建 | ✅ 构建成功 | `CI=true pnpm build` |
 | 端到端主流程 | ✅ 1 条主流程通过（34 个编号步骤 + 补充断言，浏览器预览后端） | `CI=true pnpm test:e2e`（截图见 `docs/screenshots/`）；重负载下时序敏感，配置了 1 次重试与 10s 断言超时（原因写在 `playwright.config.ts` 注释里） |
 
@@ -29,6 +29,7 @@
 | 图谱大库 | 3 万篇全量查询 < 1.5s 红线；节点总数不再被截断；抽样保留 3708 条边 | `tests/graph_bench.rs`（断言）+ `tests/graph_flow.rs` |
 | 网页剪藏 | 抓取 → 转 Markdown → 写 `source_type: web` 与来源地址 | `tests/clip_flow.rs` |
 | 网页剪藏 · 非 UTF-8 页面 | Content-Type 声明 GBK / **只在 `<meta charset>` 声明** / 完全不声明（UTF-8 严格失败后按 GBK 兜底）三种情况都要正确解码；错误信息不再把「编码问题」误报成「超过 3 MB」；抓取→写笔记的 `source_type: web` + 来源地址由前端用例覆盖 | `tests/clip_flow.rs`（5 项，含反向验证）+ `NewNoteDialog.test.tsx` |
+| 导入非 UTF-8 文件（GBK 文本 / CSV） | 共用 `core::encoding::decode_text`（BOM → 严格 UTF-8 → GBK 兜底）：GBK 的 `.txt` / `.csv` 解对不出现乱码，且**如实提醒**「不是 UTF-8，已按 GBK 解码」（导入报告 + 成功路径的 toast）；UTF-8 文件不产生噪声提醒 | `tests/import_flow.rs`（13 项，含 2 项本项）+ `core::encoding` 单测（4 项）+ `NewNoteDialog.test.tsx`（+1，均反向验证过） |
 | 版本历史命名版本 | 保存 / 命名 / 改名 / 清除与还原 | `tests/history_flow.rs` |
 | 单篇复制到分类 | 副本带「副本」后缀、原作保留、分类正确 | `tests/batch_flow.rs` |
 | AI 闸门 | 默认口径下 `web_fetch` 指向不可达地址只返回 `AI_DISABLED` / `NETWORK_DISABLED`（**未触网**）；放行后真实抓取并记 `outbound=true` | `tests/ai_policy_flow.rs` |

@@ -96,6 +96,10 @@ pub struct ImportReport {
     /// 实际采用的导入模式（auto 时由识别结果决定）
     #[serde(default)]
     pub mode: String,
+    /// 需要让用户知道的提醒（例如「源文件不是 UTF-8，已按 GBK 解码」）。
+    /// 不是失败——文件导进来了，只是过程需要如实交代。
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 pub struct ImportService {
@@ -131,6 +135,7 @@ impl ImportService {
             requested_mode
         };
         let mut report = ImportReport {
+            warnings: Vec::new(),
             imported: Vec::new(),
             skipped: Vec::new(),
             total: 0,
@@ -221,6 +226,7 @@ impl ImportService {
                 preserve_structure,
                 mode,
                 &attachment_map,
+                &mut report.warnings,
             ) {
                 Ok(imported) => report.imported.push(imported),
                 Err(error) => {
@@ -346,6 +352,7 @@ impl ImportService {
         preserve_file_name: bool,
         mode: ImportMode,
         attachments: &AttachmentMap,
+        warnings: &mut Vec<String>,
     ) -> Result<ImportedNote> {
         if !is_supported(path) {
             return Err(AppError::invalid_input(format!(
@@ -365,7 +372,19 @@ impl ImportService {
         let office_format = super::import_office::OfficeFormat::detect(path);
 
         let bytes = std::fs::read(path)?;
-        let raw = String::from_utf8_lossy(&bytes).into_owned();
+        // 非 UTF-8（GBK 的 .txt/.md/.csv 很常见）不能 `from_utf8_lossy`——那会静默变乱码。
+        // 共用解码器给出「解出的文本 + 是否用了兜底编码」，后者如实回报给用户。
+        let (raw, fallback_encoding) = crate::core::encoding::decode_text(&bytes);
+        if let Some(encoding) = fallback_encoding {
+            // 静默当成 UTF-8 会把整篇变成乱码（此前就是 `from_utf8_lossy`）；
+            // 现在按兜底编码解对了，但仍要告诉用户「这份文件不是 UTF-8」。
+            if warnings.len() < 20 {
+                warnings.push(format!(
+                    "{} 不是 UTF-8，已按 {encoding} 解码",
+                    path.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default()
+                ));
+            }
+        }
         let is_markdown = path
             .extension()
             .and_then(|ext| ext.to_str())

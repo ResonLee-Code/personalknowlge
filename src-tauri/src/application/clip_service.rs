@@ -73,11 +73,10 @@ pub struct ClippedPage {
 /// `charset=utf-8`）时是 **PassThrough**，我们拿到的是**原始字节**。
 /// 所以这里必须分两种情况处理，否则会对已经解好的文本再解一次（变成乱码）。
 ///
-/// 无声明时的兜底顺序：BOM → HTML `<meta charset>` → 严格 UTF-8 → GBK。
-/// 中文站点里「只在 meta 里写 gbk」非常常见，而 GBK 解码能力已经在依赖树里
-/// （`ureq` 的 charset 特性带入 `encoding_rs`），这里直接复用，不新增第三方依赖。
+/// 原始字节的兜底顺序：BOM → HTML `<meta charset>` → 严格 UTF-8 → GBK
+/// （最后两步在 `core::encoding::decode_text` 里，与「导入本地文件」共用同一份实现）。
 fn decode_html(bytes: &[u8], content_type: &str) -> String {
-    if ureq_already_decoded(content_type) {
+    if crate::core::encoding::charset_declared_non_utf8(content_type) {
         // ureq 已转成 UTF-8：只做一次容错转换，绝不再按 charset 解一遍
         return String::from_utf8_lossy(bytes).into_owned();
     }
@@ -85,54 +84,12 @@ fn decode_html(bytes: &[u8], content_type: &str) -> String {
         let (text, _, _) = encoding.decode(bytes);
         return text.into_owned();
     }
-    if let Some(label) = charset_from_meta(bytes) {
-        if let Some(encoding) = encoding_rs::Encoding::for_label(label.as_bytes()) {
-            let (text, _, _) = encoding.decode(bytes);
-            return text.into_owned();
+    if let Some(label) = crate::core::encoding::charset_from_meta(bytes) {
+        if let Some((text, _)) = crate::core::encoding::decode_with(bytes, &label) {
+            return text;
         }
     }
-    match std::str::from_utf8(bytes) {
-        Ok(text) => text.to_string(),
-        Err(_) => {
-            // 严格 UTF-8 失败：按 GBK 解（中文网页最常见的非 UTF-8 编码）。
-            // 真解错时正文里会出现替换字符——那是「这里可能解错了」的可见信号，不会静默糊掉。
-            let (text, _, _) = encoding_rs::GBK.decode(bytes);
-            text.into_owned()
-        }
-    }
-}
-
-/// 与 `ureq` 内部同一套判断：Content-Type 里声明了**非 UTF-8** 的 charset 时它已经解码过。
-fn ureq_already_decoded(content_type: &str) -> bool {
-    charset_from_content_type(content_type)
-        .and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes()))
-        .is_some_and(|encoding| encoding != encoding_rs::UTF_8)
-}
-
-/// 从 `Content-Type` 里取 charset（值已小写）。
-fn charset_from_content_type(content_type: &str) -> Option<String> {
-    let (_, rest) = content_type.split_once("charset=")?;
-    let label = rest
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .trim_matches(['"', '\''])
-        .to_string();
-    (!label.is_empty()).then_some(label)
-}
-
-/// 从前 4 KB 里找 `<meta charset=...>`（也覆盖 `content="text/html; charset=..."`）。
-fn charset_from_meta(bytes: &[u8]) -> Option<String> {
-    let head = &bytes[..bytes.len().min(4096)];
-    let text = String::from_utf8_lossy(head).to_ascii_lowercase();
-    let index = text.find("charset=")?;
-    let rest = &text[index + "charset=".len()..];
-    let label: String = rest
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
-        .collect();
-    (!label.is_empty()).then_some(label)
+    crate::core::encoding::decode_text(bytes).0
 }
 
 /// 抓取并转换一个网页。**只读**，不写库。

@@ -950,6 +950,35 @@ p95 44.4 ms、召回 100%；3 万篇图谱 `graph_get` 全量 **843.7 ms**（红
 反向验证过（把过滤撤掉 → 用例立刻失败，打印出 E 级来源混进结论段）。
 Rust 36 个测试目标、前端 248 用例全绿。
 
+### 缺陷修复：导入 GBK 文本 / CSV 会静默变乱码（2026-10-11）
+
+**症状**：导入 Windows 记事本或 Excel 在中文环境下另存的 `.txt` / `.md` / `.csv`（默认是 GBK）
+时，笔记正文会**静默变成乱码**——导入报告里显示「成功导入 N 篇」，用户点进去才发现全是问号方块。
+比报错更糟：没有任何信号。
+
+**根因**：导入路径用 `String::from_utf8_lossy` 读文件（`import_service`），
+CSV / docx 走的是 `import_office` 里另一个同样只认 UTF-8 的 `decode_text`。
+
+**修复**：
+
+1. 抽出 `core::encoding::decode_text()`（BOM → 严格 UTF-8 → **GBK 兜底**），
+   返回「文本 + 用了哪种兜底编码」；导入文本、CSV、docx 正文与网页剪藏**共用这一份实现**；
+   GBK 解码复用已在依赖树里的 `encoding_rs`（不新增第三方依赖）；
+2. **乱码要说出来**：`ImportReport` 新增 `warnings`，凡是用兜底编码解过的文件都记一条
+   「xx.txt 不是 UTF-8，已按 GBK 解码」（上限 20 条）；
+   前端在「导入成功」这条路径上用 `toast.warning` 提示（这条路径会直接跳到第一篇笔记，
+   结果面板根本不会展示——只把提示放在面板里等于没说），全部失败时结果面板里也会列出来；
+3. 顺手修掉一处「形同虚设」的 `<meta charset>` 嗅探：带引号的写法（`charset="gbk"`）
+   之前匹配不到（剪藏靠 GBK 兜底侥幸解对，但没有真正用上声明）。
+
+**测试**：`tests/import_flow.rs` 增 2 项——GBK 的 `.txt` 与 `.csv` 都要解对（正文含中文、CSV 转成表格）
+且各留一条编码提醒；**UTF-8 文件不得产生任何提醒**（避免噪声）。
+`core::encoding` 4 个单测（UTF-8 / GBK 兜底并如实报出编码 / BOM 与标签 / Content-Type 与 meta 嗅探）。
+`NewNoteDialog.test.tsx` 增 1 项（成功路径必须用 toast 把编码提醒带出来——测试里顺带补上了
+「Tauri 运行时」可切换的 mock，因为导入流程本来就只在桌面端可用）。
+四处都反向验证过（退回 `from_utf8_lossy`、去掉提醒、去掉 toast → 对应用例立即失败）。
+Rust 39 个测试目标、前端 255 用例全绿。
+
 ### 缺陷修复：只在 `<meta charset>` 里声明 GBK 的中文网页完全抓不下来（2026-10-11）
 
 **症状**：剪藏一个「HTTP 头不带 charset、只在 `<meta charset="gbk">` 里声明编码」的页面

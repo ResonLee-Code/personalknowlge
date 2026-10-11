@@ -432,6 +432,8 @@ export interface ImportReport {
   attachments: number;
   /** 实际采用的导入模式（auto 时由识别结果决定） */
   mode: string;
+  /** 需要让用户知道的提醒（例如「源文件不是 UTF-8，已按 GBK 解码」）；不是失败 */
+  warnings?: string[];
 }
 
 /** 笔记导出 */

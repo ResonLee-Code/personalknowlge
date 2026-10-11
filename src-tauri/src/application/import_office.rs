@@ -59,16 +59,11 @@ pub fn to_markdown(path: &Path, format: OfficeFormat) -> Result<String> {
             let bytes = std::fs::read(path).map_err(|error| {
                 AppError::new(ErrorCode::IoError, format!("读取 CSV 失败：{error}"))
             })?;
-            csv_to_markdown(&decode_text(&bytes))
+            csv_to_markdown(&crate::core::encoding::decode_text(&bytes).0)
         }
     }
 }
 
-/// 文本解码：优先 UTF-8（含 BOM），失败时回退 GBK 之外的宽松处理（按 UTF-8 有损）。
-fn decode_text(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes).to_string();
-    text.strip_prefix('\u{feff}').unwrap_or(&text).to_string()
-}
 
 /// `.docx` → Markdown：解压 `word/document.xml` 抽取段落。
 fn docx_to_markdown(path: &Path) -> Result<String> {
@@ -86,7 +81,7 @@ fn docx_to_markdown(path: &Path) -> Result<String> {
             AppError::new(ErrorCode::IoError, format!("读取 docx 正文失败：{error}"))
         })?;
     }
-    extract_docx_paragraphs(&decode_text(&bytes))
+    extract_docx_paragraphs(&crate::core::encoding::decode_text(&bytes).0)
 }
 
 /// 从 `word/document.xml` 里按段落抽取 Markdown。

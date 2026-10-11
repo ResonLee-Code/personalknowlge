@@ -5,6 +5,7 @@ import {
   Link2,
   Loader2,
   PencilLine,
+  TriangleAlert,
   X,
   XCircle,
 } from 'lucide-react';
@@ -462,6 +463,13 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
       await refreshNotes();
       await refreshStats();
       if (result.imported.length > 0) {
+        // 编码提醒要在「导入成功」这条路径上也说出来——这条路径会直接跳到第一篇笔记，
+        // 结果面板根本不会展示（面板只在「全部失败」时保留）。
+        if ((result.warnings?.length ?? 0) > 0) {
+          toast.warning(
+            `${result.warnings!.length} 个文件不是 UTF-8，已按原编码解码：${result.warnings![0]}`,
+          );
+        }
         // 导入成功后直接进入第一篇笔记，避免停在结果页
         const first = result.imported[0];
         onClose();
@@ -505,6 +513,19 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
               <span className="ml-1 text-[var(--ink-subtle)]">{item.filePath}</span>
             </p>
           ))}
+          {(report.warnings?.length ?? 0) > 0 ? (
+            <>
+              <p className="flex items-center gap-1.5 pt-1 text-amber-600">
+                <TriangleAlert className="h-3.5 w-3.5" />
+                {report.warnings!.length} 条提醒
+              </p>
+              {report.warnings!.slice(0, 5).map((line) => (
+                <p key={line} className="truncate text-[var(--ink-subtle)]">
+                  · {line}
+                </p>
+              ))}
+            </>
+          ) : null}
           {report.skipped.length > 0 ? (
             <>
               <p className="flex items-center gap-1.5 pt-1 text-red-500">

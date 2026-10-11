@@ -3,6 +3,7 @@
 //! 该层不依赖任何业务模块，可被 domain / infrastructure / application 复用。
 
 pub mod base64;
+pub mod encoding;
 pub mod error;
 pub mod events;
 pub mod hash;

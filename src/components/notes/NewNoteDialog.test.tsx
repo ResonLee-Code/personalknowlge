@@ -4,12 +4,32 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NewNoteDialog } from '@/components/notes/NewNoteDialog';
+import * as appServiceModule from '@/services/appService';
+import { noteService } from '@/services/noteService';
 import { templateService } from '@/services/templateService';
+import { toast } from 'sonner';
 import { useNotesStore } from '@/stores/notesStore';
 import { useUiStore } from '@/stores/uiStore';
 
 vi.mock('@/services/templateService', () => ({
   templateService: { list: vi.fn(), render: vi.fn() },
+}));
+
+// 运行时可切换（默认浏览器预览；需要走桌面导入流程的用例自己打开）
+const runtimeFlag = vi.hoisted(() => ({ tauri: false }));
+
+vi.mock('@/services/api', async () => {
+  const actual = await vi.importActual<typeof import('@/services/api')>('@/services/api');
+  return { ...actual, isTauriRuntime: () => runtimeFlag.tauri };
+});
+
+vi.mock('@/services/appService', async () => {
+  const actual = await vi.importActual<typeof import('@/services/appService')>('@/services/appService');
+  return { ...actual, pickMarkdownFiles: vi.fn(), pickDirectory: vi.fn() };
+});
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
 const listTemplates = vi.mocked(templateService.list);
@@ -18,6 +38,7 @@ const renderTemplate = vi.mocked(templateService.render);
 describe('NewNoteDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    runtimeFlag.tauri = false;
     listTemplates.mockResolvedValue([]);
     useUiStore.setState({ newNoteDialogOpen: false });
   });
@@ -40,6 +61,43 @@ describe('NewNoteDialog', () => {
     expect(screen.getByRole('button', { name: '选择文件夹' })).toBeInTheDocument();
     // 未选择文件时导入按钮不可用
     expect(screen.getByRole('button', { name: /导入到知识库/ })).toBeDisabled();
+  });
+
+  // 回归：导入成功的路径会直接跳到第一篇笔记，结果面板不会展示——
+  // 「源文件不是 UTF-8，已按 GBK 解码」这类提醒必须在这条路径上也说出来，
+  // 否则用户只知道「导入成功」，不知道自己的文件被换过编码。
+  it('导入时把编码提醒带出来（成功路径用 toast，不静默）', async () => {
+    runtimeFlag.tauri = true;
+    vi.mocked(appServiceModule.pickMarkdownFiles).mockResolvedValue(['/tmp/gbk-note.txt']);
+    vi.spyOn(noteService, 'importFiles').mockResolvedValue({
+      imported: [{ sourcePath: '/tmp/gbk-note.txt', noteId: 'note_gbk', title: 'gbk-note', filePath: '00_Inbox/gbk-note.md' }],
+      skipped: [],
+      total: 1,
+      failed: 0,
+      attachments: 0,
+      mode: 'plain',
+      warnings: ['gbk-note.txt 不是 UTF-8，已按 GBK 解码'],
+    });
+    useNotesStore.setState({ refresh: vi.fn() } as never);
+
+    useUiStore.setState({ newNoteDialogOpen: true });
+    render(
+      <MemoryRouter>
+        <NewNoteDialog />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: /导入外部文件/ }));
+    await userEvent.click(screen.getByRole('button', { name: '选择文件' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /导入到知识库/ })).toBeEnabled(),
+    );
+    await userEvent.click(screen.getByRole('button', { name: /导入到知识库/ }));
+
+    await waitFor(() =>
+      expect(vi.mocked(toast.warning)).toHaveBeenCalledWith(
+        expect.stringContaining('不是 UTF-8'),
+      ),
+    );
   });
 
   it('浏览器预览模式提示需在桌面应用中使用导入', async () => {
@@ -168,4 +226,5 @@ describe('NewNoteDialog · 从网页剪藏（C1）', () => {
     await waitFor(() => expect(screen.queryByTestId('clip-preview')).not.toBeInTheDocument());
     expect(screen.getByTestId('clip-create')).toBeDisabled();
   });
+
 });
