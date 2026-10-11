@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { toast } from 'sonner';
 
 import { EVENTS } from '@/lib/constants';
+import { formatWarningsToast } from '@/lib/warnings';
 import { subscribe } from '@/services/api';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
@@ -28,6 +29,9 @@ export function useWorkspaceEvents() {
         if (parts.length > 0) {
           toast.info(`检测到外部修改：${parts.join('，')}`);
         }
+        // 扫描里的提醒（跳过无法读取的文件 / 重建链接失败…）以前被直接丢掉
+        const notice = formatWarningsToast(payload.warnings);
+        if (notice) toast.warning(notice);
         void useNotesStore.getState().refresh();
         void useWorkspaceStore.getState().refreshStats();
         const detail = useNotesStore.getState().detail;

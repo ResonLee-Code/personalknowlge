@@ -1,6 +1,8 @@
+import { toast } from 'sonner';
 import { create } from 'zustand';
 
 import { errorMessage } from '@/lib/format';
+import { formatWarningsToast } from '@/lib/warnings';
 import { workspaceService } from '@/services/workspaceService';
 import { searchService } from '@/services/searchService';
 import { useUiStore } from '@/stores/uiStore';
@@ -102,6 +104,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         indexStatus: result.indexStatus,
         initializedWarnings: result.warnings,
       });
+      // 打开 / 新建 / 切换工作区时后端会带回提醒（例如「跳过无法读取的文件 xx.md」）：
+      // 以前只是存进 state，界面上从来不显示——用户放进来的文件被跳过却毫无提示。
+      const notice = formatWarningsToast(result.warnings);
+      if (notice) toast.warning(notice);
       useUiStore.getState().applyPreferences(result.settings);
       await get().refreshList();
       return true;
@@ -124,6 +130,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         indexStatus: result.indexStatus,
         initializedWarnings: result.warnings,
       });
+      // 打开 / 新建 / 切换工作区时后端会带回提醒（例如「跳过无法读取的文件 xx.md」）：
+      // 以前只是存进 state，界面上从来不显示——用户放进来的文件被跳过却毫无提示。
+      const notice = formatWarningsToast(result.warnings);
+      if (notice) toast.warning(notice);
       useUiStore.getState().applyPreferences(result.settings);
       await get().refreshList();
       return true;
@@ -146,6 +156,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         indexStatus: result.indexStatus,
         initializedWarnings: result.warnings,
       });
+      // 打开 / 新建 / 切换工作区时后端会带回提醒（例如「跳过无法读取的文件 xx.md」）：
+      // 以前只是存进 state，界面上从来不显示——用户放进来的文件被跳过却毫无提示。
+      const notice = formatWarningsToast(result.warnings);
+      if (notice) toast.warning(notice);
       useUiStore.getState().applyPreferences(result.settings);
       await get().refreshList();
       return true;

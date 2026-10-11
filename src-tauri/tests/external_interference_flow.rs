@@ -385,3 +385,42 @@ fn child_adopted_before_parent_regains_its_level_via_file_watch() {
         "监听路径也要在同一轮把层级补上"
     );
 }
+
+/// 非 UTF-8（GBK）的 Markdown 直接放进工作区时：扫描**明确跳过并告警**，
+/// 不会静默消失，也不会把整篇解成乱码偷偷入库。
+///
+/// 想把它变成正常笔记，走「导入」——导入会按 GBK 解码并写成 UTF-8 的新笔记。
+#[test]
+fn a_non_utf8_markdown_file_is_skipped_with_a_visible_warning() {
+    let fixture = Fixture::new();
+    let root = fixture.workspace.path();
+    // 「标题：中文内容」的 GBK 字节，前面加上 GBK 的 frontmatter 分隔行
+    let mut bytes: Vec<u8> = Vec::new();
+    bytes.extend_from_slice(b"---\nid: note_gbk_0001\ntitle: ");
+    bytes.extend_from_slice(&[0xB1, 0xEA, 0xCC, 0xE2]); // 标题
+    bytes.extend_from_slice(b"\n---\n");
+    bytes.extend_from_slice(&[0xD6, 0xD0, 0xCE, 0xC4, 0xC4, 0xDA, 0xC8, 0xDD]); // 中文内容
+    bytes.push(b'\n');
+    std::fs::write(root.join("00_Inbox/gbk-笔记.md"), &bytes).expect("写入 GBK 笔记");
+
+    let report = IndexService::new(fixture.context())
+        .scan_workspace()
+        .expect("扫描不应因为一个读不了的文件而失败");
+
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|line| line.contains("gbk-笔记.md")),
+        "要如实告警是哪份文件被跳过：{:?}",
+        report.warnings
+    );
+    let notes = fixture
+        .notes()
+        .list(NoteListQuery { page_size: Some(200), ..Default::default() })
+        .expect("列表");
+    assert!(
+        !notes.items.iter().any(|item| item.title.contains("标题")),
+        "读不了的 GBK 文件不该被静默当成乱码入库"
+    );
+}

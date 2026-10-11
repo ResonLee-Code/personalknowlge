@@ -10,6 +10,7 @@ import { AiSettingsPanel } from '@/features/settings/AiSettingsPanel';
 import { reportAction } from '@/lib/actionFeedback';
 import { AUTOSAVE_DELAY_OPTIONS, FONT_SIZE_OPTIONS, ROUTES, THEME_OPTIONS } from '@/lib/constants';
 import { errorMessage, formatBytes, formatDateTime } from '@/lib/format';
+import { formatWarningsToast } from '@/lib/warnings';
 import { backupService } from '@/services/backupService';
 import { openPath, pickDirectory } from '@/services/appService';
 import { isTauriRuntime } from '@/services/api';
@@ -210,13 +211,17 @@ export function SettingsPage() {
               size="sm"
               variant="secondary"
               onClick={() =>
-                void scan().then((report) =>
-                  report
-                    ? toast.success(
-                        `新增 ${report.added}，更新 ${report.updated}，缺失 ${report.missing}`,
-                      )
-                    : toast.error('扫描失败'),
-                )
+                void scan().then((report) => {
+                  if (!report) {
+                    toast.error('扫描失败');
+                    return;
+                  }
+                  toast.success(
+                    `新增 ${report.added}，更新 ${report.updated}，缺失 ${report.missing}`,
+                  );
+                  const notice = formatWarningsToast(report.warnings);
+                  if (notice) toast.warning(notice);
+                })
               }
             >
               <RefreshCw className="h-3.5 w-3.5" />
