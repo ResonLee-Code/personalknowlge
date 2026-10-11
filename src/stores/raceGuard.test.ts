@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRequestGuard } from '@/lib/latestRequest';
 import { noteService } from '@/services/noteService';
 import { searchService } from '@/services/searchService';
-import { useNotesStore } from '@/stores/notesStore';
+import { registerEditorFlush, useNotesStore } from '@/stores/notesStore';
 import { useSearchStore } from '@/stores/searchStore';
 import type { NoteDetail, SearchResponse } from '@/types';
 
@@ -100,5 +100,33 @@ describe('异步竞态：最后发起的请求才算数', () => {
     resolveSlow(searchResponse('旧词'));
     await first;
     expect(useSearchStore.getState().response?.keyword).toBe('新词');
+  });
+  it('切换笔记前会先调用编辑器注册的「立即落盘」', async () => {
+    const order: string[] = [];
+    registerEditorFlush(async () => {
+      order.push('flush');
+      return true;
+    });
+    vi.spyOn(noteService, 'get').mockImplementation(async (id: string) => {
+      order.push(`get:${id}`);
+      return detail(id, id) as never;
+    });
+
+    useNotesStore.setState({ detail: detail('note_a', '甲'), selectedId: 'note_a' });
+    await useNotesStore.getState().openDetail('note_b');
+    expect(order, '必须先落盘再切走').toEqual(['flush', 'get:note_b']);
+
+    // 同一篇（外部变更后刷新）不重复触发落盘
+    order.length = 0;
+    await useNotesStore.getState().openDetail('note_b');
+    expect(order).toEqual(['get:note_b']);
+
+    // 冲突对话框「以磁盘为准」时明确跳过落盘
+    order.length = 0;
+    useNotesStore.setState({ detail: detail('note_c', '丙'), selectedId: 'note_c' });
+    await useNotesStore.getState().openDetail('note_d', { discardLocalEdits: true });
+    expect(order).toEqual(['get:note_d']);
+
+    registerEditorFlush(null);
   });
 });

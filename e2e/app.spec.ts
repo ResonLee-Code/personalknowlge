@@ -90,6 +90,17 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.keyboard.press('Meta+e');
   await expect(page.locator('.cm-content')).toBeFocused();
 
+  // 5c. 防抖窗口内切走笔记不能丢改动（切走前必须先落盘）
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('\n\n切走前的这行字必须落盘。');
+  // 立刻点到另一篇笔记：此刻 3000ms 的自动保存防抖还没到
+  await page.getByTestId('note-list-item').filter({ hasText: '欢迎使用' }).first().click();
+  await expect(page.locator('.cm-content')).toContainText('欢迎使用');
+  // 切回来：刚才那行字必须还在（说明切换前已经落盘）
+  await page.getByTestId('note-list-item').filter({ hasText: 'SQLite 全文搜索学习笔记' }).first().click();
+  await expect(page.locator('.cm-content')).toContainText('切走前的这行字必须落盘');
+
   // 还原自动保存延迟，避免影响后续步骤的等待逻辑
   await page.goto('/#/settings');
   await page.getByLabel('自动保存延迟').selectOption('1000');

@@ -72,6 +72,7 @@ import { noteService } from '@/services/noteService';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { isTauriRuntime } from '@/services/api';
 import { useNotesStore } from '@/stores/notesStore';
+import { registerEditorFlush } from '@/stores/notesStore';
 import { LAYOUT_DEFAULTS, useUiStore } from '@/stores/uiStore';
 import { persistLayoutPreferences, useWorkspaceStore } from '@/stores/workspaceStore';
 import type { LinkCounts, RelationView } from '@/types';
@@ -259,7 +260,7 @@ export function NoteEditorPage() {
     [navigate, wikilinkTargets],
   );
 
-  const { saveNow, resetBaseline } = useAutosave({
+  const { saveNow, flush, resetBaseline } = useAutosave({
     enabled: settings?.autosaveEnabled ?? false,
     delay: settings?.autosaveDelayMs ?? 1000,
     signature: detail ? signature : null,
@@ -427,6 +428,21 @@ export function NoteEditorPage() {
     },
     [setEditorMode],
   );
+
+  /** 把「立即落盘」注册给 store：切换笔记时它会先调用这里（自动保存有防抖窗口） */
+  const flushRef = useRef(flush);
+  useEffect(() => {
+    // 在 effect 里同步最新实现（不要在渲染期间写 ref）
+    flushRef.current = flush;
+  }, [flush]);
+  useEffect(() => {
+    registerEditorFlush(() => flushRef.current());
+    return () => {
+      registerEditorFlush(null);
+      // 离开编辑器前再保险一次：防抖窗口里的改动不能就这么丢
+      void flushRef.current();
+    };
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

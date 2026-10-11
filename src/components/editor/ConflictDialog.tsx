@@ -43,7 +43,10 @@ export function ConflictDialog({
             variant="secondary"
             onClick={() => {
               clearConflict();
-              void openDetail(conflict.noteId).then(() => toast.info('已重新加载磁盘内容'));
+              // 用户明确选择「以磁盘为准」：跳过「切换前落盘」，不要把本地内容写回去
+              void openDetail(conflict.noteId, { discardLocalEdits: true }).then(() =>
+                toast.info('已重新加载磁盘内容'),
+              );
             }}
           >
             重新加载磁盘内容

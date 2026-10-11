@@ -53,7 +53,13 @@ interface NotesState {
   setRootOnly: (rootOnly: boolean) => Promise<void>;
   refresh: () => Promise<void>;
   select: (id: string | null) => Promise<void>;
-  openDetail: (id: string) => Promise<void>;
+  /**
+   * 打开笔记详情。
+   *
+   * 默认在**切换笔记**前先把防抖中的编辑落盘；`discardLocalEdits: true` 表示
+   * 调用方明确要放弃本地编辑（例如冲突对话框的「重新加载磁盘内容」）。
+   */
+  openDetail: (id: string, options?: { discardLocalEdits?: boolean }) => Promise<void>;
   create: (input: CreateNoteInput) => Promise<NoteDetail | null>;
   save: (input: { id: string; content: string; baseContentHash?: string | null; title?: string; categoryId?: string | null; tags?: string[] }) => Promise<boolean>;
   markDirty: () => void;
@@ -146,6 +152,18 @@ function queryFromScope(
 const listGuard = createRequestGuard();
 const detailGuard = createRequestGuard();
 
+/**
+ * 编辑器注册的「立即落盘」回调。
+ *
+ * 自动保存有防抖窗口，切换笔记时若不等它落盘，刚输入的改动会被下一篇内容覆盖而丢失。
+ * 编辑器挂载时注册、卸载时注销（见 `NoteEditorPage`）。
+ */
+let editorFlush: (() => Promise<unknown>) | null = null;
+
+export function registerEditorFlush(handler: (() => Promise<unknown>) | null) {
+  editorFlush = handler;
+}
+
 export const useNotesStore = create<NotesState>((set, get) => ({
   items: [],
   total: 0,
@@ -215,7 +233,15 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     else set({ detail: null });
   },
 
-  openDetail: async (id) => {
+  openDetail: async (id, options) => {
+    // 切换笔记前先落盘：否则防抖窗口内的改动会被下一篇内容覆盖（静默丢数据）
+    if (!options?.discardLocalEdits && id !== get().detail?.note.id && editorFlush) {
+      try {
+        await editorFlush();
+      } catch {
+        // 落盘失败不阻塞切换：编辑器自身的保存状态会提示失败
+      }
+    }
     const isLatest = detailGuard.begin();
     set({ detailLoading: true });
     try {

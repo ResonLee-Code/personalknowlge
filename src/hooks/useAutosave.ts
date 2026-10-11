@@ -54,10 +54,25 @@ export function useAutosave({ enabled, delay, onSave, signature }: AutosaveOptio
 
   const saveNow = () => trigger();
 
+  /**
+   * 立即落盘（取消防抖等待）。
+   *
+   * 用途：切换笔记 / 离开编辑器之前——否则「刚敲的字」还停在防抖窗口里，
+   * 组件一旦卸载或内容被下一篇覆盖，这些改动就**静默丢失**了。
+   * 无改动时调用也安全（`onSave` 自身会判断是否真的需要写）。
+   */
+  const flush = useCallback(async () => {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    await trigger();
+  }, [trigger]);
+
   /** 重新加载笔记后重置比对基线。 */
   const resetBaseline = (value: string | null) => {
     lastSignature.current = value;
   };
 
-  return { saveNow, resetBaseline };
+  return { saveNow, flush, resetBaseline };
 }
