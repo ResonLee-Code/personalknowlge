@@ -90,6 +90,15 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByRole('heading', { name: '分类管理', level: 1 })).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '06-categories.png') });
 
+  // 嵌套分类显示**完整**目录路径（后端 dirName 只是单级目录名，直接显示会让人误以为在根目录）
+  const techRow = page.locator('li').filter({ hasText: '01_技术' }).first();
+  await techRow.getByTitle('分类操作').click();
+  await page.getByRole('menuitem', { name: '新建子分类' }).click();
+  await page.getByLabel('分类名称').fill('数据库');
+  await page.getByRole('button', { name: '创建' }).click();
+  await expect(page.getByText(/01_技术\/\d+_数据库/)).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '06b-categories-nested.png') });
+
   await page.goto('/#/tags');
   await expect(page.getByRole('heading', { name: '标签', level: 1 })).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '07-tags.png') });
