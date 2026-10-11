@@ -144,6 +144,7 @@ export function SearchPage() {
           <div className="relative flex-1">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink-subtle)]" />
             <Input
+              aria-label="搜索关键词"
               autoFocus
               value={keyword}
               placeholder="搜索标题、正文、标签（支持中文短语与英文前缀）"
@@ -307,6 +308,7 @@ export function SearchPage() {
         {showFilters ? (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <select
+              aria-label="按分类筛选"
               value={categoryId ?? ''}
               onChange={(event) => setFilters({ categoryId: event.target.value || null })}
               className="h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-sm"
@@ -319,6 +321,7 @@ export function SearchPage() {
               ))}
             </select>
             <select
+              aria-label="按标签筛选"
               value={tagId ?? ''}
               onChange={(event) => setFilters({ tagId: event.target.value || null })}
               className="h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-sm"
@@ -331,6 +334,7 @@ export function SearchPage() {
               ))}
             </select>
             <select
+              aria-label="排序方式"
               value={sort}
               onChange={(event) =>
                 setFilters({ sort: event.target.value as typeof sort })

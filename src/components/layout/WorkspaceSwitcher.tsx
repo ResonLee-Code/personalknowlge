@@ -96,6 +96,7 @@ export function WorkspaceSwitcher() {
         <div className="space-y-2 px-2 py-1.5">
           {!isTauriRuntime() ? (
             <Input
+              aria-label="工作区目录路径"
               value={manualRoot}
               placeholder="输入目录路径"
               onChange={(event) => setManualRoot(event.target.value)}

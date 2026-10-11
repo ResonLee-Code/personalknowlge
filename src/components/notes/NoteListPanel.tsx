@@ -222,6 +222,7 @@ export function NoteListPanel() {
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink-subtle)]" />
           <Input
+            aria-label="按标题筛选笔记"
             value={keyword}
             placeholder="按标题筛选"
             className="h-8 pl-8 text-xs"

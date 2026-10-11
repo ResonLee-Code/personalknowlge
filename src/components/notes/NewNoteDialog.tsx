@@ -340,6 +340,7 @@ function ClipForm({ categoryId, onClose }: { categoryId: string; onClose: () => 
       <div className="space-y-2 rounded-md border border-[var(--border-subtle)] p-3">
         <div className="flex flex-wrap gap-2">
           <Input
+            aria-label="要剪藏的网页地址"
             value={url}
             data-testid="clip-url"
             placeholder="https://example.com/article"

@@ -110,6 +110,7 @@ export function AiSettingsPanel() {
 
       <Row label="联网检索" hint="仅本地：只用本地模型与本地检索；允许联网后仍需每次确认">
         <select
+          aria-label="联网档位"
           data-testid="ai-network"
           value={policy.network}
           onChange={(event) => {
@@ -187,6 +188,7 @@ export function AiSettingsPanel() {
         <Label>本地模型（Ollama HTTP，可选；默认关闭）</Label>
         <div className="space-y-1">
           <Input
+            aria-label="本地模型地址"
             data-testid="ai-local-endpoint"
             defaultValue={policy.localModelEndpoint ?? ''}
             placeholder="http://127.0.0.1:11434"
@@ -195,6 +197,7 @@ export function AiSettingsPanel() {
             }
           />
           <Input
+            aria-label="本地模型名称"
             data-testid="ai-local-model"
             defaultValue={policy.localModelName ?? ''}
             placeholder="qwen2.5:7b（模型名，需先 ollama pull）"

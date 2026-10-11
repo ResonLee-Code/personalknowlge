@@ -61,6 +61,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
         <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2.5">
           <Search className="h-4 w-4 text-[var(--ink-subtle)]" />
           <Input
+            aria-label="搜索关键词"
             autoFocus
             value={keyword}
             placeholder={hint}

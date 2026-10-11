@@ -55,6 +55,7 @@ export function TagEditor({
           </span>
         ))}
         <Input
+          aria-label="添加标签"
           value={input}
           placeholder={tags.length === 0 ? placeholder : '添加标签'}
           className="h-7 w-32 border-none px-1 text-xs focus-visible:ring-0"

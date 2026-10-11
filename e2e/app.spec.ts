@@ -54,7 +54,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
 
   // 4. 新建笔记并进入编辑器
   await page.getByRole('button', { name: '新建笔记' }).first().click();
-  await page.getByLabel('标题').fill('SQLite 全文搜索学习笔记');
+  await page.getByLabel('标题', { exact: true }).fill('SQLite 全文搜索学习笔记');
   await page.getByLabel('标签（逗号分隔）').fill('sqlite, search');
   await page
     .getByLabel('初始内容（可选）')
@@ -224,7 +224,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   // 17. 双向链接：反向链接面板 + 未解析链接一键创建（V1.1 M1-3）
   await page.goto('/#/notes');
   await page.getByRole('button', { name: '新建笔记' }).first().click();
-  await page.getByLabel('标题').fill('索引设计笔记');
+  await page.getByLabel('标题', { exact: true }).fill('索引设计笔记');
   await page
     .getByLabel('初始内容（可选）')
     .fill('参考 [[SQLite 全文搜索学习笔记]]，另见 [[尚未存在的笔记]]。');
@@ -609,7 +609,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   for (const [title, content] of materials) {
     await page.goto('/#/notes');
     await page.getByRole('button', { name: '新建笔记' }).first().click();
-    await page.getByLabel('标题').fill(title);
+    await page.getByLabel('标题', { exact: true }).fill(title);
     await page.getByLabel('初始内容（可选）').fill(content);
     await page.getByRole('button', { name: '创建笔记' }).click();
     await expect(page.locator('.cm-content')).toBeVisible();

@@ -651,6 +651,7 @@ export function NoteEditorPage() {
 
       <div className="space-y-2 border-b border-[var(--border-subtle)] px-4 py-3">
         <Input
+          aria-label="笔记标题"
           value={title}
           readOnly={readOnly}
           placeholder="笔记标题"

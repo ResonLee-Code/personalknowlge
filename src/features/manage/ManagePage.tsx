@@ -186,6 +186,7 @@ export function ManagePage() {
         <div className="relative min-w-[200px] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink-subtle)]" />
           <Input
+            aria-label="搜索文档标题"
             value={keyword}
             data-testid="manage-search"
             placeholder="按标题筛选"

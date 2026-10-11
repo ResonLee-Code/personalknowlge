@@ -77,6 +77,7 @@ export function DashboardPage() {
             <div className="relative min-w-[220px] flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink-subtle)]" />
               <Input
+                aria-label="快速搜索笔记"
                 value={keyword}
                 placeholder="快速搜索笔记…（⌘K 打开全局搜索）"
                 className="pl-8"

@@ -80,6 +80,7 @@ export function TagList() {
             <DialogTitle>新建标签</DialogTitle>
           </DialogHeader>
           <Input
+            aria-label="标签名称"
             autoFocus
             value={name}
             placeholder="标签名称"

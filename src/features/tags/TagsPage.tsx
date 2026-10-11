@@ -108,6 +108,7 @@ export function TagsPage() {
               <DialogTitle>重命名标签</DialogTitle>
             </DialogHeader>
             <Input
+              aria-label="标签名称"
               autoFocus
               value={name}
               onChange={(event) => setName(event.target.value)}

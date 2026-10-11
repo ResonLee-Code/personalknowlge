@@ -111,6 +111,7 @@ export function SettingsPage() {
           </Row>
           <Row label="自动保存延迟" hint="200ms ~ 10000ms">
             <select
+              aria-label="自动保存延迟"
               value={settings.autosaveDelayMs}
               onChange={(event) =>
                 void updateSettings({ autosaveDelayMs: Number(event.target.value) })
@@ -129,6 +130,7 @@ export function SettingsPage() {
             hint="打开笔记时的默认布局；在编辑器顶部切换后会被记住"
           >
             <select
+              aria-label="默认视图"
               value={settings.editorMode}
               onChange={(event) => void updateSettings({ editorMode: event.target.value })}
               className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs"
@@ -140,6 +142,7 @@ export function SettingsPage() {
           </Row>
           <Row label="字号" hint="编辑器与预览的字号">
             <select
+              aria-label="字号"
               value={settings.fontSize}
               onChange={(event) => void updateSettings({ fontSize: Number(event.target.value) })}
               className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs"
@@ -153,6 +156,7 @@ export function SettingsPage() {
           </Row>
           <Row label="界面主题" hint="浅色 / 深色">
             <select
+              aria-label="界面主题"
               value={theme}
               onChange={(event) => {
                 const value = event.target.value as 'light' | 'dark';
@@ -170,6 +174,7 @@ export function SettingsPage() {
           </Row>
           <Row label="新建笔记位置" hint="Inbox 或最近使用的分类">
             <select
+              aria-label="新建笔记位置"
               value={settings.defaultNewLocation}
               onChange={(event) =>
                 void updateSettings({ defaultNewLocation: event.target.value })
@@ -315,7 +320,8 @@ export function SettingsPage() {
             <Label className="text-[11px] text-[var(--ink-subtle)]">
               工作区 ID：{workspace?.id ?? '—'}
             </Label>
-            <Input readOnly value={workspace?.rootPath ?? ''} className="mt-1 h-8 text-xs" />
+            <Input
+              aria-label="当前知识库目录" readOnly value={workspace?.rootPath ?? ''} className="mt-1 h-8 text-xs" />
           </div>
         </Section>
         </div>

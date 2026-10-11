@@ -213,6 +213,7 @@ export function HistoryDialog({
             {/* 对标语雀「保存为版本」：把当前正文显式存成一个命名版本 */}
             <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] p-1.5">
               <Input
+                aria-label="新版本名称"
                 value={versionName}
                 data-testid="history-version-name"
                 placeholder="版本名，例如 v1 交付版"
@@ -297,6 +298,7 @@ export function HistoryDialog({
                     {namingId === entry.entryId ? (
                       <div className="mt-1 flex items-center gap-1">
                         <Input
+                          aria-label="重命名版本"
                           autoFocus
                           value={namingValue}
                           data-testid="history-label-input"
