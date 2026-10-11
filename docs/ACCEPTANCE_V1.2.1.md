@@ -14,10 +14,10 @@
 
 | 项目 | 结果 | 证据 |
 | --- | --- | --- |
-| Rust 全量测试 | ✅ 37 个测试目标全绿（库单测 111 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
+| Rust 全量测试 | ✅ 38 个测试目标全绿（库单测 111 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
-| 前端单元 / 组件测试 | ✅ 47 个文件、249 用例全通过 | `CI=true pnpm test` |
+| 前端单元 / 组件测试 | ✅ 47 个文件、250 用例全通过 | `CI=true pnpm test` |
 | 前端生产构建 | ✅ 构建成功 | `CI=true pnpm build` |
 | 端到端主流程 | ✅ 1 条主流程通过（34 个编号步骤 + 补充断言，浏览器预览后端） | `CI=true pnpm test:e2e`（截图见 `docs/screenshots/`）；重负载下时序敏感，配置了 1 次重试与 10s 断言超时（原因写在 `playwright.config.ts` 注释里） |
 
@@ -125,6 +125,7 @@
 | 研究助手 | 五步流程 + 六段报告 + 冲突并列 + 写入纪律 | `tests/research_flow.rs` |
 | 研究助手 · 引用可点开（§9.9 验收 1） | 报告第 6 段本地来源 `[[标题]]` / 外部来源裸 URL；页面上「结论与引用」逐句可点（本地跳笔记、外链新窗口，悬停显示级别与获取时间） | `tests/research_flow.rs` + `tests/web_search_flow.rs` + `ResearchPage.test.tsx`（各含反向验证） |
 | 研究助手 · 实时进度（§9.2） | 每一步与每个抓取页都推 `ai://research-progress`（会话 id / 步骤 / 说明 / 已抓页数 / 来源数）；**只含元数据，不含笔记正文与网页内容**；仅本地口径下 `pagesFetched` 恒为 0；页面在长步骤里显示「已抓 N 页 / 来源 N 条」 | `tests/research_progress_flow.rs`（1 项，记账型事件出口）+ `ResearchPage.test.tsx`（+1） |
+| 研究助手 · 运行中可中止（§9.2 / §9.7） | 中止优先：收集在本地跑完 / 每个候选前 / 收尾保存前都以磁盘状态为准，已中止就停下并把这一步成果并回草稿（不覆盖 `aborted` 与中止原因）；验证 / 汇总 / 提案同样处理；界面忙碌时「中止」仍可点 | `tests/research_abort_flow.rs`（2 项，慢速检索源必现竞态）+ `ResearchPage.test.tsx`（+1，反向验证） |
 | 联网检索 | 可配置检索源 + 分级 + 预算 + 注入丢弃 | `tests/web_search_flow.rs` |
 | 待复核提醒 | `note_due_for_review` + 首页卡片 | `tests/review_flow.rs` + `ReviewDueCard.test.tsx` |
 

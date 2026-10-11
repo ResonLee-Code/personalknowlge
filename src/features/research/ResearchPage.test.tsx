@@ -482,4 +482,26 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     expect(line).toHaveTextContent('已抓 3 页');
     expect(line).toHaveTextContent('来源 5 条');
   });
+
+  // §9.7「运行中可随时中止」：忙碌时中止按钮必须仍可点（否则只能等这一步跑完）。
+  it('步骤进行中「中止」仍可点击，并调用后端中止', async () => {
+    vi.spyOn(researchService, 'start').mockResolvedValue(planned());
+    vi.spyOn(researchService, 'collect').mockImplementation(() => new Promise(() => {}));
+    const abort = vi.spyOn(researchService, 'abort').mockResolvedValue({
+      ...planned(),
+      status: 'aborted',
+      abortReason: '用户中止',
+    });
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+    await userEvent.click(await screen.findByTestId('research-collect'));
+
+    const button = screen.getByTestId('research-abort');
+    expect(button).toBeEnabled();
+    await userEvent.click(button);
+
+    await waitFor(() => expect(abort).toHaveBeenCalledWith('research_1', '用户中止'));
+  });
 });

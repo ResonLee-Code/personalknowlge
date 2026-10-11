@@ -131,6 +131,83 @@ impl ResearchService {
         );
     }
 
+    /// 用户是否已经**在长步骤运行期间**点了「中止」。
+    ///
+    /// 中止与正在跑的步骤是并发的（中止按钮不因忙碌而禁用），因此每一步都要以
+    /// **磁盘上的状态**为准：否则运行中的步骤会用自己那份内存快照把中止覆盖回去，
+    /// 用户看到会话又变回「已收集」，联网抓取也照旧跑完预算。
+    fn aborted_snapshot(&self, session_id: &str) -> Result<Option<ResearchSession>> {
+        let persisted = self.load(session_id)?;
+        Ok((persisted.status == ResearchStatus::Aborted).then_some(persisted))
+    }
+
+    /// 收集中途被中止：把**已经拿到的材料**并回那份「已中止」的会话（草稿不丢），
+    /// 状态与中止原因保持磁盘上的值。
+    fn finish_aborted_collect(
+        &self,
+        session_id: &str,
+        sources: Vec<ResearchSource>,
+        decision_provider: Option<String>,
+        web_fetched: usize,
+    ) -> Result<ResearchSession> {
+        let mut persisted = self.load(session_id)?;
+        persisted.sources = sources;
+        if persisted.decision_provider.is_none() {
+            persisted.decision_provider = decision_provider;
+        }
+        if let Some(plan) = persisted.plan.as_mut() {
+            let counts: std::collections::HashMap<String, usize> =
+                persisted.sources.iter().fold(std::collections::HashMap::new(), |mut acc, source| {
+                    *acc.entry(source.sub_question_id.clone()).or_insert(0) += 1;
+                    acc
+                });
+            for question in plan.sub_questions.iter_mut() {
+                question.local_hits = counts.get(&question.id).copied().unwrap_or(0);
+            }
+        }
+        persisted.updated_at = now_iso();
+        persisted.steps.push(ResearchStepLog {
+            step: "collect".to_string(),
+            at: now_iso(),
+            detail: format!(
+                "收集中途被用户中止：已得材料 {} 条保留为草稿",
+                persisted.sources.len()
+            ),
+        });
+        self.save(&persisted)?;
+        self.emit_progress(
+            session_id,
+            "collect",
+            "收集中途被中止：已得材料保留为草稿",
+            web_fetched,
+            persisted.sources.len(),
+        );
+        Ok(persisted)
+    }
+
+    /// 长步骤收尾时，若用户在这期间点了中止：把**这一步的成果**并回那份「已中止」的会话。
+    ///
+    /// 状态与中止原因保持磁盘上的值（中止优先），成果按 `apply` 合并——这样既不会
+    /// 「中止被覆盖」，也不会白跑一步（例如汇总出的报告仍留作草稿）。
+    fn finish_aborted_step(
+        &self,
+        session_id: &str,
+        detail: &str,
+        apply: impl FnOnce(&mut ResearchSession),
+    ) -> Result<ResearchSession> {
+        let mut persisted = self.load(session_id)?;
+        apply(&mut persisted);
+        persisted.updated_at = now_iso();
+        persisted.steps.push(ResearchStepLog {
+            step: "abort".to_string(),
+            at: now_iso(),
+            detail: detail.to_string(),
+        });
+        self.save(&persisted)?;
+        self.emit_progress(session_id, "abort", detail, 0, persisted.sources.len());
+        Ok(persisted)
+    }
+
     /// 本次打分该用哪个决策模型：策略里显式开启本地模型打分且地址/模型名齐全时用它，
     /// 否则用注入的默认模型（规则档）。Jev 接入时同样只改这里。
     fn decision_model(&self) -> Arc<dyn DecisionModel> {
@@ -324,6 +401,10 @@ impl ResearchService {
 
         let mut sources: Vec<ResearchSource> = Vec::new();
         let mut per_question: Vec<usize> = vec![0; plan.sub_questions.len()];
+        // 长步骤开始前先看一次：用户可能在上一步刚结束时点了中止
+        if let Some(persisted) = self.aborted_snapshot(session_id)? {
+            return Ok(persisted);
+        }
         let mut seen: Vec<(String, String)> = Vec::new(); // (子问题 id, 笔记 id)
         let mut notes_read = 0usize;
         for hit in hits {
@@ -384,6 +465,10 @@ impl ResearchService {
         }
 
         // ---- 外部检索（需要在「设置 → AI」开启联网档位 + 配置检索源 + 本次确认）----
+        // 本地部分已经跑完：联网之前再确认一次用户没有中止
+        if self.aborted_snapshot(session_id)?.is_some() {
+            return self.finish_aborted_collect(session_id, sources, None, 0);
+        }
         let mut web_collected = 0usize;
         let mut web_fetched = 0usize;
         let mut web_injected = 0usize;
@@ -405,6 +490,10 @@ impl ResearchService {
                     let mut web_seen: Vec<String> = Vec::new();
                     let mut dropped: Vec<DroppedSource> = Vec::new();
                     for hit in hits {
+                        // 每个候选前都看一次：联网抓取可能跑好几分钟，用户要能随时叫停
+                        if self.aborted_snapshot(session_id)?.is_some() {
+                            return self.finish_aborted_collect(session_id, sources, None, web_fetched);
+                        }
                         if sources.len() >= MAX_SOURCES || started.elapsed() >= deadline {
                             break;
                         }
@@ -517,12 +606,23 @@ impl ResearchService {
         }
         // 决策层打分（§9.6）：规则档默认；开了本地模型就由它打分、失败自动降级
         let (decision_provider, score_fallback) = self.score_sources(&plan.topic, &mut sources);
-        session.decision_provider = Some(decision_provider);
+        session.decision_provider = Some(decision_provider.clone());
         if let Some(note) = score_fallback {
             tracing::debug!(target: "ai", "{note}");
             self.policy()
                 .audit("research_score", true, "error", 0, Some(&note));
         }
+
+        // 收尾前最后一次确认：**中止优先**——否则这次保存会把用户的中止覆盖回去
+        if self.aborted_snapshot(session_id)?.is_some() {
+            return self.finish_aborted_collect(
+                session_id,
+                sources,
+                Some(decision_provider),
+                web_fetched,
+            );
+        }
+
         session.sources = sources;
         session.status = ResearchStatus::Collected;
         session.updated_at = now_iso();
@@ -704,6 +804,14 @@ impl ResearchService {
                     .unwrap_or(0)
             ),
         });
+        if self.aborted_snapshot(session_id)?.is_some() {
+            let draft = session.report.clone();
+            return self.finish_aborted_step(
+                session_id,
+                "验证途中被用户中止：已得的验证结论保留为草稿",
+                |persisted| persisted.report = draft,
+            );
+        }
         self.save(&session)?;
         self.emit_progress(&session.id, "verify", "验证完成：交叉验证与冲突判定已写入报告草稿", 0, session.sources.len());
         self.policy().audit(
@@ -829,6 +937,14 @@ impl ResearchService {
             at: now_iso(),
             detail: format!("已生成报告：{composer_label}"),
         });
+        if self.aborted_snapshot(session_id)?.is_some() {
+            let report = session.report.clone();
+            return self.finish_aborted_step(
+                session_id,
+                "汇总途中被用户中止：已生成的报告保留为草稿",
+                |persisted| persisted.report = report,
+            );
+        }
         self.save(&session)?;
         self.emit_progress(&session.id, "compose", "汇总完成：六段报告已生成", 0, session.sources.len());
         self.policy().audit(
@@ -897,6 +1013,14 @@ impl ResearchService {
             at: now_iso(),
             detail: "已生成写入提案（等待用户确认后落库）".to_string(),
         });
+        if self.aborted_snapshot(session_id)?.is_some() {
+            let proposal = session.proposal.clone();
+            return self.finish_aborted_step(
+                session_id,
+                "生成提案途中被用户中止：已生成的提案保留为草稿",
+                |persisted| persisted.proposal = proposal,
+            );
+        }
         self.save(&session)?;
         self.emit_progress(&session.id, "proposal", "写入提案已生成，等待确认", 0, session.sources.len());
         self.policy().audit(
