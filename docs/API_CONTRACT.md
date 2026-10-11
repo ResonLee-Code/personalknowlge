@@ -466,7 +466,9 @@ interface ReviewDueNote {
 - **决策层打分**（D5）：`ResearchSource.credibility`（0–1，模型分与级别折算各半）与
   `ResearchClaim.confidence`（支持来源均值 × 交叉验证折扣：≥2 独立来源 ×1.0、单一来源 ×0.6）；
   `ResearchReport.decisionProvider` 写明打分来源（规则档 `rule`）。后端默认用 `RuleDecisionProvider`，
-  `ResearchService::with_decision_model()` 可注入其他 `DecisionModel`（Jev / 本地模型接入点）；
+  `ResearchService::with_decision_model()` 可注入其他 `DecisionModel`（Jev 接入点）；
+  实际生效的 provider 按 `decisionCandidates` 的顺序试：**在线（已授权）→ 本地 → 规则档**，
+  生成侧同理（在线 → 本地 → 模板实现），哪一档成功就把标识写进报告；
 - 审计：每一步都写 `research_*` 记录（不含正文）；**默认口径下 `outbound` 恒为 `false`**。
 
 ### 24.1 写入纪律（`research_write`）
