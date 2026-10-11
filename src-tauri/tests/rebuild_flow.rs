@@ -419,3 +419,107 @@ fn renaming_a_parent_updates_title_declared_children_and_survives_a_rebuild() {
         "改名的父文档在删库重建后仍然要能解析出层级"
     );
 }
+
+#[test]
+fn restoring_a_backup_keeps_hierarchy_metadata_links_and_search() {
+    let fixture = Fixture::new();
+    let notes = fixture.notes();
+
+    // 父文档 + 按标题声明的子文档（故意用最容易在恢复后断掉的那种声明方式）
+    let parent = notes
+        .create(CreateNoteInput {
+            title: "备份父文档".to_string(),
+            category_id: None,
+            initial_content: Some("父文档正文，见 [[备份子文档]]".to_string()),
+            tags: Some(vec!["备份验收".to_string()]),
+            parent_id: None,
+        })
+        .expect("父文档")
+        .note;
+    notes.set_pinned(&parent.id, true).expect("置顶");
+    notes
+        .reorder(ReorderNotesInput { ids: vec![parent.id.clone()] })
+        .expect("手动顺序");
+
+    let child_id = "note_backup_child_0001";
+    std::fs::write(
+        fixture.workspace.path().join("00_Inbox/备份子文档.md"),
+        format!(
+            "---\nid: {child_id}\ntitle: 备份子文档\ntype: note\nstatus: active\nparent: 备份父文档\nsource_type: official\nsource_reliability: 4\nvalid_until: 2027-09-30\n---\n\n子文档正文\n"
+        ),
+    )
+    .expect("写子文档");
+    personal_knowledge_os_lib::application::index_service::IndexService::new(fixture.context())
+        .scan_workspace()
+        .expect("扫描");
+
+    // 备份 → 恢复到空目录 → 用新工作区打开
+    let backup = personal_knowledge_os_lib::application::backup_service::BackupService::new(
+        fixture.context(),
+    )
+    .create(personal_knowledge_os_lib::domain::backup::BackupCreateInput {
+        target_dir: None,
+        note: None,
+    })
+    .expect("创建备份");
+    let validation = personal_knowledge_os_lib::application::backup_service::BackupService::new(
+        fixture.context(),
+    )
+    .validate(&backup.path)
+    .expect("校验备份");
+    assert!(validation.valid, "备份校验细节：{:?}", validation.checks);
+
+    let restore_root = fixture._data.path().join("restored-workspace");
+    personal_knowledge_os_lib::application::backup_service::BackupService::new(fixture.context())
+        .restore(personal_knowledge_os_lib::domain::backup::RestoreBackupInput {
+            archive_path: backup.path.clone(),
+            target_dir: restore_root.to_string_lossy().to_string(),
+        })
+        .expect("恢复备份");
+
+    WorkspaceService::new(Arc::clone(&fixture.app))
+        .close()
+        .expect("关闭原工作区");
+    WorkspaceService::new(Arc::clone(&fixture.app))
+        .open(&restore_root.to_string_lossy())
+        .expect("打开恢复出来的工作区");
+
+    let restored_notes = NoteService::new(fixture.context());
+    let restored_parent = restored_notes.get(&parent.id).expect("恢复后的父文档");
+    let restored_child = restored_notes.get(child_id).expect("恢复后的子文档");
+
+    assert!(restored_parent.note.pinned, "置顶要随备份恢复");
+    assert!(restored_parent.note.sort_order > 0, "手动顺序要随备份恢复");
+    assert_eq!(
+        restored_child.note.parent_id.as_deref(),
+        Some(parent.id.as_str()),
+        "父子层级要随备份恢复"
+    );
+    assert_eq!(restored_child.note.source_type.as_deref(), Some("official"));
+    assert_eq!(restored_child.note.source_reliability, Some(4));
+    assert_eq!(restored_child.note.valid_until.as_deref(), Some("2027-09-30"));
+
+    let tags = TagService::new(fixture.context()).list().expect("标签");
+    assert!(tags.iter().any(|tag| tag.name == "备份验收"), "标签要随备份恢复");
+
+    let backlinks = LinkService::new(fixture.context())
+        .backlinks(child_id)
+        .expect("反链");
+    assert!(
+        backlinks.iter().any(|link| link.note_id == parent.id),
+        "双向链接要随备份恢复：{backlinks:?}"
+    );
+
+    let hits = SearchService::new(fixture.context())
+        .search(SearchQuery {
+            keyword: "备份父文档".to_string(),
+            page: Some(1),
+            page_size: Some(20),
+            ..Default::default()
+        })
+        .expect("检索");
+    assert!(
+        hits.hits.iter().any(|hit| hit.note.id == parent.id),
+        "恢复后的工作区要立刻可检索"
+    );
+}
