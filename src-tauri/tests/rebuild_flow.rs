@@ -16,7 +16,7 @@ use personal_knowledge_os_lib::application::tag_service::TagService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
 use personal_knowledge_os_lib::domain::note::{
-    CreateNoteInput, NoteListQuery, ReorderNotesInput, SetParentInput, SetSourceInput,
+    CreateNoteInput, NoteListQuery, NoteStatus, ReorderNotesInput, SetParentInput, SetSourceInput,
 };
 use personal_knowledge_os_lib::domain::search::SearchQuery;
 use personal_knowledge_os_lib::infrastructure::frontmatter;
@@ -101,6 +101,18 @@ fn deleting_the_database_rebuilds_everything_from_markdown() {
         .expect("写来源与时效");
     notes.set_pinned(&parent.id, true).expect("置顶");
     notes.set_favorite(&parent.id, true).expect("收藏");
+    // 回收站：删掉一篇笔记（文件被移到 `.trash/`，仍然是一份 Markdown）
+    let trashed = notes
+        .create(CreateNoteInput {
+            title: "重建测试待恢复笔记".to_string(),
+            category_id: None,
+            initial_content: Some("这句应该能从回收站恢复。".to_string()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("建待删笔记")
+        .note;
+    notes.delete(&trashed.id).expect("移入回收站");
     notes
         .reorder(ReorderNotesInput { ids: vec![parent.id.clone()] })
         .expect("设置手动顺序");
@@ -165,6 +177,39 @@ fn deleting_the_database_rebuilds_everything_from_markdown() {
         tags.iter().any(|tag| tag.name == "重建"),
         "标签要重建：{:?}",
         tags.iter().map(|tag| tag.name.clone()).collect::<Vec<_>>()
+    );
+
+    // 2b) 回收站：删库重建后仍要能看到「已删除」的笔记（文件还在 .trash/ 里）
+    let deleted = notes.list_deleted().expect("回收站列表");
+    assert!(
+        deleted.iter().any(|item| item.id == trashed.id),
+        "回收站里的笔记要能从 .trash/ 重建：{deleted:?}"
+    );
+    // 恢复要能用：回到原相对路径、正文还在（trash_path 与 file_path 的约定要对得上）
+    let restored_note = notes.restore(&trashed.id).expect("从重建出来的回收站恢复");
+    assert_eq!(restored_note.note.status, NoteStatus::Active);
+    assert!(
+        restored_note.content.contains("这句应该能从回收站恢复"),
+        "恢复后正文要还在：{}",
+        restored_note.content
+    );
+    assert!(
+        fixture
+            .workspace
+            .path()
+            .join(restored_note.note.file_path.replace('\\', "/"))
+            .exists(),
+        "恢复后文件要真的回到工作区"
+    );
+    // 再扫一遍不能重复登记（幂等）
+    let before_scan = notes.list_deleted().expect("回收站").len();
+    personal_knowledge_os_lib::application::index_service::IndexService::new(fixture.context())
+        .scan_workspace()
+        .expect("再扫描一次");
+    assert_eq!(
+        notes.list_deleted().expect("回收站").len(),
+        before_scan,
+        "重复扫描不应重复登记回收站条目"
     );
 
     // 3) 来源与时效（N1）原样保留

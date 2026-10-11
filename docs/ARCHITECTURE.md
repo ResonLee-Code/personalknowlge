@@ -144,6 +144,11 @@ research_write  → 用户确认后 note_create 或 note_save（追加留历史�
 因为应用层只依赖 trait，集成测试可以在没有 Tauri 运行时的情况下跑完整业务链路
 （见 `src-tauri/tests/workspace_flow.rs`）。
 
+扫描的边界（2026-10-11 补齐）：正文目录按常规采纳；收尾时另外把 `.trash/` 下
+**尚未登记**的 Markdown 采纳成「已删除」笔记（`adopt_trash_notes`）——
+回收站文件同样是带 frontmatter 的 Markdown，删库重建后应当能回到界面里并被恢复；
+按 id / `trash_path` 判重，重复扫描不会重复登记。
+
 ## 5. 与设计文档的差异（已确认的工程决策）
 
 1. **ULID 使用自实现（26 位 Crockford Base32）**，同毫秒内单调递增，保证字符串排序即时间排序；

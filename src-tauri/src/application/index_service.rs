@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use crate::core::error::{AppError, ErrorCode, Result};
 use crate::core::events::events as event_names;
+use crate::core::paths::TRASH_DIR;
 use crate::core::hash::sha256_hex_str;
 use crate::core::ids::note_id;
 use crate::core::text::{count_words, markdown_to_plain_text, tag_key};
@@ -23,7 +24,8 @@ use crate::repositories::settings_repository::{
 };
 use crate::repositories::tag_repository::{tags_for_note, SqliteTagRepository, TagRepository};
 use crate::repositories::{
-    NoteRepository, SettingsRepository, SqliteNoteRepository, SqliteSettingsRepository,
+    trash_path_of, NoteRepository, SettingsRepository, SqliteNoteRepository,
+    SqliteSettingsRepository,
 };
 
 use super::context::WorkspaceContext;
@@ -404,6 +406,14 @@ impl IndexService {
             self.rebuild_derived_after_bulk();
         }
 
+        // `.trash/` 里的 Markdown 也要登记回库：删库重建（文档推荐的恢复手段）或换机器之后，
+        // 回收站不能凭空消失——文件还在，只是此前没有任何一条记录指向它们。
+        if let Err(error) = self.adopt_trash_notes(&mut report) {
+            report
+                .warnings
+                .push(format!("重建回收站记录失败：{}", error.message));
+        }
+
         report.duration_ms = started.elapsed().as_millis() as u64;
         if report.added > 0 || report.updated > 0 || report.missing > 0 {
             self.ctx.events.emit(
@@ -782,6 +792,113 @@ impl IndexService {
             .map(|note| (note.id, note.declared_parent.unwrap_or_default()))
             .collect();
         self.resolve_declared_parents(&pending)
+    }
+
+    /// 把 `.trash/` 下**尚未登记**的 Markdown 采纳成「已删除」笔记（可恢复）。
+    ///
+    /// 背景：回收站文件是「原文件被移动到 `.trash/<原相对路径>`」，
+    /// 它们同样是 Markdown、同样带 frontmatter。删库重建 / 换机器后，
+    /// 如果不登记这些文件，「回收站」会空掉——文件明明还在，用户却看不到、也恢复不了。
+    ///
+    /// 规则：
+    /// - 只处理 Markdown；按 `trash_path`（或 id）已登记过的直接跳过，保持幂等；
+    /// - `file_path` 取「去掉 `.trash/` 前缀」的原路径（`restore_from_trash` 依赖这个约定）；
+    /// - id 已被占用（例如这篇笔记又回到活跃列表）时跳过，绝不覆盖已有记录。
+    fn adopt_trash_notes(&self, report: &mut ScanReport) -> Result<usize> {
+        let root = self.ctx.paths.trash_dir();
+        if !root.exists() {
+            return Ok(0);
+        }
+        let mut adopted = 0usize;
+        for entry in walkdir::WalkDir::new(&root).follow_links(false).into_iter().flatten() {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let Ok(relative) = self.ctx.paths.to_relative(entry.path()) else {
+                continue;
+            };
+            if !relative.starts_with(&format!("{TRASH_DIR}/")) {
+                continue;
+            }
+            if !(relative.ends_with(".md") || relative.ends_with(".markdown")) {
+                continue;
+            }
+            let stored = match self.ctx.storage.read_note(&relative) {
+                Ok(stored) => stored,
+                Err(error) => {
+                    report
+                        .warnings
+                        .push(format!("跳过无法读取的回收站文件 {relative}：{}", error.message));
+                    continue;
+                }
+            };
+            let id = stored
+                .frontmatter
+                .id
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(note_id);
+            if self.ctx.db.with_conn(|conn| {
+                Ok(SqliteNoteRepository.get(conn, &id)?.is_some()
+                    || trash_path_of(conn, &id)?.is_some())
+            })? {
+                continue;
+            }
+            let title = stored
+                .frontmatter
+                .title
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| file_stem_title(&relative));
+            let created_at = stored
+                .frontmatter
+                .created_at
+                .clone()
+                .or_else(|| stored.modified_at.clone())
+                .unwrap_or_else(now_iso);
+            let updated_at = stored
+                .frontmatter
+                .updated_at
+                .clone()
+                .unwrap_or_else(|| created_at.clone());
+            let original_path = relative
+                .trim_start_matches(&format!("{TRASH_DIR}/"))
+                .to_string();
+            let note = Note {
+                id: id.clone(),
+                workspace_id: self.workspace_id().to_string(),
+                title,
+                file_path: original_path,
+                category_id: None,
+                status: NoteStatus::Deleted,
+                content_hash: Some(stored.content_hash.clone()),
+                word_count: count_words(&markdown_to_plain_text(&stored.body)),
+                favorite: stored.frontmatter.favorite,
+                created_at,
+                updated_at,
+                last_indexed_at: None,
+                source_type: stored.frontmatter.source_type.clone(),
+                source_ref: stored.frontmatter.source_ref.clone(),
+                source_reliability: stored.frontmatter.source_reliability,
+                valid_until: stored.frontmatter.valid_until.clone(),
+                file_size: None,
+                file_mtime: None,
+                parent_id: None,
+                declared_parent: None,
+                sort_order: 0,
+                pinned: stored.frontmatter.pinned,
+            };
+            self.ctx.db.with_conn(|conn| {
+                SqliteNoteRepository.insert(conn, &note)?;
+                SqliteNoteRepository.set_status(conn, &note.id, NoteStatus::Deleted, Some(&relative))
+            })?;
+            adopted += 1;
+        }
+        if adopted > 0 {
+            report.updated += adopted as i64;
+            tracing::info!(target: "index", "从 .trash/ 重建了 {adopted} 条回收站记录");
+        }
+        Ok(adopted)
     }
 
     /// 采纳磁盘上的新文件。
