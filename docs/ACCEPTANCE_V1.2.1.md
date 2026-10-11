@@ -130,6 +130,7 @@
 | 研究助手 · 运行中可中止（§9.2 / §9.7） | 中止优先：收集在本地跑完 / 每个候选前 / 收尾保存前都以磁盘状态为准，已中止就停下并把这一步成果并回草稿（不覆盖 `aborted` 与中止原因）；验证 / 汇总 / 提案同样处理；界面忙碌时「中止」仍可点 | `tests/research_abort_flow.rs`（2 项，慢速检索源必现竞态）+ `ResearchPage.test.tsx`（+1，反向验证） |
 | 导出 · HTML / PDF 真的自包含 | 正文里指向工作区内的图片在导出时内联为 `data:` URL（HTML 与打印视图两处都验），远程 / `data:` / 缺失 / 超限的图片原样保留；Word 导出仍以「[图片]」占位（`docx.rs` 写明的取舍） | `tests/export_flow.rs`（7 项，含本项，反向验证过） |
 | 图谱导出 · PNG / SVG | SVG：自包含、转义、无图例不画面板、空图合法；PNG：图例面板几何抽成纯函数并有单测，**失败（无 Canvas / 生成图片抛错）会明确提示而不是静默**（反向验证过） | `src/lib/graphExport.test.ts`（9 项）+ `src/features/graph/GraphPage.test.tsx`（+1） |
+| 排序与分页的确定性（用户清单里的「抖动治理」） | 30 篇同秒写入的笔记：列表与检索的**分页不重复不遗漏、顺序与一次性取回一致、同一页重复请求结果相同**，且顺序**显式等于** `(updated_at DESC, id DESC)` / `(得分 ASC, updated_at DESC, id DESC)`——去掉 `n.id` 次级键两条用例立刻失败（真守卫，不是自洽检查） | `tests/paging_flow.rs`（2 项，反向验证过） |
 | AI 闸门 · 主机解析与「只连本机」 | 主机解析抽成**一份共用实现**（闸门 / 白黑名单 / 来源分级 / 本地模型地址共用，杜绝两处口径漂移）：小写 → 去 `www.`、端口、userinfo，IPv6 字面量去方括号；本地模型地址只放行 `localhost` / `127.0.0.1` / `[::1]`，**拒绝** `localhost.evil.com`、`evil.com#@localhost`、十进制 IP、`0.0.0.0` 等写法；IPv6 在「域名规则」与「主机解析」两侧口径一致 | `ai::host` 单测（2 项）+ `ai::policy` 单测（2 项，双向反向验证） |
 | 联网检索 | 可配置检索源 + 分级 + 预算 + 注入丢弃 | `tests/web_search_flow.rs` |
 | 待复核提醒 | `note_due_for_review` + 首页卡片 | `tests/review_flow.rs` + `ReviewDueCard.test.tsx` |
