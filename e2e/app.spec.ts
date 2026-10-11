@@ -71,6 +71,30 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.keyboard.type('\n\n补充：中文检索需要双字扩展。');
   await expect(page.getByText('已保存').first()).toBeVisible({ timeout: 15_000 });
 
+  // 5b. 编辑器快捷键：⌘S 立即保存（把自动保存延迟调大，证明是快捷键而不是自动保存）、⌘E 聚焦编辑器
+  const editorUrl = page.url();
+  await page.goto('/#/settings');
+  // 选项范围是 500–3000ms：调到最大值后，⌘S 的效果才和自动保存区分得开
+  await page.getByLabel('自动保存延迟').selectOption('3000');
+  await page.goto(editorUrl);
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('\n\n⌘S 应当立即保存。');
+  await expect(page.getByText('未保存').first()).toBeVisible();
+  await page.keyboard.press('Meta+s');
+  // 断言窗口（1500ms）小于自动保存延迟（3000ms）：这一条只能由快捷键满足
+  await expect(page.getByText('已保存').first()).toBeVisible({ timeout: 1500 });
+
+  // ⌘E：先点到别处，再用快捷键把焦点送回编辑器
+  await page.getByTestId('note-list-item').first().click();
+  await page.keyboard.press('Meta+e');
+  await expect(page.locator('.cm-content')).toBeFocused();
+
+  // 还原自动保存延迟，避免影响后续步骤的等待逻辑
+  await page.goto('/#/settings');
+  await page.getByLabel('自动保存延迟').selectOption('1000');
+  await page.goto(editorUrl);
+
   // 6. 全局搜索面板（⌘/Ctrl + K）
   await page.keyboard.press('Meta+k');
   await expect(page.getByPlaceholder(/输入关键词开始搜索|输入以搜索标题与正文/)).toBeVisible();

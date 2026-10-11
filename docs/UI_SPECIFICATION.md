@@ -376,9 +376,18 @@ GlobalSearchDialog（⌘K 面板）、NewNoteDialog（⌘N）
 | 关闭当前笔记 | Ctrl + W | ⌘ + W |
 | 删除选中笔记 | Delete | Delete |
 
+实现分层（2026-10-11 明确）：
+
+- `AppShell` 里的 `useKeyboardShortcuts` 负责 **⌘K / ⌘P / ⌘N / ⌘W / Delete**；
+- **⌘S（立即保存）与 ⌘E（聚焦编辑器）由编辑器页面自己实现**（它才知道 `saveNow` / 编辑器节点）；
+- 该 hook 现在**只在确实有处理器时**才 `preventDefault`——否则会出现「键被吞掉但什么也没发生」；
+  `src/hooks/useKeyboardShortcuts.test.ts` 覆盖了这个语义（含 Delete 在输入框内不触发）。
+
 ## 7. 主题与可访问性
 
 - 浅色 / 深色两套 CSS 变量（`--surface`、`--ink`、`--brand` 等），切换写入 `html.dark`；
 - 焦点可见（`focus-visible:ring`）；
 - 交互元素具备 `title` 或 `aria-label`；
+- 表单控件必须有**程序化标签**（`id` + `<Label>`、`aria-label` 或被 `<label>` 包裹；
+  `placeholder` 不算标签；自定义 `Row label=` 只是排版）。守卫：`src/lib/a11yLabels.test.ts`；
 - 分栏把手使用 `role="separator"` 支持指针拖拽。

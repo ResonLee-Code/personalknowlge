@@ -23,37 +23,47 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
       const meta = event.metaKey || event.ctrlKey;
       const editable = isEditableTarget(event.target);
 
-      if (meta && event.key.toLowerCase() === 'k') {
+      /**
+       * 只有**确实有处理器**时才 `preventDefault`。
+       *
+       * 否则会出现「键被吞掉但什么也没发生」：⌘S / ⌘E 由编辑器页面自己实现
+       * （`NoteEditorPage` 里另有一个监听器），AppShell 这一层没有处理器——
+       * 若照样拦截，一旦编辑器换实现，用户按下去就变成彻底静默失效。
+       */
+      const handle = (handler: (() => void) | undefined) => {
+        if (!handler) return false;
         event.preventDefault();
-        handlers.onSearch?.();
+        handler();
+        return true;
+      };
+
+      const key = event.key.toLowerCase();
+      if (meta && key === 'k') {
+        handle(handlers.onSearch);
         return;
       }
-      if (meta && event.key.toLowerCase() === 'p') {
-        event.preventDefault();
-        handlers.onQuickSwitch?.();
+      if (meta && key === 'p') {
+        handle(handlers.onQuickSwitch);
         return;
       }
-      if (meta && event.key.toLowerCase() === 'n') {
-        event.preventDefault();
-        handlers.onNewNote?.();
+      if (meta && key === 'n') {
+        handle(handlers.onNewNote);
         return;
       }
-      if (meta && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        handlers.onSave?.();
+      if (meta && key === 's') {
+        handle(handlers.onSave);
         return;
       }
-      if (meta && event.key.toLowerCase() === 'e') {
-        event.preventDefault();
-        handlers.onFocusEditor?.();
+      if (meta && key === 'e') {
+        handle(handlers.onFocusEditor);
         return;
       }
-      if (meta && event.key.toLowerCase() === 'w') {
-        event.preventDefault();
-        handlers.onCloseNote?.();
+      if (meta && key === 'w') {
+        handle(handlers.onCloseNote);
         return;
       }
       if (event.key === 'Delete' && !editable && !meta) {
+        // Delete 没有默认行为要拦，只在有处理器时响应
         handlers.onDelete?.();
       }
     };
