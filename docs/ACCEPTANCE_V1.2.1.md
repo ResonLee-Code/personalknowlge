@@ -17,7 +17,7 @@
 | Rust 全量测试 | ✅ 36 个测试目标全绿（库单测 111 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
-| 前端单元 / 组件测试 | ✅ 47 个文件、242 用例全通过 | `CI=true pnpm test` |
+| 前端单元 / 组件测试 | ✅ 47 个文件、247 用例全通过 | `CI=true pnpm test` |
 | 前端生产构建 | ✅ 构建成功 | `CI=true pnpm build` |
 | 端到端主流程 | ✅ 1 条主流程通过（34 个编号步骤 + 补充断言，浏览器预览后端） | `CI=true pnpm test:e2e`（截图见 `docs/screenshots/`）；重负载下时序敏感，配置了 1 次重试与 10s 断言超时（原因写在 `playwright.config.ts` 注释里） |
 
@@ -47,7 +47,7 @@
 | 防抖保存不丢改动 | 切换笔记前先 flush（顺序断言「先落盘再取新详情」）；同一篇刷新不重复触发；`discardLocalEdits` 时跳过（冲突对话框「以磁盘为准」）；E2E 实测：延迟 3000ms 下输入后立刻切走，切回来内容仍在 | `src/hooks/useAutosave.test.ts`（3 项）+ `raceGuard.test.ts`（+1）+ E2E 第 5c 步 |
 | 缺失笔记可恢复 | 笔记文件被移出后标记缺失；文件放回再扫描 → 自动恢复为正常笔记、正文读回、**重新可检索**；整目录被删/被移走时不 panic、保存返回明确错误、目录放回后无需重启即可恢复 | `tests/external_interference_flow.rs`（3 项） |
 | 恢复不覆盖他人文件 | 原路径被别的文件占用时，从回收站恢复会改用唯一路径：占位文件**原封不动**、笔记落在新路径且内容正确；`purge` 对已被外部删除的文件也能正常清干净（记录 / 索引 / 历史） | `tests/external_interference_flow.rs`（4 项，含本项） |
-| 预览端与后端同规则 | ① 未知分类：新建 / 单篇移动 / 批量移动都拒绝（批量逐条记失败）；② 标签规范化：去空 / 折叠空白 / 大小写不敏感去重，空名与撞名按后端错误码拒绝；③ 返回形状（`note_set_tags` → `NoteDetail`、`note_set_tag_names` → `Tag[]`）；④ `app_info` 版本读 `package.json`、schemaVersion 与后端一致；反向验证过（撤掉校验 → `promise resolved … instead of rejecting`） | `src/services/mockBackend.test.ts`（21 项，含以上各项） |
+| 预览端与后端同规则 | ① 未知分类：新建 / 单篇移动 / 批量移动都拒绝（批量逐条记失败）；② 标签规范化：去空 / 折叠空白 / 大小写不敏感去重，空名与撞名按后端错误码拒绝；③ 返回形状（`note_set_tags` → `NoteDetail`、`note_set_tag_names` → `Tag[]`）；④ `app_info` 版本读 `package.json`、schemaVersion 与后端一致；⑤ 重命名与后端同规则（标题规范化 / 按时间戳改名文件 / `renameFile=false` 只改标题 / **重连 `[[旧标题]]` 链接**）；⑥ 相对路径（`YYYYMMDD-HHmmss-标题.md`、按分类目录落位、移动分类改路径、同秒撞名追加序号）；⑦ 永久删除「列表不可见 + 详情 `NOTE_NOT_FOUND`」，删除 / 永久删除不存在的笔记报错；⑧ 模板另存为在预览端如实报「不支持」。守卫逐条反向验证过（撤掉校验 / 强制 `renameFile=false` / 关掉链接改写 / `categoryDirectory` 恒返回 `00_Inbox` → 用例立即失败） | `src/services/mockBackend.test.ts`（26 项，含以上各项） |
 | 元数据保全 | `note_save` / `note_set_source` / AI 追加写入之后，frontmatter 的来源、时效、父子层级、手动顺序、置顶、类型化关系、自定义字段、标签全部保留；创建时间不被改写 | `tests/metadata_preservation_flow.rs`（3 项） |
 | 分类移动（挪目录 + 改路径） | 带孙分类的子树移到顶层 / 移回：完整目录路径正确、老目录消失、子目录随行、直属与子分类里的笔记路径改写且文件真实存在、归属 id 不变、移动后仍可检索、重开扫描后一致；防环与目标不存在被拒绝且不改数据 | `tests/category_move_flow.rs`（2 项） |
 | 分类目录展示 | 分类管理页副标题显示**完整**相对路径（子分类不再被误读为根目录）；未建目录时沿用父目录 | `src/lib/categoryDirectory.test.ts`（3 项） |

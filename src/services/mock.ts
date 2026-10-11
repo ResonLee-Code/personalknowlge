@@ -1299,6 +1299,145 @@ function assertCategoryExists(categoryId?: string | null) {
   }
 }
 
+// ---------------------------------------------------------------- 文件名与目录
+//
+// 与 Rust 端 `core/text.rs` / `NoteService` 保持一致：文件名为
+// `YYYYMMDD-HHmmss-标题.md`，放在分类目录下（无分类回落到 `00_Inbox`）。
+// 预览端此前用「去掉分隔符的 14 位时间戳」且永远落在 `00_Inbox`，
+// 界面上显示的相对路径与桌面端不同。
+
+/** 文件名（不含扩展名）最大字符数（与 Rust `MAX_FILE_STEM_CHARS` 一致）。 */
+const MAX_FILE_STEM_CHARS = 120;
+/** Windows 保留名称（与 Rust `sanitize_file_name` 一致）。 */
+const RESERVED_FILE_STEMS = [
+  'CON', 'PRN', 'AUX', 'NUL',
+  'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+  'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+];
+
+/** 清理文件名：非法字符与控制字符替换为 `-`，折叠分隔符并限制长度。 */
+function sanitizeFileName(input: string): string {
+  const illegal = /[<>:"/\\|?*]/;
+  let cleaned = '';
+  for (const ch of input) {
+    cleaned += illegal.test(ch) || /\p{Cc}/u.test(ch) ? '-' : ch;
+  }
+
+  let collapsed = '';
+  let previousDash = false;
+  for (const ch of cleaned) {
+    const isDash = ch === '-' || /\s/.test(ch);
+    if (isDash) {
+      if (!previousDash) collapsed += '-';
+    } else {
+      collapsed += ch;
+    }
+    previousDash = isDash;
+  }
+
+  const trimmed = collapsed.replace(/^[-.\s]+/, '').replace(/[-.\s]+$/, '');
+  let result = [...trimmed]
+    .slice(0, MAX_FILE_STEM_CHARS)
+    .join('')
+    .replace(/^[-.]+/, '')
+    .replace(/[-.]+$/, '');
+  if (result === '') result = 'note';
+  if (RESERVED_FILE_STEMS.some((name) => name.toLowerCase() === result.toLowerCase())) {
+    result = `note-${result}`;
+  }
+  return result;
+}
+
+/** 紧凑时间戳：`YYYYMMDD-HHmmss`（与 Rust `file_timestamp` 一致，按本地时间）。 */
+function fileTimestamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const day = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+  const clock = `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+  return `${day}-${clock}`;
+}
+
+/** 文件名主干：`YYYYMMDD-HHmmss-标题`（设计文档 12.2）。 */
+function noteFileStem(title: string, date: Date): string {
+  let stem = sanitizeFileName(title);
+  if (stem === 'note' && title.trim() === '') stem = 'untitled';
+  return `${fileTimestamp(date)}-${stem}`;
+}
+
+/** 重命名时的文件名主干（与 Rust `file_stem_with_prefix` 同规则）。 */
+function renamedFileStem(relative: string, title: string): string {
+  const fileName = relative.split('/').pop() ?? '';
+  const stem = fileName.replace(/\.md$/, '').replace(/\.markdown$/, '');
+  const safeTitle = sanitizeFileName(title);
+  const dash = stem.indexOf('-');
+  if (dash === 15) return `${stem.slice(0, dash)}-${safeTitle}`;
+  return noteFileStem(title, new Date());
+}
+
+/** 分类对应的目录（与 Rust `CategoryLookup::directory_of` 同规则：无目录时回落到 Inbox）。 */
+function categoryDirectory(categoryId?: string | null): string {
+  const segments: string[] = [];
+  const guard = new Set<string>();
+  let current = categoryId ?? null;
+  while (current && !guard.has(current)) {
+    guard.add(current);
+    const category = state.categories.find((item) => item.id === current);
+    if (!category || !category.dirName.trim()) break;
+    segments.unshift(category.dirName);
+    current = category.parentId ?? null;
+  }
+  return segments.length > 0 ? segments.join('/') : '00_Inbox';
+}
+
+/**
+ * 生成不与其它笔记冲突的相对路径（与 Rust `unique_relative_path` 同规则：
+ * 撞名时追加 `-1` / `-2`，避免两条笔记共用一个路径）。
+ */
+function notePathIn(directory: string, stem: string, excludeId?: string): string {
+  const taken = (path: string) =>
+    state.notes.some((item) => item.id !== excludeId && item.filePath === path);
+  const join = (name: string) => (directory ? `${directory}/${name}.md` : `${name}.md`);
+  const candidate = join(stem);
+  if (!taken(candidate)) return candidate;
+  const free = Array.from({ length: 999 }, (_, index) => index + 1).find(
+    (index) => !taken(join(`${stem}-${index}`)),
+  );
+  if (free === undefined) fail('PATH_INVALID', '同名文件过多，请调整标题。');
+  return join(`${stem}-${free}`);
+}
+
+/**
+ * 把正文里指向旧标题的 `[[旧标题]]` 改写为新标题（保留锚点与别名）。
+ * 与 Rust `core/text.rs::rewrite_wikilink_target` 同规则：忽略代码块 / 行内代码，不跨行。
+ */
+function rewriteWikilinkTargets(
+  content: string,
+  oldTitle: string,
+  newTitle: string,
+): { content: string; count: number } {
+  if (oldTitle === newTitle) return { content, count: 0 };
+  const oldKey = oldTitle.trim().toLowerCase();
+  const tokens = parseWikilinks(content);
+  if (tokens.length === 0) return { content, count: 0 };
+
+  // 偏移量来自 `parseWikilinks`（按码点计数），因此这里也用码点数组切片拼接
+  const chars = [...content];
+  const out: string[] = [];
+  let cursor = 0;
+  let count = 0;
+  for (const token of tokens) {
+    if (token.target.trim().toLowerCase() !== oldKey) continue;
+    out.push(chars.slice(cursor, token.start).join(''));
+    const anchor = token.anchor ? `#${token.anchor}` : '';
+    const alias = token.alias ? `|${token.alias}` : '';
+    out.push(`[[${newTitle}${anchor}${alias}]]`);
+    cursor = token.end;
+    count += 1;
+  }
+  if (count === 0) return { content, count: 0 };
+  out.push(chars.slice(cursor).join(''));
+  return { content: out.join(''), count };
+}
+
 function createNote(input: CreateNoteInput): NoteDetail {
   const workspace = requireWorkspace();
   assertCategoryExists(input.categoryId);
@@ -1307,14 +1446,15 @@ function createNote(input: CreateNoteInput): NoteDetail {
   const createdAt = now();
   const id = `note_${ulid()}`;
   const title = input.title.trim() || '未命名笔记';
-  const filePath = `00_Inbox/${createdAt.slice(0, 19).replace(/[-:T]/g, '')}-${title.replace(/\s+/g, '-')}.md`;
+  // 未显式指定分类时继承父文档分类（与后端一致）
+  const categoryId = input.categoryId ?? parent?.categoryId ?? null;
+  const filePath = notePathIn(categoryDirectory(categoryId), noteFileStem(title, new Date(createdAt)), id);
   const note: Note = {
     id,
     workspaceId: workspace.id,
     title,
     filePath,
-    // 未显式指定分类时继承父文档分类
-    categoryId: input.categoryId ?? parent?.categoryId ?? null,
+    categoryId,
     status: 'active',
     contentHash: ulid(),
     wordCount: plainText(input.initialContent ?? '').length,
@@ -1826,11 +1966,10 @@ export async function handleMockInvoke(
       return saveNote(payload.input as SaveNoteInput);
     case 'note_delete': {
       const note = state.notes.find((item) => item.id === payload.id);
-      if (note) {
-        note.status = 'deleted';
-        persist();
-        emit('notes://changed', { kind: 'deleted', noteId: note.id });
-      }
+      if (!note) fail('NOTE_NOT_FOUND', '笔记不存在或已被删除。');
+      note.status = 'deleted';
+      persist();
+      emit('notes://changed', { kind: 'deleted', noteId: note.id });
       return null;
     }
     case 'note_restore': {
@@ -1841,28 +1980,67 @@ export async function handleMockInvoke(
       return toDetail(note);
     }
     case 'note_purge': {
+      if (!state.notes.some((item) => item.id === payload.id)) {
+        fail('NOTE_NOT_FOUND', '笔记不存在或已被删除。');
+      }
       state.notes = state.notes.filter((item) => item.id !== payload.id);
       delete state.contents[String(payload.id)];
       delete state.history[String(payload.id)];
+      delete state.noteTags[String(payload.id)];
       persist();
       return null;
     }
     case 'note_rename': {
       const note = state.notes.find((item) => item.id === payload.id);
-      if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
-      note.title = String(payload.title);
+      if (!note) fail('NOTE_NOT_FOUND', '笔记不存在或已被删除。');
+      const oldTitle = note.title;
+      // 与 Rust `normalize_title` 同规则：折叠空白并按字符数截断到 200
+      const title = [...String(payload.title ?? '').split(/\s+/).filter(Boolean).join(' ')].slice(0, 200).join('').trim();
+      if (!title) fail('INVALID_INPUT', '标题不能为空。');
+      const renameFile = payload.renameFile !== false;
+      if (renameFile) {
+        const directory = note.filePath.includes('/')
+          ? note.filePath.slice(0, note.filePath.lastIndexOf('/'))
+          : '';
+        const stem = renamedFileStem(note.filePath, title);
+        note.filePath = notePathIn(directory, stem, note.id);
+      }
+      note.title = title;
       note.updatedAt = now();
+      // 指向旧标题的链接自动重连（与 Rust `LinkService::on_note_renamed` 同规则）
+      if (oldTitle !== title) {
+        state.notes
+          .filter((item) => item.id !== note.id && item.status === 'active')
+          .forEach((source) => {
+            const rewritten = rewriteWikilinkTargets(
+              state.contents[source.id] ?? '',
+              oldTitle,
+              title,
+            );
+            if (rewritten.count > 0) {
+              state.contents[source.id] = rewritten.content;
+              source.updatedAt = now();
+            }
+          });
+      }
       persist();
+      emit('notes://changed', { kind: 'renamed', noteId: note.id });
       return toDetail(note);
     }
     case 'note_move': {
       const note = state.notes.find((item) => item.id === payload.id);
-      if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
+      if (!note) fail('NOTE_NOT_FOUND', '笔记不存在或已被删除。');
       const targetCategory = (payload.categoryId as string | null) ?? null;
       assertCategoryExists(targetCategory);
       note.categoryId = targetCategory;
+      // 与后端一致：文件跟着分类目录走（文件名不变，撞名时追加序号）
+      const stem = (note.filePath.split('/').pop() ?? '')
+        .replace(/\.md$/, '')
+        .replace(/\.markdown$/, '');
+      note.filePath = notePathIn(categoryDirectory(targetCategory), stem, note.id);
       note.updatedAt = now();
       persist();
+      emit('notes://changed', { kind: 'modified', noteId: note.id });
       return toDetail(note);
     }
     case 'note_set_parent': {

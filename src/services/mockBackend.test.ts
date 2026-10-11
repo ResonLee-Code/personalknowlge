@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { clipService } from '@/services/clipService';
 import { linkService } from '@/services/linkService';
@@ -7,6 +7,7 @@ import { noteService } from '@/services/noteService';
 import { categoryService } from '@/services/categoryService';
 import { searchService } from '@/services/searchService';
 import { tagService } from '@/services/tagService';
+import { templateService } from '@/services/templateService';
 import { workspaceService } from '@/services/workspaceService';
 
 // 浏览器预览后端（localStorage 内存实现）的端到端验证。
@@ -405,5 +406,109 @@ describe('浏览器预览后端 · 标签规范化（与 Rust 对齐）', () => 
     await expect(tagService.rename(beta.id, '   ')).rejects.toMatchObject({
       code: 'INVALID_INPUT',
     });
+  });
+});
+
+// 重命名 / 永久删除的预览端行为要与 Rust 对齐：
+// 重命名会改写文件名并重连指向旧标题的链接；永久删除后列表不可见、详情取不到；
+// 对不存在的笔记做删除 / 永久删除必须报错（Rust 走 `note_or_err`），而不是静默成功。
+describe('浏览器预览后端 · 重命名与永久删除（与 Rust 对齐）', () => {
+  it('重命名会规范化标题、改写文件名并重连指向旧标题的链接', async () => {
+    await workspaceService.create('重命名库', '/tmp/mock-rename');
+    const target = await noteService.create({ title: '旧标题', initialContent: '目标正文' });
+    const source = await noteService.create({
+      title: '来源笔记',
+      initialContent:
+        '见 [[旧标题]]、[[旧标题#小节|别名]]，行内代码 `[[旧标题]]` 不改，另有 [[别的笔记]]。',
+    });
+    const originalPath = target.note.filePath;
+    expect(originalPath).toMatch(/^00_Inbox\/\d{8}-\d{6}-旧标题\.md$/);
+
+    const renamed = await noteService.rename(target.note.id, '  新   标题  ');
+    expect(renamed.note.title).toBe('新 标题');
+    expect(renamed.note.filePath).not.toBe(originalPath);
+    expect(renamed.note.filePath).toMatch(/^00_Inbox\/\d{8}-\d{6}-新-标题\.md$/);
+
+    const reloaded = await noteService.get(source.note.id);
+    expect(reloaded.content).toContain('[[新 标题]]');
+    expect(reloaded.content).toContain('[[新 标题#小节|别名]]');
+    expect(reloaded.content).toContain('`[[旧标题]]`');
+    expect(reloaded.content).toContain('[[别的笔记]]');
+
+    // renameFile=false 时只改标题，文件名保持不动
+    const keepFile = await noteService.rename(target.note.id, '只改标题', false);
+    expect(keepFile.note.filePath).toBe(renamed.note.filePath);
+
+    await expect(noteService.rename(target.note.id, '   ')).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    });
+    await expect(noteService.rename('note_不存在', '随便')).rejects.toMatchObject({
+      code: 'NOTE_NOT_FOUND',
+    });
+  });
+
+  it('永久删除后列表不可见、详情取不到；删除不存在的笔记报错', async () => {
+    await workspaceService.create('永久删除库', '/tmp/mock-purge');
+    const note = await noteService.create({ title: '待永久删除', initialContent: '正文' });
+    await noteService.remove(note.note.id);
+    expect(await noteService.listDeleted()).toHaveLength(1);
+
+    await noteService.purge(note.note.id);
+    expect(await noteService.listDeleted()).toHaveLength(0);
+    await expect(noteService.get(note.note.id)).rejects.toMatchObject({
+      code: 'NOTE_NOT_FOUND',
+    });
+
+    await expect(noteService.purge(note.note.id)).rejects.toMatchObject({
+      code: 'NOTE_NOT_FOUND',
+    });
+    await expect(noteService.remove('note_不存在')).rejects.toMatchObject({
+      code: 'NOTE_NOT_FOUND',
+    });
+  });
+
+  it('模板另存为在预览端明确报「不支持」，而不是假装成功', async () => {
+    await workspaceService.create('模板库', '/tmp/mock-template');
+    await expect(
+      templateService.save({ name: '我的模板', content: '# 正文' }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+});
+
+// 相对路径要跟桌面端一致：笔记文件放在分类目录下（无分类回落到 00_Inbox），
+// 移动分类会连同文件路径一起改；同一目录同一秒内撞名时追加序号，不共用路径。
+describe('浏览器预览后端 · 相对路径与分类目录（与 Rust 对齐）', () => {
+  it('新建按分类目录落位，移动分类会改路径，移回 Inbox 恢复', async () => {
+    await workspaceService.create('目录库', '/tmp/mock-directory');
+    const tech = await categoryService.create('技术文档', null);
+    const database = await categoryService.create('数据库', tech.id);
+
+    const note = await noteService.create({ title: '索引设计', categoryId: tech.id });
+    expect(note.note.filePath.startsWith(`${tech.dirName}/`)).toBe(true);
+
+    const nested = await noteService.create({ title: 'B+ 树', categoryId: database.id });
+    expect(nested.note.filePath.startsWith(`${tech.dirName}/${database.dirName}/`)).toBe(true);
+
+    const moved = await noteService.move(note.note.id, database.id);
+    expect(moved.note.filePath.startsWith(`${tech.dirName}/${database.dirName}/`)).toBe(true);
+    // 移动只换目录，文件名（时间戳 + 标题）保持不变
+    expect(moved.note.filePath.split('/').pop()).toBe(note.note.filePath.split('/').pop());
+
+    const inbox = await noteService.move(note.note.id, null);
+    expect(inbox.note.filePath.startsWith('00_Inbox/')).toBe(true);
+  });
+
+  it('同一目录同一秒内撞名时追加序号，不会两条笔记共用一个路径', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-11T10:00:00Z'));
+    try {
+      await workspaceService.create('撞名库', '/tmp/mock-collide');
+      const first = await noteService.create({ title: '重名笔记' });
+      const second = await noteService.create({ title: '重名笔记' });
+      expect(second.note.filePath).not.toBe(first.note.filePath);
+      expect(second.note.filePath).toMatch(/-1\.md$/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
