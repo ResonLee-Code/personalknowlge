@@ -218,26 +218,34 @@ function AddRelationDialog({
 }) {
   const [keyword, setKeyword] = useState('');
   const [candidates, setCandidates] = useState<NoteSummary[]>([]);
+  // 读取失败不能显示成「没有匹配的笔记」（那是在撒谎）——要与「确实没结果」区分开
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [target, setTarget] = useState<NoteSummary | null>(null);
   const [relationType, setRelationType] = useState<string>('RELATED_TO');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void noteService
+  const searchCandidates = useCallback(
+    () =>
+      noteService
         .list({ keyword: keyword.trim() || null, pageSize: 20, sort: 'titleAsc' })
         .then((result) => {
-          if (!cancelled) setCandidates(result.items.filter((item) => item.id !== noteId));
+          setCandidates(result.items.filter((item) => item.id !== noteId));
+          setLoadError(null);
         })
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          setCandidates([]);
+          setLoadError(errorMessage(error));
+        }),
+    [keyword, noteId],
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void searchCandidates();
     }, 180);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [keyword, noteId]);
+    return () => window.clearTimeout(timer);
+  }, [searchCandidates]);
 
   const submit = async () => {
     if (!target) {
@@ -301,7 +309,19 @@ function AddRelationDialog({
             />
             {!target ? (
               <ul className="max-h-40 overflow-auto rounded-md border border-[var(--border-subtle)]">
-                {candidates.length === 0 ? (
+                {loadError ? (
+                  <li className="flex items-center justify-between gap-2 px-2 py-1.5 text-[11px] text-red-500">
+                    <span>读取笔记失败：{loadError}</span>
+                    <button
+                      type="button"
+                      data-testid="relation-candidates-retry"
+                      className="shrink-0 rounded border border-[var(--border-subtle)] px-1.5 py-0.5 text-[var(--ink-muted)] hover:text-[var(--ink)]"
+                      onClick={() => void searchCandidates()}
+                    >
+                      重试
+                    </button>
+                  </li>
+                ) : candidates.length === 0 ? (
                   <li className="px-2 py-1.5 text-[11px] text-[var(--ink-subtle)]">没有匹配的笔记</li>
                 ) : (
                   candidates.map((item) => (

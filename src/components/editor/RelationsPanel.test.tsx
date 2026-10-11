@@ -104,4 +104,23 @@ describe('RelationsPanel', () => {
       }),
     );
   });
+
+  // 回归：「读取候选笔记失败」以前被 `.catch(() => undefined)` 吞掉，
+  // 界面显示成「没有匹配的笔记」——那是在撒谎（和快速切换那次是同一个坑）。
+  it('候选笔记读取失败时明确报错并给出重试，而不是假装「没有匹配」', async () => {
+    vi.mocked(noteService.list)
+      .mockRejectedValueOnce({ code: 'IO_ERROR', message: '磁盘暂时不可用' })
+      .mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+
+    renderPanel();
+    await userEvent.click(await screen.findByRole('button', { name: /新增关系|添加关系/ }));
+
+    expect(await screen.findByText(/读取笔记失败：磁盘暂时不可用/)).toBeInTheDocument();
+    expect(screen.queryByText('没有匹配的笔记')).not.toBeInTheDocument();
+
+    // 重试：第二次成功 → 回到正常（显示「没有匹配的笔记」而不是错误）
+    await userEvent.click(screen.getByTestId('relation-candidates-retry'));
+    await waitFor(() => expect(screen.queryByText(/读取笔记失败/)).not.toBeInTheDocument());
+    expect(screen.getByText('没有匹配的笔记')).toBeInTheDocument();
+  });
 });
