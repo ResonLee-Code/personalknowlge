@@ -1018,6 +1018,20 @@ fn layout_settings_round_trip_and_clamp() {
     assert_eq!(updated.editor_mode, "split");
     assert_eq!(updated.list_sort, "manual", "「自定义顺序」应被记住");
 
+    // 未知的**枚举类**设置同样不落库：主题 / 新建位置 / 编辑器模式都只接受已知值。
+    // 判据不是「看起来像不像」，而是「界面拿着它查表能不能查到」。
+    let rejected_enums = service
+        .update_settings(UpdateSettingsInput {
+            editor_theme: Some("solarized".into()),
+            default_new_location: Some("somewhere".into()),
+            editor_mode: Some("SPLIT".into()), // 大小写不同也算未知值
+            ..Default::default()
+        })
+        .expect("未知枚举值应被忽略而不是报错");
+    assert_eq!(rejected_enums.editor_theme, "light", "主题保持上一个有效值");
+    assert_eq!(rejected_enums.default_new_location, "inbox");
+    assert_eq!(rejected_enums.editor_mode, "split", "编辑器模式保持上一个有效值");
+
     // 未知排序值不落库（避免脏数据写进设置）
     let rejected = service
         .update_settings(UpdateSettingsInput {

@@ -332,6 +332,9 @@ interface ReviewDueNote {
 - 写回 frontmatter 的 `pinned:`（`true` 时写入，取消时移除字段）并投影到 `notes.pinned`；
 - **所有排序键前置 `pinned DESC`**：`updatedDesc` / `updatedAsc` / `createdDesc` /
   `titleAsc` / `manual` 下置顶笔记都排在最前；
+- 每条排序键都追加 `id` 作为**次级键**（同秒写入、同分同名的笔记顺序因此确定，分页不抖动）；
+  `titleAsc` 使用 SQLite 默认的**码点序**（`COLLATE NOCASE` 只折叠 ASCII 大小写），
+  **不是中文拼音序**——浏览器预览端按同一口径实现（曾用 `localeCompare('zh-CN')`，已对齐）；
 - 置顶只在同一层内生效（子文档仍跟在父文档之后），且**不改写 `updated_at`**；
 - `NoteSummary` 与 `Note` 新增 `pinned`（布尔，缺失视为 false）；
 - 扫描同步路径（`apply_external_edit`）会投影 `pinned` 与 `order`，

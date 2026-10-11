@@ -511,4 +511,53 @@ describe('浏览器预览后端 · 相对路径与分类目录（与 Rust 对齐
       vi.useRealTimers();
     }
   });
+
+});
+
+// 列表排序必须与后端 `NoteSort::order_by()` 同口径：置顶最前、次级键 `id`、
+// 标题用 SQLite 的**码点序**（COLLATE NOCASE）而不是中文拼音序——否则预览里的顺序
+// 与桌面端不一致，用户会以为是应用在随机排序。
+describe('浏览器预览后端 · 列表排序（与 Rust 对齐）', () => {
+  it('标题排序用码点序（不是拼音序），并用 id 兜底', async () => {
+    await workspaceService.create('排序库', '/tmp/mock-sort');
+    // 「波」(U+6CE2) 在码点上小于「阿」(U+963F)，但拼音序相反——用来区分两种口径
+    const wave = await noteService.create({ title: '波' });
+    const ah = await noteService.create({ title: '阿' });
+    const beta = await noteService.create({ title: 'Beta' });
+    const alpha = await noteService.create({ title: 'alpha' });
+
+    const sorted = await noteService.list({ sort: 'titleAsc' });
+    // 只比对本用例建的笔记：工作区初始化会放一篇「欢迎使用 Personal Knowledge OS」
+    const titles = sorted.items
+      .map((item) => item.title)
+      .filter((title) => ['alpha', 'Beta', '波', '阿'].includes(title));
+    // ASCII 大小写折叠：alpha < Beta；其余按码点：Beta(Z 前无) → 'B'(0x42) < 波(0x6CE2) < 阿(0x963F)
+    expect(titles).toEqual(['alpha', 'Beta', '波', '阿']);
+    expect(
+      sorted.items
+        .filter((item) => ['alpha', 'Beta', '波', '阿'].includes(item.title))
+        .map((item) => item.id),
+    ).toEqual([alpha.note.id, beta.note.id, wave.note.id, ah.note.id]);
+  });
+
+  it('置顶在最前，自定义顺序同层内按 order→updatedAt→id 兜底', async () => {
+    await workspaceService.create('排序库2', '/tmp/mock-sort2');
+    const first = await noteService.create({ title: '一号' });
+    const second = await noteService.create({ title: '二号' });
+    const third = await noteService.create({ title: '三号' });
+
+    // 手动顺序：三号 → 一号 → 二号
+    await noteService.reorder({ ids: [third.note.id, first.note.id, second.note.id] });
+    // 把二号置顶：即便它排在最后，也必须跑到最前
+    await noteService.setPinned(second.note.id, true);
+
+    const only = (items: Array<{ title: string }>) =>
+      items.map((item) => item.title).filter((title) => ['一号', '二号', '三号'].includes(title));
+
+    const manual = await noteService.list({ sort: 'manual' });
+    expect(only(manual.items)).toEqual(['二号', '三号', '一号']);
+
+    const updated = await noteService.list({ sort: 'updatedDesc' });
+    expect(updated.items[0]?.title).toBe('二号');
+  });
 });

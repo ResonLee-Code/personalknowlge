@@ -528,19 +528,27 @@ pub fn apply_settings(settings: &mut AppSettings, input: &UpdateSettingsInput) {
         settings.autosave_delay_ms = value.clamp(200, 10_000);
     }
     if let Some(value) = &input.editor_theme {
-        settings.editor_theme = value.clone();
+        // 只接受已知值：脏数据写进设置后界面会拿着它去查表，查不到就静默退化
+        if ["light", "dark"].contains(&value.as_str()) {
+            settings.editor_theme = value.clone();
+        }
     }
     if let Some(value) = input.font_size {
         settings.font_size = value.clamp(10, 32);
     }
     if let Some(value) = &input.default_new_location {
-        settings.default_new_location = value.clone();
+        if ["inbox", "currentCategory", "lastCategory"].contains(&value.as_str()) {
+            settings.default_new_location = value.clone();
+        }
     }
     if let Some(value) = &input.backup_dir {
         settings.backup_dir = Some(value.clone());
     }
     if let Some(value) = &input.editor_mode {
-        settings.editor_mode = value.clone();
+        // 与 list_sort 同口径：未知值忽略（保留上一个有效值），不让编辑器落到未定义分支
+        if ["edit", "split", "preview"].contains(&value.as_str()) {
+            settings.editor_mode = value.clone();
+        }
     }
     if let Some(value) = input.editor_split_ratio {
         settings.editor_split_ratio = value.clamp(0.3, 0.7);

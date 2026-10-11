@@ -1302,21 +1302,52 @@ function listNotes(query: NoteListQuery = {}) {
         (state.contents[note.id] ?? '').toLowerCase().includes(keyword),
     );
   }
-  const sort = query.sort ?? 'updatedDesc';
+  /** 与 SQLite `COLLATE NOCASE` 同口径：只折叠 ASCII 大小写，其余按码点比较。 */
+function compareNoCase(left: string, right: string): number {
+  const fold = (value: string) =>
+    [...value]
+      .map((ch) => {
+        const code = ch.charCodeAt(0);
+        return code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : ch;
+      })
+      .join('');
+  const a = fold(left);
+  const b = fold(right);
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+const sort = query.sort ?? 'updatedDesc';
   items = [...items].sort((a, b) => {
-    // 置顶在所有排序方式下都排在最前（与后端 ORDER BY pinned DESC, ... 一致）
+    // 与后端 `NoteSort::order_by()` 逐字对齐：置顶最前 + 次级键 `id`
+    // （缺次级键时，同秒写入的笔记顺序不确定，分页会抖动）
     if ((a.pinned ?? false) !== (b.pinned ?? false)) return a.pinned ? -1 : 1;
-    if (sort === 'titleAsc') return a.title.localeCompare(b.title, 'zh-CN');
-    if (sort === 'createdDesc') return b.createdAt.localeCompare(a.createdAt);
-    if (sort === 'updatedAsc') return a.updatedAt.localeCompare(b.updatedAt);
+    if (sort === 'titleAsc') {
+      // 后端用的是 SQLite 码点序（COLLATE NOCASE），不是中文拼音序
+      const byTitle = compareNoCase(a.title, b.title);
+      if (byTitle !== 0) return byTitle;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    }
+    if (sort === 'createdDesc') {
+      const byCreated = b.createdAt.localeCompare(a.createdAt);
+      if (byCreated !== 0) return byCreated;
+      return a.id > b.id ? -1 : 1;
+    }
+    if (sort === 'updatedAsc') {
+      const byUpdated = a.updatedAt.localeCompare(b.updatedAt);
+      if (byUpdated !== 0) return byUpdated;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    }
     if (sort === 'manual') {
-      // 与后端一致：order 升序，未排序（0）时用更新时间兜底
       const left = a.sortOrder ?? 0;
       const right = b.sortOrder ?? 0;
       if (left !== right) return left - right;
-      return b.updatedAt.localeCompare(a.updatedAt);
+      const byUpdated = b.updatedAt.localeCompare(a.updatedAt);
+      if (byUpdated !== 0) return byUpdated;
+      return a.id > b.id ? -1 : 1;
     }
-    return b.updatedAt.localeCompare(a.updatedAt);
+    const byUpdated = b.updatedAt.localeCompare(a.updatedAt);
+    if (byUpdated !== 0) return byUpdated;
+    return a.id > b.id ? -1 : 1;
   });
   const page = Math.max(1, query.page ?? 1);
   const pageSize = Math.min(500, Math.max(1, query.pageSize ?? 200));
