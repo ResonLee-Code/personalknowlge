@@ -1,12 +1,25 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口默认权限：应用核心命令、文件夹选择与在文件管理器中打开",
+  "description": "主窗口默认权限：应用核心命令、文件夹选择、在文件管理器中显示，以及「用系统默认程序打开用户选定的路径」",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
     "dialog:default",
-    "opener:default"
+    "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "comment": "open_path 不在 opener:default 里（默认只含 open_url / reveal_item_in_dir）。缺了它，「PDF 打印视图」与「设置 → 工作区目录 → 打开」会报 ACL 错误（真机验收发现）。这里只放行**用户自己选定过的位置**：家目录、临时目录、外接卷——应用不会把笔记内容里的字符串当路径传进来。",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$TEMP/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "/Volumes/**" },
+        { "path": "/tmp/**" },
+        { "path": "/private/tmp/**" }
+      ]
+    }
   ]
 }

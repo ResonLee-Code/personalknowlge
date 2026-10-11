@@ -134,6 +134,25 @@
   活跃状态下批量「删除」走回收站（可撤销）；
 - 表格自带全选 / 单选，点击标题直接打开对应笔记。
 
+### 缺陷修复：PDF「打印视图」报 `open_path not allowed by ACL`（2026-10-11，真机验收发现）
+
+**现场表现**：笔记 → 「导出…」→ 选 PDF（打印视图）→ 点「打开打印视图」，
+弹出 `Command plugin:opener|open_path not allowed by ACL`，打印流程整条走不通；
+同一处问题也让「设置 → 工作区目录 → 打开」失效（那里只是把错误吞成一句 toast）。
+
+**根因**：前端调的是 `openPath`（`@tauri-apps/plugin-opener`），而能力声明里只有
+`opener:default` —— 这个默认集**只含 `open_url` 与 `reveal_item_in_dir`，不含 `open_path`**。
+只有真机点下去才会暴露：组件测试与浏览器 E2E 都碰不到 Tauri 的 ACL。
+
+**修复**（`src-tauri/capabilities/default.json`）：显式放行 `opener:allow-open-path`，
+并给出**非空 scope**（这类权限不带 scope 等于一条路径都不允许）：
+家目录 / 临时目录 / 应用数据目录 / 外接卷 / `/tmp`。放行范围是「用户自己选定过的位置」
+（工作区根目录、刚导出的文件），应用不会把笔记内容里的字符串当路径传进来。
+
+**守卫**（`src/lib/pluginPermissions.test.ts`，2 项）：扫描前端对 `plugin-opener` 的 import，
+逐个比对权限标识；并检查 `open_path` 的 scope 非空。去掉权限立刻红（已反向验证）。
+这类「前端调用 ↔ ACL 不匹配」以后在 `pnpm test` 就会失败，而不是等到真机上弹 ACL 错误。
+
 ### 缺陷修复：切换知识库后列表不更新（2026-10-11，真机验收发现）
 
 **现场表现**：从「验收临时库」切到 `knowledge` 后，侧边栏计数已经是新库的
