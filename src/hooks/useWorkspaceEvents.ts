@@ -15,6 +15,21 @@ import type { IndexStatus, ScanReport } from '@/types';
 export function useWorkspaceEvents() {
   const workspaceId = useWorkspaceStore((state) => state.workspace?.id ?? null);
 
+  /**
+   * 换了工作区 = 换了一整个数据源：列表 / 统计 / 分类 / 标签都必须重新按新库加载。
+   *
+   * 2026-10-11 修复「切库后中栏一直显示『这里还没有笔记』」：以前切库只清空状态，
+   * 刷新靠的是页面组件里「路由/筛选变化」的 effect——路由没变就永远不刷新，
+   * 用户得先在新库上做点别的操作才看得到内容。这里按 `workspaceId` 兜底再取一次。
+   */
+  useEffect(() => {
+    if (!workspaceId) return;
+    void useNotesStore.getState().refresh();
+    void useWorkspaceStore.getState().refreshStats();
+    void useCategoriesStore.getState().refresh();
+    void useTagsStore.getState().refresh();
+  }, [workspaceId]);
+
   useEffect(() => {
     if (!workspaceId) return;
     let disposed = false;

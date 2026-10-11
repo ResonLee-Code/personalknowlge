@@ -79,6 +79,10 @@ interface NotesState {
   setTags: (id: string, tags: string[]) => Promise<void>;
   clearConflict: () => void;
   reset: () => void;
+  /**
+   * 切换工作区后调用：清掉上一个库的视图状态并**立刻按新库重新取一次列表**。
+   */
+  reloadForWorkspace: () => Promise<void>;
   /** 多选（批量操作） */
   selectionMode: boolean;
   selection: string[];
@@ -575,5 +579,23 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       conflict: null,
       keyword: '',
       rootOnly: false,
+      selection: [],
+      selectionMode: false,
+      error: null,
     }),
+
+  /**
+   * 切换工作区后重置并重新加载（2026-10-11 修复）。
+   *
+   * 现场缺陷：从「验收临时库」切到 `knowledge` 后，侧边栏计数是新的（全部笔记 3），
+   * 中栏却一直显示「这里还没有笔记」，状态栏还挂着「笔记不存在或已被删除。」
+   * ——因为切库只 `reset()` 清了状态，**没有任何人再去取一次列表**，
+   * 得等用户在新库上做点别的（换筛选 / 换路由）才会顺带刷新。
+   *
+   * 切库是「换了一整个数据源」，列表 / 统计 / 分类 / 标签都必须按新库重取一次。
+   */
+  reloadForWorkspace: async () => {
+    get().reset();
+    await get().refresh();
+  },
 }));

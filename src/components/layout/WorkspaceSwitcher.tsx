@@ -1,5 +1,6 @@
 import { ChevronDown, FolderOpen, Library, Plus } from 'lucide-react';
 import { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { ROUTES } from '@/lib/constants';
 import { pickDirectory } from '@/services/appService';
 import { isTauriRuntime } from '@/services/api';
 import { useNotesStore } from '@/stores/notesStore';
@@ -22,13 +24,27 @@ export function WorkspaceSwitcher() {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   const switchWorkspace = useWorkspaceStore((state) => state.switchWorkspace);
   const openWorkspace = useWorkspaceStore((state) => state.openWorkspace);
-  const resetNotes = useNotesStore((state) => state.reset);
+  const reloadNotesForWorkspace = useNotesStore((state) => state.reloadForWorkspace);
+  const navigate = useNavigate();
+  const location = useLocation();
   const [manualRoot, setManualRoot] = useState('');
+
+  /**
+   * 换了知识库之后要做的两件事（2026-10-11 修复「切库后列表不更新」）：
+   * 1. 前面那篇笔记属于旧库，路由留在 `/notes/<旧 id>` 只会立刻报「笔记不存在」→ 回列表；
+   * 2. 列表 / 详情必须**立刻按新库重取**（只清空状态会停在「这里还没有笔记」）。
+   */
+  const afterSwitch = () => {
+    if (location.pathname.startsWith(`${ROUTES.notes}/`)) {
+      navigate(ROUTES.notes, { replace: true });
+    }
+    void reloadNotesForWorkspace();
+  };
 
   const switchTo = async (id: string) => {
     const ok = await switchWorkspace(id);
     if (ok) {
-      resetNotes();
+      afterSwitch();
       toast.success('已切换知识库');
     }
   };
@@ -38,7 +54,7 @@ export function WorkspaceSwitcher() {
     if (!path) return;
     const ok = await openWorkspace(path);
     if (ok) {
-      resetNotes();
+      afterSwitch();
       toast.success('已打开知识库');
     } else {
       toast.error(useWorkspaceStore.getState().error ?? '打开失败');
