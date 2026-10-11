@@ -2,20 +2,23 @@
 //!
 //! 说明：
 //! - `Markdown`：直接复制原文件（含 frontmatter），保证数据无损；
-//! - `Html`：Markdown → 自包含 HTML（内联样式、可直接用浏览器打印为 PDF）；
+//! - `Html`：Markdown → 自包含 HTML（内联样式；**工作区内的图片内联成 data URL**）；
 //! - `Docx`：Markdown → OOXML（Word / WPS 可直接打开，也可另存为 PDF）；
-//! - `Pdf`：生成打印视图 HTML 并返回其内容与路径，由前端打开系统打印流程
+//! - `Pdf`：生成打印视图 HTML 并返回其内容与路径（图片同样内联），由前端打开系统打印流程
 //!   （Windows 走 WebView 打印，macOS 在浏览器里「打印 → 存储为 PDF」）。
 //!   这样无需引入体积庞大的 PDF 排版引擎与字体嵌入。
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+use regex::Regex;
 
 use pulldown_cmark::{html, Options, Parser};
 use serde::{Deserialize, Serialize};
 
 use crate::core::error::{AppError, ErrorCode, Result};
+use crate::application::attachment_service::{AttachmentService, ReadAttachmentInput};
 use crate::core::text::sanitize_file_name;
 use crate::infrastructure::frontmatter;
 use crate::repositories::NoteRepository;
@@ -89,7 +92,8 @@ impl ExportService {
                 Ok(self.result(input.format, &path, bytes.len() as u64, false, None))
             }
             ExportFormat::Html => {
-                let page = render_html(&stored.title, &stored.body, &stored.category_path);
+                let body = self.inline_workspace_images(&input.id, &stored.body);
+                let page = render_html(&stored.title, &body, &stored.category_path);
                 let path = self.resolve_target(&input.target_path, &default_name)?;
                 write_file(&path, page.as_bytes())?;
                 Ok(self.result(input.format, &path, page.len() as u64, false, None))
@@ -109,7 +113,8 @@ impl ExportService {
             }
             ExportFormat::Pdf => {
                 // 生成打印视图：默认写到系统临时目录，前端打开后走「打印 → 存储为 PDF」
-                let page = render_html(&stored.title, &stored.body, &stored.category_path);
+                let body = self.inline_workspace_images(&input.id, &stored.body);
+                let page = render_html(&stored.title, &body, &stored.category_path);
                 let path = match input.target_path {
                     Some(target) => PathBuf::from(target),
                     None => {
@@ -149,6 +154,39 @@ impl ExportService {
             print_ready,
             html,
         }
+    }
+
+    /// 把正文里指向**工作区内**的图片换成 data URL。
+    ///
+    /// 导出文件（HTML / 打印视图）宣称「自包含」，但如果正文里是
+    /// `../attachments/2026-10/x.png` 这种相对路径，离开工作区就是破图——
+    /// 打印成 PDF 也会缺图。这里复用 `AttachmentService::read` 的解析口径
+    /// （相对**当前笔记目录**），读不到或超过大小上限时**原样保留**，不让导出失败。
+    fn inline_workspace_images(&self, note_id: &str, markdown: &str) -> String {
+        static IMAGE: OnceLock<Regex> = OnceLock::new();
+        let pattern = IMAGE.get_or_init(|| {
+            Regex::new(r#"!\[([^\]]*)\]\(([^)\s]+)(\s+"[^"]*")?\)"#)
+                .expect("内置图片正则必须合法")
+        });
+        if !markdown.contains("![") {
+            return markdown.to_string();
+        }
+        let attachments = AttachmentService::new(Arc::clone(&self.ctx));
+        pattern
+            .replace_all(markdown, |caps: &regex::Captures<'_>| {
+                let alt = caps.get(1).map(|item| item.as_str()).unwrap_or("");
+                let source = caps.get(2).map(|item| item.as_str()).unwrap_or("");
+                let title = caps.get(3).map(|item| item.as_str()).unwrap_or("");
+                let original = caps.get(0).map(|item| item.as_str()).unwrap_or("");
+                match attachments.read(ReadAttachmentInput {
+                    note_id: Some(note_id.to_string()),
+                    source: source.to_string(),
+                }) {
+                    Ok(data) => format!("![{alt}]({}){title}", data.data_url),
+                    Err(_) => original.to_string(),
+                }
+            })
+            .to_string()
     }
 
     fn resolve_target(&self, target: &Option<String>, default_name: &str) -> Result<PathBuf> {

@@ -4,15 +4,19 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use personal_knowledge_os_lib::application::attachment_service::{
+    AttachmentService, SaveAttachmentInput,
+};
 use personal_knowledge_os_lib::application::context::WorkspaceContext;
 use personal_knowledge_os_lib::application::export_service::{
     ExportFormat, ExportNoteInput, ExportService,
 };
 use personal_knowledge_os_lib::application::note_service::NoteService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
+use personal_knowledge_os_lib::core::base64;
 use personal_knowledge_os_lib::core::error::ErrorCode;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
-use personal_knowledge_os_lib::domain::note::CreateNoteInput;
+use personal_knowledge_os_lib::domain::note::{CreateNoteInput, SaveNoteInput};
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -170,4 +174,62 @@ fn exporting_missing_note_fails_clearly() {
         })
         .expect_err("不存在的笔记应报错");
     assert_eq!(error.code, ErrorCode::NoteNotFound);
+}
+
+/// 1×1 的透明 PNG（与 `attachment_flow` 用的是同一张）。
+const SAMPLE_PNG: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+    0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+    0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
+    0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+    0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+];
+
+/// HTML / 打印视图宣称「自包含单文件」——工作区里的图片必须内联，
+/// 否则导出文件（以及「打印 → 存储为 PDF」的结果）里图片全是破图。
+#[test]
+fn html_and_print_view_inline_workspace_images() {
+    let fixture = Fixture::new();
+    let saved = AttachmentService::new(fixture.context())
+        .save(SaveAttachmentInput {
+            note_id: Some(fixture.note_id.clone()),
+            file_name: Some("dot.png".to_string()),
+            mime_type: Some("image/png".to_string()),
+            data_base64: base64::encode(SAMPLE_PNG),
+        })
+        .expect("保存附件");
+    NoteService::new(fixture.context())
+        .save(SaveNoteInput {
+            id: fixture.note_id.clone(),
+            content: format!("{MARKDOWN}\n\n![点]({})\n", saved.link_path),
+            base_content_hash: None,
+            title: None,
+            category_id: None,
+            tags: None,
+        })
+        .expect("把图片写进正文");
+
+    let html_target = fixture.output.join("with-image.html");
+    fixture.export(ExportFormat::Html, Some(html_target.clone()));
+    let html = std::fs::read_to_string(&html_target).expect("读 HTML");
+    assert!(
+        html.contains("data:image/png;base64,"),
+        "工作区内的图片要内联成 data URL：\n{html}"
+    );
+    assert!(
+        !html.contains(&saved.link_path),
+        "不应再留下打不开的相对路径：\n{html}"
+    );
+
+    // PDF 走打印视图：同样要内联，否则打印出来是破图
+    let result = fixture.export(
+        ExportFormat::Pdf,
+        Some(fixture.output.join("with-image.print.html")),
+    );
+    assert!(result.print_ready);
+    let print_html = result.html.expect("打印视图 HTML");
+    assert!(
+        print_html.contains("data:image/png;base64,"),
+        "打印视图也要内联工作区图片"
+    );
 }

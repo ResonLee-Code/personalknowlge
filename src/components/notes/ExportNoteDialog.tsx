@@ -38,7 +38,7 @@ const FORMATS: FormatOption[] = [
   {
     value: 'html',
     label: '网页 (.html)',
-    hint: '自包含单文件，含内联样式，可直接在浏览器中打印为 PDF',
+    hint: '自包含单文件：内联样式 + 工作区内的图片内联为 data URL，可直接在浏览器中打印为 PDF',
     icon: FileText,
     extension: 'html',
   },
@@ -52,7 +52,7 @@ const FORMATS: FormatOption[] = [
   {
     value: 'pdf',
     label: 'PDF（打印视图）',
-    hint: '打开打印视图，在系统打印面板中选择「存储为 PDF」',
+    hint: '打开打印视图（图片同样内联），在系统打印面板中选择「存储为 PDF」',
     icon: Printer,
     extension: null,
   },
