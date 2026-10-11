@@ -57,7 +57,7 @@ pnpm tauri build --no-bundle
 
 | 平台 | 可执行文件路径 | 体积（2026-10-11 实测） |
 | --- | --- | --- |
-| macOS arm64 | `src-tauri/target/release/personal-knowledge-os` | **9,792,448 B（9.79 MB）**；V1.2.0 为 7,787,328 B，差值是网页剪藏与联网检索引入的 `ureq` / `dom_query` |
+| macOS arm64 | `src-tauri/target/release/personal-knowledge-os` | **9,842,176 B（9.84 MB）**；V1.2.0 为 7,787,328 B，差值是网页剪藏与联网检索引入的 `ureq` / `dom_query` |
 | Windows x64（交叉编译） | `src-tauri/target/x86_64-pc-windows-gnu/release/personal-knowledge-os.exe` | 约 8.5 MB |
 | Linux x64 | `src-tauri/target/release/personal-knowledge-os` | 与平台/链接方式有关 |
 

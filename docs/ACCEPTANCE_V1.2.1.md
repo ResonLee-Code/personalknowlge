@@ -167,7 +167,7 @@
 | 预检项 | 结果 | 证据 |
 | --- | --- | --- |
 | release 档能否编译（新增 ureq / dom_query 之后） | ✅ | `cd src-tauri && cargo build --release --offline` → `Finished release profile in 1m 04s` |
-| release 二进制体积与架构 | ✅ | 9,792,448 bytes（9.79 MB），`Mach-O 64-bit executable arm64`（V1.2.0 为 7.79 MB，差值是剪藏 + 联网检索的依赖） |
+| release 二进制体积与架构 | ✅ | 9,842,176 bytes（9.84 MB），`Mach-O 64-bit executable arm64`（V1.2.0 为 7.79 MB，差值是剪藏 + 联网检索的依赖） |
 | 版本号四处一致（当前都是 1.2.0） | ✅ | 发布工作流的 preflight 现在会校验 `package.json` / `Cargo.toml` / `Cargo.lock` / `tauri.conf.json` 四处 |
 | Windows 安装脚本不会打出错版本号 | ✅ | `installer.nsi` 未传 `APP_VERSION` 时 `!error` 直接失败（原来默认 1.0.0） |
 | Linux 打包依赖齐全 | ✅（静态核对） | 工作流与本机脚本都补了 `libfuse2`（AppImage 走 linuxdeploy 需要 FUSE 2，Ubuntu 22.04 默认没有） |
