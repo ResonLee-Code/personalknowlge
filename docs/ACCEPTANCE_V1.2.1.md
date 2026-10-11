@@ -17,7 +17,7 @@
 | Rust 全量测试 | ✅ 39 个测试目标全绿（库单测 116 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
-| 前端单元 / 组件测试 | ✅ 54 个文件、278 用例全通过 | `CI=true pnpm test` |
+| 前端单元 / 组件测试 | ✅ 54 个文件、279 用例全通过 | `CI=true pnpm test` |
 | 前端生产构建 | ✅ 构建成功 | `CI=true pnpm build` |
 | 端到端主流程 | ✅ 1 条主流程通过（34 个编号步骤 + 补充断言，浏览器预览后端） | `CI=true pnpm test:e2e`（截图见 `docs/screenshots/`）；重负载下时序敏感，配置了 1 次重试与 10s 断言超时（原因写在 `playwright.config.ts` 注释里） |
 
@@ -46,12 +46,12 @@
 | 备份包内容与「恢复即同一知识库」 | 包内含笔记 / 版本历史（命名版本）/ 模板 / **回收站** / 附件 / 数据库 / 配置；恢复到新目录后打开：**沿用原知识库 id**（不产生孤儿行）、命名版本、模板、回收站里的笔记、附件、**收藏**（只存在数据库里的状态）全部回来；写入与校验共用同一套条目分类（四类分别计数） | `tests/rebuild_flow.rs`（含本项，反向验证过） |
 | 决策层打分 | 来源可信度 ∈ (0,1]、交叉验证结论置信度高于单一来源；注入桩 `DecisionModel` 可改变打分（A/B 通路） | `tests/research_flow.rs` |
 | 本地模型接入 | 开启后可信度由模型分决定且报告写明 provider；连不上自动降级且流程不中断；开关关闭时零请求；远程地址被拒绝（**写入侧与读取侧各校验一次**：即使有人直接改了库里的地址，也不会把笔记内容发到远程） | `tests/local_model_flow.rs`（4 项） |
-| 文档与代码一致性 | README / ARCHITECTURE / 安装指南 / 发布流程的版本、能力表、命令与体积都按当前代码校正；文档内引用的相对路径全部存在（**可执行守卫**：跑 `pnpm test` 即检查，链接改坏立刻失败） | `src/lib/docsLinks.test.ts` |
+| 文档与代码一致性 | README / ARCHITECTURE / 安装指南 / 发布流程的版本、能力表、命令与体积都按当前代码校正；文档内引用的相对路径全部存在（**可执行守卫**：跑 `pnpm test` 即检查，链接改坏立刻失败） | `src/lib/docsLinks.test.ts`（两类：相对链接目标 + 行内代码里的仓库内路径，均反向验证过） |
 | 命令契约 | 前端 104 条命令与 `lib.rs` 注册表、mock 分支三方对齐；**参数名也对齐**（77 处带参调用 0 不一致）；守卫两次反向验证（插入未注册命令 / 改错参数名 → 立即失败） | `tests/command_contract.rs`（3 项） |
 | IPC 契约 | ① 响应结构：界面读取的 **29 个 DTO**，TS 字段必须存在于 Rust 结构（238 字段 0 不一致）；② **事件名** 3/3 一致；③ **错误码** 22/22 集合相等。三条都反向验证过（故意制造漂移 → 立即失败） | `tests/dto_contract.rs`（13 项） |
 | 可访问性（程序化标签） | 全部 `Input` / `select` / `textarea` 都有 `id` / `aria-label` / 被 `<label>` 包裹（本轮补齐 25 处）；无标题图标按钮与缺 `alt` 图片均为 0；守卫反向验证过 | `src/lib/a11yLabels.test.ts` |
 | 快捷键 | 语义：无处理器的快捷键**不被吞**（⌘S/⌘E 由编辑器页面实现）；行为：⌘S 在自动保存延迟 3000ms 下仍能立即保存（E2E 断言窗口 1500ms）、⌘E 能把焦点送回编辑器；Delete 在输入框内不触发 | `src/hooks/useKeyboardShortcuts.test.ts`（4 项）+ E2E 第 5b 步；「关于」页列表与实现的双向对齐：`src/lib/shortcutsContract.test.ts`（2 项） |
-| 文件监听降级 | 原生事件不可用时自动降级为轮询（3 秒）——用测试开关强制「探测通过但启动失败」，断言返回 `WatchMode::Polling` 而不是直接失败；线程创建失败也返回错误而非 panic | `src/infrastructure/watcher.rs` 单测（3 项） |
+| 文件监听降级 | 原生事件不可用时自动降级为轮询（3 秒）——用测试开关强制「探测通过但启动失败」，断言返回 `WatchMode::Polling` 而不是直接失败；线程创建失败也返回错误而非 panic | `src-tauri/src/infrastructure/watcher.rs` 单测（3 项） |
 | 异步竞态 | 快速切换笔记 / 连续输入检索词时，先发出的响应后到**不会**覆盖当前状态（详情、列表、检索三处）；反向验证过（撤掉守卫 → `expected 'note_a' to be 'note_b'`） | `src/stores/raceGuard.test.ts`（3 项）+ `src/lib/latestRequest.ts` |
 | 防抖保存不丢改动 | 切换笔记前先 flush（顺序断言「先落盘再取新详情」）；同一篇刷新不重复触发；`discardLocalEdits` 时跳过（冲突对话框「以磁盘为准」）；E2E 实测：延迟 3000ms 下输入后立刻切走，切回来内容仍在 | `src/hooks/useAutosave.test.ts`（3 项）+ `raceGuard.test.ts`（+1）+ E2E 第 5c 步 |
 | 缺失笔记可恢复 | 笔记文件被移出后标记缺失；文件放回再扫描 → 自动恢复为正常笔记、正文读回、**重新可检索**；整目录被删/被移走时不 panic、保存返回明确错误、目录放回后无需重启即可恢复 | `tests/external_interference_flow.rs`（含本项，共 6 项） |

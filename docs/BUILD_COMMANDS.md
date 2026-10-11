@@ -41,7 +41,7 @@ cargo --version
 本仓库为离线/受限网络做了两处配置，一般不需要额外操作：
 
 - `.npmrc` 里 `verify-deps-before-run=false`，避免 `pnpm tauri build` 每次先尝试联网校验依赖；
-- `src-tauri/.cargo/config.toml` 把 crates 源指向 USTC 镜像，Rust 侧可配合 `--offline`。
+- `.cargo/config.toml` 把 crates 源指向 USTC 镜像，Rust 侧可配合 `--offline`。
 
 ## 2. 场景 A：只编译可执行文件（不出安装包）
 
@@ -193,7 +193,7 @@ dist-windows/                           # Windows 安装包与便携版（NSIS �
 | 现象 | 原因与处理 |
 | --- | --- |
 | `pnpm tauri build` 卡在联网校验依赖 | 确认没删掉 `.npmrc` 里的 `verify-deps-before-run=false` |
-| Rust 依赖拉不下来 | 使用 `src-tauri/.cargo/config.toml` 的镜像；必要时加 `--offline`（依赖已在本地缓存时） |
+| Rust 依赖拉不下来 | 使用 `.cargo/config.toml` 的镜像；必要时加 `--offline`（依赖已在本地缓存时） |
 | 编译很慢 | `[profile.release]` 开了 `lto = true` + `codegen-units = 1` + `strip`（体积换时间）。迭代期用 `--debug` 或 `--no-bundle`；只在出包时跑 release |
 | 交叉编译 Windows 报找不到 `dlltool/windres` | 必须先设 `ZIG=/path/to/zig`，脚本会为 mingw-w64 建 Zig 工具链软链 |
 | `build-installer.sh` 报找不到 `makensis` | `brew install makensis`，或用 `NSIS_PATH` 指向自建 NSIS 目录 |

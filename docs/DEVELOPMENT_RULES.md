@@ -167,7 +167,10 @@ pnpm build && pnpm test:e2e      # 端到端 UI 验证，截图输出到 docs/sc
 
 ### 文档链接守卫
 
-`docs/**.md` 与 `README.md` 里的相对链接由 `src/lib/docsLinks.test.ts` 检查
+`docs/**.md`、`README.md` 与其余被 Git 跟踪的 Markdown 由 `src/lib/docsLinks.test.ts` 检查**两类东西**：
+① 相对链接的目标文件；② **行内代码里的仓库内路径**（首段必须是仓库真实顶层目录，
+  例如 `` `src-tauri/.cargo/config.toml` ``——写错前缀会立刻被抓；
+  模块相对简写如 `` `core/text.rs` `` 与占位符 `` `.knowledge/templates/<名字>.md` `` 不在此列）。
 （随 `pnpm test` 一起跑）：目标文件不在就失败，并一次列出全部问题。
 只查**被 Git 跟踪**的 Markdown——`docs/yuque-manuals/books/` 下的语雀手册正文是第三方抓取内容
 （默认不入库），其中的伪链接不属于本项目要维护的引用。
