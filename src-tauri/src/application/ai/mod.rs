@@ -9,6 +9,7 @@
 //! - 唯一已实现的是离线兜底 `RuleDecisionProvider`（无网络、无新依赖）
 
 pub mod policy;
+pub mod host;
 pub mod local_model;
 pub mod research;
 pub mod rule_provider;

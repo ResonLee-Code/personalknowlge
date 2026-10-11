@@ -14,7 +14,7 @@
 
 | 项目 | 结果 | 证据 |
 | --- | --- | --- |
-| Rust 全量测试 | ✅ 38 个测试目标全绿（库单测 111 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
+| Rust 全量测试 | ✅ 38 个测试目标全绿（库单测 116 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
 | 前端单元 / 组件测试 | ✅ 47 个文件、250 用例全通过 | `CI=true pnpm test` |
@@ -126,6 +126,7 @@
 | 研究助手 · 引用可点开（§9.9 验收 1） | 报告第 6 段本地来源 `[[标题]]` / 外部来源裸 URL；页面上「结论与引用」逐句可点（本地跳笔记、外链新窗口，悬停显示级别与获取时间） | `tests/research_flow.rs` + `tests/web_search_flow.rs` + `ResearchPage.test.tsx`（各含反向验证） |
 | 研究助手 · 实时进度（§9.2） | 每一步与每个抓取页都推 `ai://research-progress`（会话 id / 步骤 / 说明 / 已抓页数 / 来源数）；**只含元数据，不含笔记正文与网页内容**；仅本地口径下 `pagesFetched` 恒为 0；页面在长步骤里显示「已抓 N 页 / 来源 N 条」 | `tests/research_progress_flow.rs`（1 项，记账型事件出口）+ `ResearchPage.test.tsx`（+1） |
 | 研究助手 · 运行中可中止（§9.2 / §9.7） | 中止优先：收集在本地跑完 / 每个候选前 / 收尾保存前都以磁盘状态为准，已中止就停下并把这一步成果并回草稿（不覆盖 `aborted` 与中止原因）；验证 / 汇总 / 提案同样处理；界面忙碌时「中止」仍可点 | `tests/research_abort_flow.rs`（2 项，慢速检索源必现竞态）+ `ResearchPage.test.tsx`（+1，反向验证） |
+| AI 闸门 · 主机解析与「只连本机」 | 主机解析抽成**一份共用实现**（闸门 / 白黑名单 / 来源分级 / 本地模型地址共用，杜绝两处口径漂移）：小写 → 去 `www.`、端口、userinfo，IPv6 字面量去方括号；本地模型地址只放行 `localhost` / `127.0.0.1` / `[::1]`，**拒绝** `localhost.evil.com`、`evil.com#@localhost`、十进制 IP、`0.0.0.0` 等写法；IPv6 在「域名规则」与「主机解析」两侧口径一致 | `ai::host` 单测（2 项）+ `ai::policy` 单测（2 项，双向反向验证） |
 | 联网检索 | 可配置检索源 + 分级 + 预算 + 注入丢弃 | `tests/web_search_flow.rs` |
 | 待复核提醒 | `note_due_for_review` + 首页卡片 | `tests/review_flow.rs` + `ReviewDueCard.test.tsx` |
 

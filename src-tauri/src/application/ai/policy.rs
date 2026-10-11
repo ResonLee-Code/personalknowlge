@@ -15,6 +15,7 @@ use crate::core::error::{AppError, ErrorCode, Result};
 use crate::core::time::now_iso;
 use crate::domain::ai::{AiAuditEntry, AiPolicy, NetworkMode, UpdateAiPolicyInput};
 
+use super::host::host_of;
 use super::super::context::WorkspaceContext;
 
 /// 审计文件名（放在既有 `.knowledge/logs/` 下）。
@@ -292,19 +293,9 @@ pub fn normalize_local_endpoint(value: &str) -> Option<String> {
     if !(lowered.starts_with("http://") || lowered.starts_with("https://")) {
         return None;
     }
-    let rest = trimmed.split_once("://").map(|(_, rest)| rest).unwrap_or(trimmed);
-    let host = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or("")
-        .rsplit('@')
-        .next()
-        .unwrap_or("")
-        .split(':')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let local = host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]";
+    // 主机名解析与闸门/分级共用一份实现（IPv6 字面量会去掉方括号）
+    let host = host_of(trimmed)?;
+    let local = matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1");
     if !local {
         return None;
     }
@@ -338,36 +329,6 @@ fn normalize_domains(list: &[String]) -> Vec<String> {
         }
     }
     seen
-}
-
-/// 从 URL 或裸域名里取 host（小写、去 www、去端口）。
-fn host_of(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let rest = trimmed
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(trimmed);
-    let host = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or("")
-        .rsplit('@')
-        .next()
-        .unwrap_or("")
-        .split(':')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .trim_start_matches("www.")
-        .to_ascii_lowercase();
-    if host.is_empty() {
-        None
-    } else {
-        Some(host)
-    }
 }
 
 /// 域名匹配：支持精确与子域（规则 `example.com` 命中 `a.example.com`）。
@@ -428,6 +389,56 @@ mod tests {
             &UpdateAiPolicyInput { network: Some("localOnly".into()), ..Default::default() },
         );
         assert!(policy.network_confirmed_at.is_none());
+    }
+
+    /// 本地模型是**唯一的外发通道之一**，地址校验必须真的只放行本机：
+    /// 这条规则以前没有任何测试，而且 `::1` 分支因为解析方式写错而永远不会命中。
+    #[test]
+    fn local_model_endpoint_must_be_a_loopback_host() {
+        for accepted in [
+            "http://localhost:11434",
+            "http://127.0.0.1:11434",
+            "http://[::1]:11434",
+            "http://LOCALHOST:11434/",
+            "https://localhost",
+            "http://localhost:11434/api",
+        ] {
+            assert!(
+                normalize_local_endpoint(accepted).is_some(),
+                "应当接受本机地址：{accepted}"
+            );
+        }
+        for rejected in [
+            "",
+            "   ",
+            "localhost:11434",
+            "ftp://localhost",
+            "http://evil.com:11434",
+            "http://localhost.evil.com:11434",
+            "http://127.0.0.1.evil.com:11434",
+            "http://evil.com#@localhost",
+            "http://user@evil.com:11434",
+            // 十进制写法指向 127.0.0.1，但不是我们声明的本机写法：一律拒绝（保守）
+            "http://2130706433:11434",
+            "http://0.0.0.0:11434",
+        ] {
+            assert!(
+                normalize_local_endpoint(rejected).is_none(),
+                "必须拒绝非本机地址：{rejected}"
+            );
+        }
+    }
+
+    /// IPv6 字面量在「域名规则」与「主机解析」两侧的口径要一致，否则黑名单写了也拦不住。
+    #[test]
+    fn ipv6_literals_normalize_the_same_way_in_rules_and_hosts() {
+        assert_eq!(normalize_domains(&["[::1]".to_string()]), vec!["::1".to_string()]);
+        assert_eq!(
+            normalize_domains(&["https://[2001:db8::1]/x".to_string()]),
+            vec!["2001:db8::1".to_string()]
+        );
+        assert!(domain_matches("::1", "::1"));
+        assert!(domain_matches("2001:db8::1", "2001:db8::1"));
     }
 
     #[test]

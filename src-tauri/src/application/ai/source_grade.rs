@@ -181,35 +181,8 @@ pub fn is_stale(published_at: Option<&str>, time_window_days: u32) -> Option<boo
     Some(age_days > i64::from(time_window_days))
 }
 
-/// 取 host（小写、去 www、去端口）。
-pub fn host_of(url: &str) -> Option<String> {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let rest = trimmed
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(trimmed);
-    let host = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or("")
-        .rsplit('@')
-        .next()
-        .unwrap_or("")
-        .split(':')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .trim_start_matches("www.")
-        .to_ascii_lowercase();
-    if host.is_empty() {
-        None
-    } else {
-        Some(host)
-    }
-}
+/// 取主机名（与闸门共用一份实现，见 `ai::host`）。
+pub use super::host::host_of;
 
 /// 域名表匹配：规则命中 host 本身或它的某个父域，取最长（最具体）的规则。
 fn longest_match(host: &str) -> Option<(&'static str, SourceLevel)> {
