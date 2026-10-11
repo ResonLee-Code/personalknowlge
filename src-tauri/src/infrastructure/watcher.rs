@@ -55,7 +55,8 @@ pub struct FileChangeBatch {
     pub attachments_changed: bool,
 }
 
-/// 监听后端。
+/// 监听后端（原生事件 / 轮询兜底）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WatchMode {
     Native,
     Polling,
@@ -219,7 +220,7 @@ where
         .watch(&root, RecursiveMode::Recursive)
         .map_err(|error| AppError::new(ErrorCode::IoError, format!("监听目录失败：{error}")))?;
 
-    Ok(build_handle(collector, Backend::Native(watcher), on_change))
+    build_handle(collector, Backend::Native(watcher), on_change)
 }
 
 /// 启动轮询式监听（兜底方案）。
@@ -246,28 +247,65 @@ where
         .watch(&root, RecursiveMode::Recursive)
         .map_err(|error| AppError::new(ErrorCode::IoError, format!("监听目录失败：{error}")))?;
 
-    Ok(build_handle(collector, Backend::Polling(watcher), on_change))
+    build_handle(collector, Backend::Polling(watcher), on_change)
+}
+
+
+/// **仅测试用**：强制「原生监听启动失败」，用来验证降级到轮询的路径。
+///
+/// 真实环境里很难让 `notify` 的 `watch()` 失败（那才是这个开关存在的理由）。
+#[cfg(test)]
+pub(crate) static FORCE_NATIVE_START_FAILURE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn native_start_forced_to_fail() -> bool {
+    #[cfg(test)]
+    {
+        FORCE_NATIVE_START_FAILURE.load(Ordering::SeqCst)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
 }
 
 /// 自动选择可用的监听方式。
 pub fn start_best_watcher<F>(root: PathBuf, on_change: F) -> Result<(WatcherHandle, WatchMode)>
 where
-    F: Fn(FileChangeBatch) + Send + 'static,
+    F: Fn(FileChangeBatch) + Send + Sync + 'static,
 {
+    // 回调可能要在「原生 → 轮询」两条尝试里各用一次，因此用 Arc 共享
+    let callback = Arc::new(on_change);
     if filesystem_events_available() {
-        match start_watcher(root.clone(), on_change) {
+        let for_native = Arc::clone(&callback);
+        let native_attempt = if native_start_forced_to_fail() {
+            Err(AppError::internal("测试：强制原生监听启动失败"))
+        } else {
+            start_watcher(root.clone(), move |batch| for_native(batch))
+        };
+        match native_attempt {
             Ok(handle) => return Ok((handle, WatchMode::Native)),
             Err(error) => {
-                tracing::warn!(target: "watcher", "原生文件监听不可用，改用轮询：{error}");
-                return Err(error);
+                // 注意：这里**不是**直接失败——文档承诺「原生不可用时自动降级为轮询」，
+                // 探测通过但真正启动失败（目录权限 / 后端错误 / 线程创建失败）也要降级。
+                tracing::warn!(
+                    target: "watcher",
+                    "原生文件监听启动失败，降级为轮询：{}",
+                    error.message
+                );
             }
         }
     }
-    let handle = start_polling_watcher(root, on_change)?;
+    let for_polling = Arc::clone(&callback);
+    let handle = start_polling_watcher(root, move |batch| for_polling(batch))?;
     Ok((handle, WatchMode::Polling))
 }
 
-fn build_handle<F>(collector: Arc<Collector>, backend: Backend, on_change: F) -> WatcherHandle
+/// 组装监听句柄：起一个汇聚线程，在防抖窗口过后把批量变更交给回调。
+///
+/// 线程创建失败会返回错误而不是 panic——上层（`start_best_watcher`）会因此降级到轮询，
+/// 而不是把整个应用带崩。
+fn build_handle<F>(collector: Arc<Collector>, backend: Backend, on_change: F) -> Result<WatcherHandle>
 where
     F: Fn(FileChangeBatch) + Send + 'static,
 {
@@ -299,9 +337,11 @@ where
                 on_change(batch);
             }
         })
-        .expect("创建监听线程");
+        .map_err(|error| {
+            AppError::new(ErrorCode::IoError, format!("创建监听线程失败：{error}"))
+        })?;
 
-    WatcherHandle { stop, thread: Some(thread), backend: Some(backend) }
+    Ok(WatcherHandle { stop, thread: Some(thread), backend: Some(backend) })
 }
 
 /// 检测当前环境是否能收到原生文件系统事件。
@@ -392,6 +432,36 @@ mod tests {
     #[ignore = "环境探测：验证文件系统事件支持"]
     fn raw_notify_events_arrive() {
         println!("原生文件系统事件可用：{}", filesystem_events_available());
+    }
+
+    /// 文档承诺：原生文件系统事件不可用时**自动降级为轮询**。
+    ///
+    /// 这里用测试开关强制「探测通过但启动失败」，验证不会直接失败（原来会 `return Err`，
+    /// 结果是「既没有原生监听、也没有轮询」，外部改动要手动重扫才可见）。
+    #[test]
+    fn falls_back_to_polling_when_native_start_fails() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        FORCE_NATIVE_START_FAILURE.store(true, Ordering::SeqCst);
+        let result = start_best_watcher(dir.path().to_path_buf(), |_batch| {});
+        FORCE_NATIVE_START_FAILURE.store(false, Ordering::SeqCst);
+
+        match result {
+            Ok((mut handle, mode)) => {
+                assert_eq!(mode, WatchMode::Polling, "原生失败后必须降级为轮询");
+                handle.stop();
+            }
+            Err(error) => panic!("降级失败：{}", error.message),
+        }
+    }
+
+    /// 没有强制失败时，返回的模式必须是 Native 或 Polling 二者之一（不会失败）。
+    #[test]
+    fn best_watcher_always_starts_on_a_normal_directory() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let (mut handle, mode) =
+            start_best_watcher(dir.path().to_path_buf(), |_batch| {}).expect("监听应当能启动");
+        assert!(matches!(mode, WatchMode::Native | WatchMode::Polling));
+        handle.stop();
     }
 
     #[test]

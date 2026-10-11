@@ -438,7 +438,7 @@ impl WorkspaceService {
                         context.events.emit(
                             event_names::INDEX_STATUS,
                             serde_json::json!({
-                                "warning": "当前环境不支持文件系统事件，已改用轮询方式同步外部修改。"
+                                "warning": "文件系统事件不可用，已改用轮询方式同步外部修改（每 3 秒一次）。"
                             }),
                         );
                     }

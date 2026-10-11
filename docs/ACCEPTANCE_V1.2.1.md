@@ -14,7 +14,7 @@
 
 | 项目 | 结果 | 证据 |
 | --- | --- | --- |
-| Rust 全量测试 | ✅ 35 个测试目标全绿（库单测 109 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
+| Rust 全量测试 | ✅ 35 个测试目标全绿（库单测 111 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
 | 前端单元 / 组件测试 | ✅ 45 个文件、232 用例全通过 | `CI=true pnpm test` |
@@ -42,6 +42,7 @@
 | 响应结构契约 | 界面真正读取的 **29 个 DTO**：TS 接口字段必须都能在 Rust 结构里找到（238 个字段 0 不一致）；守卫反向验证过（加一个 Rust 不存在的可选字段 → 立即失败） | `tests/dto_contract.rs`（11 项，含本项） |
 | 可访问性（程序化标签） | 全部 `Input` / `select` / `textarea` 都有 `id` / `aria-label` / 被 `<label>` 包裹（本轮补齐 25 处）；无标题图标按钮与缺 `alt` 图片均为 0；守卫反向验证过 | `src/lib/a11yLabels.test.ts` |
 | 快捷键 | 语义：无处理器的快捷键**不被吞**（⌘S/⌘E 由编辑器页面实现）；行为：⌘S 在自动保存延迟 3000ms 下仍能立即保存（E2E 断言窗口 1500ms）、⌘E 能把焦点送回编辑器；Delete 在输入框内不触发 | `src/hooks/useKeyboardShortcuts.test.ts`（4 项）+ E2E 第 5b 步 |
+| 文件监听降级 | 原生事件不可用时自动降级为轮询（3 秒）——用测试开关强制「探测通过但启动失败」，断言返回 `WatchMode::Polling` 而不是直接失败；线程创建失败也返回错误而非 panic | `src/infrastructure/watcher.rs` 单测（3 项） |
 | 元数据保全 | `note_save` / `note_set_source` / AI 追加写入之后，frontmatter 的来源、时效、父子层级、手动顺序、置顶、类型化关系、自定义字段、标签全部保留；创建时间不被改写 | `tests/metadata_preservation_flow.rs`（3 项） |
 | 分类移动（挪目录 + 改路径） | 带孙分类的子树移到顶层 / 移回：完整目录路径正确、老目录消失、子目录随行、直属与子分类里的笔记路径改写且文件真实存在、归属 id 不变、移动后仍可检索、重开扫描后一致；防环与目标不存在被拒绝且不改数据 | `tests/category_move_flow.rs`（2 项） |
 | 分类目录展示 | 分类管理页副标题显示**完整**相对路径（子分类不再被误读为根目录）；未建目录时沿用父目录 | `src/lib/categoryDirectory.test.ts`（3 项） |
