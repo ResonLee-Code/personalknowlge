@@ -319,6 +319,24 @@
 
 至此 `research_flow.rs` 14 项、`web_search_flow.rs` 4 项；Rust 全量仍是 29 个测试目标全绿。
 
+### 修复：预览端的标签规范化、返回形状与版本号（2026-10-11）
+
+顺着上一轮的「预览端与后端同规则」继续核对标签链路，修掉三处不一致：
+
+1. **标签规范化**：预览端 `note_set_tags` / `notes_tag_batch` 原来**不做任何规范化**——
+   `' React '` 与 `'react'` 会变成两个标签、空字符串也会建出一个标签行；后端会
+   「去空 + 折叠空白 + 大小写不敏感去重」。现在预览端加了 `normalizeTagName` / `tagKey` /
+   `normalizeTagNames` / `ensureTagRow`，行为与后端一致（按 key 复用标签行、保留首次写法）；
+   `tag_create` / `tag_rename` 也补齐：空名 → `INVALID_INPUT`，与别的标签重名（不区分大小写）→
+   `CATEGORY_NAME_CONFLICT`「同名标签已存在。」；
+2. **返回形状**：`note_set_tags` 后端返回 `NoteDetail`，预览端却返回 `Tag[]`（而
+   `note_set_tag_names` 确实是 `Tag[]`）——同一分支拆开，各返回各的形状；
+3. **预览端版本号**：`app_info` 里硬编码 `1.0.0`（「关于」页在预览里显示错版本），
+   改为读取 `package.json`；`schemaVersion` 也从 2 改成与后端一致的 9。
+
+**测试**：`mockBackend.test.ts` 增 2 项（设置标签时去空/折叠/按大小写去重且标签表只有一行；
+批量打标签同样规范化、重命名撞名被拒、空名被拒）。
+
 ### 修复：浏览器预览端与后端的分类校验不一致（2026-10-11）
 
 **症状**：浏览器预览（mock 后端）里可以「新建/移动笔记到一个**不存在**的分类」——

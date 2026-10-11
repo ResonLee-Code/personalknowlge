@@ -57,6 +57,14 @@ import type {
   WorkspaceOpenResult,
 } from '@/types';
 
+import packageJson from '../../package.json';
+
+/** 与后端 `SCHEMA_VERSION` 对齐的迁移版本（预览端不跑迁移，只用于如实展示）。 */
+const SCHEMA_VERSION = 9;
+
+/** 仓库当前版本（来自 package.json，避免预览端硬编码版本号）。 */
+const packageVersion = packageJson.version;
+
 const STORAGE_KEY = 'pkos.mock.state.v1';
 
 interface MockState {
@@ -213,6 +221,43 @@ function wouldFormCycle(id: string, parentId: string): boolean {
 
 function ulid(): string {
   return Math.random().toString(36).slice(2, 12).toUpperCase();
+}
+
+/** 标签名规范化：去首尾空白并折叠内部空白（与 Rust `normalize_tag_name` 同规则）。 */
+function normalizeTagName(name: string): string {
+  return name.split(/\s+/).filter(Boolean).join(' ');
+}
+
+/** 标签唯一性比较用的键（不区分大小写，FR-T01）。 */
+function tagKey(name: string): string {
+  return normalizeTagName(name).toLowerCase();
+}
+
+/** 标签列表规范化：去空、按 key 去重（保留首次出现的写法）。 */
+function normalizeTagNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of names) {
+    const normalized = normalizeTagName(name);
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(normalized);
+  }
+  return out;
+}
+
+/** 取或建标签行：按 key 复用（保留最初的显示写法），空名返回 null。 */
+function ensureTagRow(name: string): { id: string; name: string; createdAt: string } | null {
+  const normalized = normalizeTagName(name);
+  if (!normalized) return null;
+  const key = normalized.toLowerCase();
+  const existing = state.tags.find((tag) => tagKey(tag.name) === key);
+  if (existing) return existing;
+  const tag = { id: `tag_${ulid()}`, name: normalized, createdAt: now() };
+  state.tags.push(tag);
+  return tag;
 }
 
 function requireWorkspace(): Workspace {
@@ -1670,8 +1715,9 @@ export async function handleMockInvoke(
     case 'app_info':
       return {
         name: 'Personal Knowledge OS',
-        version: '1.0.0',
-        schemaVersion: 2,
+        // 版本从 package.json 读，避免预览端硬编码出「1.0.0」这种与仓库不符的数字
+        version: packageVersion,
+        schemaVersion: SCHEMA_VERSION,
         dataDir: '（浏览器预览模式）',
         platform: 'web-preview',
         sqliteVersion: 'preview',
@@ -1880,19 +1926,20 @@ export async function handleMockInvoke(
       persist();
       return toDetail(note);
     }
+    // 注意返回形状与后端一致：`note_set_tags` 返回 NoteDetail，`note_set_tag_names` 返回 Tag[]
     case 'note_set_tags':
     case 'note_set_tag_names': {
       const note = state.notes.find((item) => item.id === payload.id);
       if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
-      const tags = (payload.tags as string[]) ?? [];
+      // 与后端一致：先规范化（去空 / 折叠空白 / 大小写不敏感去重），再按 key 复用标签行
+      const tags = normalizeTagNames((payload.tags as string[]) ?? []);
       state.noteTags[note.id] = tags;
       tags.forEach((name) => {
-        if (!state.tags.some((tag) => tag.name === name)) {
-          state.tags.push({ id: `tag_${name}`, name, createdAt: now() });
-        }
+        ensureTagRow(name);
       });
       persist();
-      return toDetail(note).tags;
+      const detail = toDetail(note);
+      return command === 'note_set_tags' ? detail : detail.tags;
     }
     case 'note_count': {
       const status = (payload.status as string) ?? 'active';
@@ -1955,6 +2002,7 @@ export async function handleMockInvoke(
     case 'notes_tag_batch': {
       requireWorkspace();
       const input = payload.input as { ids: string[]; tags: string[]; mode?: string };
+      const incoming = normalizeTagNames(input.tags ?? []);
       const failures: Array<{ noteId: string; message: string }> = [];
       let succeeded = 0;
       new Set(input.ids).forEach((id) => {
@@ -1964,17 +2012,19 @@ export async function handleMockInvoke(
           return;
         }
         const current = state.noteTags[id] ?? [];
+        const incomingKeys = incoming.map((name) => name.toLowerCase());
         const next =
           input.mode === 'remove'
-            ? current.filter((name) => !input.tags.some((tag) => tag.toLowerCase() === name.toLowerCase()))
+            ? current.filter((name) => !incomingKeys.includes(name.toLowerCase()))
             : input.mode === 'replace'
-              ? [...input.tags]
-              : [...current, ...input.tags.filter((tag) => !current.some((name) => name.toLowerCase() === tag.toLowerCase()))];
+              ? [...incoming]
+              : [
+                  ...current,
+                  ...incoming.filter((name) => !current.some((item) => item.toLowerCase() === name.toLowerCase())),
+                ];
         state.noteTags[id] = next;
         next.forEach((name) => {
-          if (!state.tags.some((tag) => tag.name === name)) {
-            state.tags.push({ id: `tag_${name}`, name, createdAt: now() });
-          }
+          ensureTagRow(name);
         });
         succeeded += 1;
       });
@@ -2798,9 +2848,10 @@ export async function handleMockInvoke(
       }));
     case 'tag_create': {
       requireWorkspace();
-      const name = String(payload.name).trim();
-      const existing = state.tags.find((tag) => tag.name.toLowerCase() === name.toLowerCase());
-      if (existing) return existing;
+      const name = normalizeTagName(String(payload.name ?? ''));
+      if (!name) fail('INVALID_INPUT', '标签名不能为空。');
+      const existing = state.tags.find((tag) => tagKey(tag.name) === name.toLowerCase());
+      if (existing) return { ...existing, workspaceId: requireWorkspace().id, noteCount: 0 };
       const tag = { id: `tag_${ulid()}`, name, createdAt: now() };
       state.tags.push(tag);
       persist();
@@ -2809,11 +2860,20 @@ export async function handleMockInvoke(
     case 'tag_rename': {
       const tag = state.tags.find((item) => item.id === payload.id);
       if (!tag) fail('TAG_NOT_FOUND', '标签不存在。');
-      const oldName = tag.name;
-      tag.name = String(payload.name);
+      const renamed = normalizeTagName(String(payload.name ?? ''));
+      if (!renamed) fail('INVALID_INPUT', '标签名不能为空。');
+      const conflict = state.tags.find(
+        (item) => item.id !== tag.id && tagKey(item.name) === renamed.toLowerCase(),
+      );
+      // 与后端一致：与别的标签重名（不区分大小写）时拒绝
+      if (conflict) fail('CATEGORY_NAME_CONFLICT', '同名标签已存在。');
+      const oldKey = tagKey(tag.name);
+      tag.name = renamed;
       Object.keys(state.noteTags).forEach((noteId) => {
         const names = state.noteTags[noteId] ?? [];
-        state.noteTags[noteId] = names.map((name) => (name === oldName ? tag.name : name));
+        state.noteTags[noteId] = names.map((name) =>
+          tagKey(name) === oldKey ? tag.name : name,
+        );
       });
       persist();
       return { ...tag, workspaceId: requireWorkspace().id, noteCount: 0 };

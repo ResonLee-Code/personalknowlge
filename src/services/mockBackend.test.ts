@@ -373,3 +373,37 @@ describe('浏览器预览后端 · 分类引用校验（与 Rust 对齐）', () 
     expect(reloaded.note.categoryId).toBeNull();
   });
 });
+
+// 标签规范化与后端一致：去空 / 折叠空白 / 大小写不敏感唯一（FR-T01）。
+// 预览端曾把 ' React ' 与 'react' 当成两个标签，界面上会出现桌面端不会有的重复标签。
+describe('浏览器预览后端 · 标签规范化（与 Rust 对齐）', () => {
+  it('设置标签时会去空、折叠空白并按大小写不敏感去重', async () => {
+    await workspaceService.create('标签规范化库', '/tmp/mock-tag-normalize');
+    const note = await noteService.create({ title: '标签测试' });
+
+    const updated = await noteService.setTags(note.note.id, [' React ', 'react', '  ', '前端  框架']);
+    expect(updated.tags.map((tag) => tag.name)).toEqual(['React', '前端 框架']);
+
+    // 标签表里也只应有两行（不会再出现 'react' 的重复行）
+    const all = await tagService.list();
+    expect(all.filter((tag) => tag.name.toLowerCase() === 'react')).toHaveLength(1);
+    expect(all.some((tag) => tag.name.trim() === '')).toBe(false);
+  });
+
+  it('批量打标签同样规范化；重命名撞名（不区分大小写）被拒绝', async () => {
+    await workspaceService.create('标签批量库', '/tmp/mock-tag-batch');
+    const note = await noteService.create({ title: '批量标签测试' });
+
+    await noteService.tagMany([note.note.id], [' Alpha ', 'alpha'], 'add');
+    const registered = await tagService.list();
+    expect(registered.filter((tag) => tag.name.toLowerCase() === 'alpha')).toHaveLength(1);
+
+    const beta = await tagService.create('Beta');
+    await expect(tagService.rename(beta.id, 'ALPHA')).rejects.toMatchObject({
+      code: 'CATEGORY_NAME_CONFLICT',
+    });
+    await expect(tagService.rename(beta.id, '   ')).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    });
+  });
+});
