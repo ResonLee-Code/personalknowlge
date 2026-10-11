@@ -249,6 +249,32 @@ fn local_research_produces_a_six_section_report_without_any_outbound_call() {
         }
     }
 
+    // 验收 1（可点开）：定位必须写成预览里点得动的形式——
+    // 本地来源 `[[标题]]`（点击打开笔记），外部来源裸 URL（自动成链）。
+    // `note://<id>` 会被预览当成外部地址交给系统打开，点了打不开，因此不得再出现。
+    assert!(
+        !report.markdown.contains("note://"),
+        "报告里不得再用点不开的 note:// 定位：\n{}",
+        report.markdown
+    );
+    // 只看第 6 段：第 4 段「与本知识库的关系」本来就有 `[[笔记]]`，
+    // 若整篇 contains 会被它蒙混过关（这是个很容易写出假绿的地方）。
+    let references_section = report
+        .markdown
+        .split("## 6. 参考来源")
+        .nth(1)
+        .unwrap_or_else(|| panic!("报告必须有第 6 段参考来源：\n{}", report.markdown));
+    for source in &report.references {
+        if source.note_id.is_some() {
+            assert!(
+                references_section.contains(&format!("[[{}]]", source.title)),
+                "本地来源必须写成可点击的 [[标题]]：{}\n{}",
+                source.title,
+                references_section
+            );
+        }
+    }
+
     // 验收 2：单一来源的结论不得出现在第 1、2 段
     let single: Vec<String> = report
         .pending

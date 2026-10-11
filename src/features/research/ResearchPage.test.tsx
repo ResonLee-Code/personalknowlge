@@ -357,4 +357,89 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     // 平均置信度由后端分数汇总得到（0.85 → 高）
     expect(screen.getByTestId('research-avg-confidence')).toHaveTextContent('平均置信度 高 0.85');
   });
+
+  // 验收 1（§9.9）：结论段每一句都能点开对应引用——
+  // 本地来源跳到笔记，外部来源是带了 target=_blank 的外链，编号与参考来源一一对应。
+  it('结论与引用可点开：本地来源跳笔记、外部来源是新窗口外链', async () => {
+    const session = composed();
+    session.report = {
+      ...session.report!,
+      conclusions: [
+        {
+          subQuestionId: 'q2',
+          text: '主流方案集中在工作窃取队列。',
+          citations: [1],
+          bestLevel: 'A',
+          crossVerified: true,
+          fresh: true,
+          relatedNotes: ['note_1'],
+          confidence: 0.8,
+        },
+      ],
+      keyFacts: [
+        {
+          subQuestionId: 'q3',
+          text: '阻塞调用会拖垮运行时。',
+          citations: [2],
+          bestLevel: 'D',
+          crossVerified: true,
+          fresh: true,
+          relatedNotes: [],
+          confidence: 0.5,
+        },
+      ],
+      references: [
+        {
+          reference: 1,
+          title: 'Rust 异步调度实现要点',
+          origin: 'local',
+          noteId: 'note_1',
+          subQuestionId: 'q2',
+          level: 'A',
+          reliability: 5,
+          gradeReason: '沿用笔记已标注的 sourceReliability=5',
+          fetchedAt: '2026-10-10T10:00:00+08:00',
+          snippet: '实现要点在于任务唤醒。',
+          stale: false,
+          credibility: 0.9,
+        },
+        {
+          reference: 2,
+          title: '工程博客：任务窃取',
+          url: 'https://weak.test/post',
+          origin: 'web',
+          noteId: null,
+          subQuestionId: 'q3',
+          level: 'D',
+          reliability: 2,
+          gradeReason: '技术社区博客：按弱来源处理',
+          fetchedAt: '2026-10-11T09:00:00+08:00',
+          snippet: '任务窃取的实现细节。',
+          stale: true,
+          credibility: 0.4,
+        },
+      ],
+    };
+    vi.spyOn(researchService, 'start').mockResolvedValue(session);
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+
+    const block = await screen.findByTestId('research-citations');
+    // 每一句结论/事实都带上了对应的引用编号
+    expect(block).toHaveTextContent('主流方案集中在工作窃取队列。');
+    expect(block).toHaveTextContent('阻塞调用会拖垮运行时。');
+
+    const local = within(block).getByTestId('citation-note');
+    expect(local).toHaveAttribute('href', '/notes/note_1');
+    expect(local).toHaveTextContent('[1] Rust 异步调度实现要点');
+    // 悬停提示带上级别与获取时间（「URL + 抓取时间」可核对）
+    expect(local.getAttribute('title')).toContain('获取');
+
+    const external = within(block).getByTestId('citation-url');
+    expect(external).toHaveAttribute('href', 'https://weak.test/post');
+    expect(external).toHaveAttribute('target', '_blank');
+    expect(external.getAttribute('title')).toContain('可能已过时');
+  });
 });

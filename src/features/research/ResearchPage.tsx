@@ -580,6 +580,60 @@ export function ResearchPage() {
                     </ul>
                   ) : null}
 
+                  {/*
+                    验收 1：结论段每一句都能点开对应引用。
+                    正文里的 `[n]` 是给人看的编号，这里把编号接上真正可点的目标——
+                    本地笔记跳转过去、外部来源用系统浏览器打开（悬停显示级别与获取时间）。
+                  */}
+                  {report.conclusions.length > 0 || report.keyFacts.length > 0 ? (
+                    <div className="mt-4" data-testid="research-citations">
+                      <h3 className="text-xs font-medium text-[var(--ink)]">结论与引用（可点开）</h3>
+                      <ul className="mt-2 flex flex-col gap-1.5 text-sm">
+                        {[...report.conclusions, ...report.keyFacts].map((claim, index) => (
+                          <li
+                            key={`${claim.subQuestionId}-${claim.text}-${index}`}
+                            className="flex flex-wrap items-baseline gap-1.5"
+                          >
+                            <span className="flex-1 text-[var(--ink)]">{claim.text}</span>
+                            {claim.citations.map((reference) => {
+                              const source = report.references.find(
+                                (item) => item.reference === reference,
+                              );
+                              if (!source) return null;
+                              const label = `[${reference}] ${source.title}`;
+                              const hint = `${source.level} 级 · 获取 ${formatDateTime(
+                                source.fetchedAt,
+                              )}${source.stale ? ' · 可能已过时' : ''}`;
+                              return source.noteId ? (
+                                <Link
+                                  key={reference}
+                                  data-testid="citation-note"
+                                  to={ROUTES.note(source.noteId)}
+                                  title={`${hint}（本地笔记）`}
+                                  className="rounded bg-[var(--brand-soft)] px-1.5 py-0.5 text-xs text-[var(--brand)] hover:brightness-95"
+                                >
+                                  {label}
+                                </Link>
+                              ) : (
+                                <a
+                                  key={reference}
+                                  data-testid="citation-url"
+                                  href={source.url ?? '#'}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title={hint}
+                                  className="rounded border border-[var(--border-subtle)] px-1.5 py-0.5 text-xs text-[var(--ink-muted)] hover:bg-[var(--surface-muted)]"
+                                >
+                                  {label}
+                                </a>
+                              );
+                            })}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
                   {report.markdown ? (
                     <div className="mt-4 max-w-none">
                       <MarkdownPreview content={report.markdown} />

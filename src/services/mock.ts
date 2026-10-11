@@ -684,6 +684,18 @@ function researchCitations(claim: ResearchClaim): string {
   return claim.citations.map((value) => `[${value}]`).join(' ');
 }
 
+/**
+ * 来源在报告里的**可点开**定位（与 Rust `source_location` 同规则）：
+ * 本地笔记 → `[[标题]]`（预览里是可点击的链接芯片）；外部来源 → 裸 URL（预览自动成链）。
+ */
+function researchSourceLocation(source: ResearchSource): string {
+  if (source.url && source.url.trim()) return source.url;
+  if (source.noteId && source.noteId.trim()) {
+    return `[[${source.title.replace(/\|/g, '\\|').replace(/#/g, '\\#').replace(/\]/g, '\\]')}]]`;
+  }
+  return '本地';
+}
+
 function researchStale(note: Note, windowDays: number): boolean {
   if (note.validUntil) return note.validUntil.slice(0, 10) < researchIsoDate();
   const ageDays = (Date.now() - new Date(note.updatedAt).getTime()) / 86_400_000;
@@ -1000,11 +1012,10 @@ function researchRenderMarkdown(session: ResearchSession, report: ResearchReport
     out.push('_没有参考来源。_');
   } else {
     report.references.forEach((source) => {
-      const location = source.url ?? (source.noteId ? `note://${source.noteId}` : '本地');
       out.push(
         `[${source.reference}] ${source.title} · ${RESEARCH_LEVEL_LABEL[source.level]} · published ${
           source.publishedAt ?? '时效未知'
-        } · 获取 ${source.fetchedAt} · ${location}（${source.gradeReason}）`,
+        } · 获取 ${source.fetchedAt} · ${researchSourceLocation(source)}（${source.gradeReason}）`,
       );
     });
   }
@@ -2742,9 +2753,7 @@ export async function handleMockInvoke(
           (source) =>
             `- [${source.reference}] ${source.title} · ${RESEARCH_LEVEL_LABEL[source.level]} · 获取 ${
               source.fetchedAt
-            } · ${source.url ?? (source.noteId ? `note://${source.noteId}` : '本地')} · ${
-              source.gradeReason
-            }`,
+            } · ${researchSourceLocation(source)} · ${source.gradeReason}`,
         );
         const child = createNote({
           title: `来源清单：${session.request.topic}`,

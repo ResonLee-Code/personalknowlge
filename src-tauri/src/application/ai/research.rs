@@ -1586,11 +1586,6 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
     } else {
         for source in &report.references {
             let published = source.published_at.as_deref().unwrap_or("时效未知");
-            let location = source
-                .url
-                .clone()
-                .or_else(|| source.note_id.clone().map(|id| format!("note://{id}")))
-                .unwrap_or_else(|| "本地".to_string());
             out.push_str(&format!(
                 "[{}] {} · {} · published {} · 获取 {} · {}（{}）\n",
                 source.reference,
@@ -1598,7 +1593,7 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
                 source.level.label(),
                 published,
                 source.fetched_at,
-                location,
+                source_location(source),
                 source.grade_reason
             ));
         }
@@ -1613,6 +1608,27 @@ fn citations_of(claim: &ResearchClaim) -> String {
         .map(|value| format!("[{value}]"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// 来源在报告里的**可点开**定位（§9.9 验收 1）。
+///
+/// - 本地笔记写成 `[[标题]]`：预览里渲染成可点击的链接芯片，点击直接打开该笔记，
+///   同时形成一条真实的反向链接（此前写 `note://<id>`，预览会把它当外部地址交给系统打开，点不开）；
+/// - 外部来源写**裸 URL**：Markdown 预览会自动识别成链接；
+/// - 都没有（理论上不该出现）时退回「本地」。
+fn source_location(source: &ResearchSource) -> String {
+    if let Some(url) = source.url.as_deref().filter(|value| !value.trim().is_empty()) {
+        return url.to_string();
+    }
+    if let Some(_note_id) = source.note_id.as_deref().filter(|value| !value.trim().is_empty()) {
+        return format!("[[{}]]", escape_wikilink_text(&source.title));
+    }
+    "本地".to_string()
+}
+
+/// 写进 `[[…]]` 的标题要转义 wikilink 的保留字符（与 `core/text.rs` 的解析规则对称）。
+fn escape_wikilink_text(value: &str) -> String {
+    value.replace('|', "\\|").replace('#', "\\#").replace(']', "\\]")
 }
 
 fn escape_table(value: &str) -> String {
@@ -1681,18 +1697,13 @@ fn source_note_markdown(report: &ResearchReport) -> String {
     );
     out.push_str(&format!("> 资料截至 {}。\n\n", report.data_cutoff));
     for source in &report.references {
-        let location = source
-            .url
-            .clone()
-            .or_else(|| source.note_id.clone().map(|id| format!("note://{id}")))
-            .unwrap_or_else(|| "本地".to_string());
         out.push_str(&format!(
             "- [{}] {} · {} · 获取 {} · {} · {}\n",
             source.reference,
             source.title,
             source.level.label(),
             source.fetched_at,
-            location,
+            source_location(source),
             source.grade_reason
         ));
     }

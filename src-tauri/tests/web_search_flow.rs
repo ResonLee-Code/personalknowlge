@@ -16,9 +16,13 @@ use std::thread;
 use personal_knowledge_os_lib::application::ai::policy::AiPolicyService;
 use personal_knowledge_os_lib::application::ai::research::ResearchService;
 use personal_knowledge_os_lib::application::ai::tools::AiTools;
+use personal_knowledge_os_lib::application::note_service::NoteService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
 use personal_knowledge_os_lib::domain::ai::{ResearchBudget, UpdateAiPolicyInput};
+use personal_knowledge_os_lib::domain::note::{
+    CreateNoteInput, NoteListQuery, SetSourceInput,
+};
 use personal_knowledge_os_lib::domain::research::{ResearchRequest, SourceOrigin};
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
@@ -211,6 +215,110 @@ fn allowed_network_collects_graded_web_sources_and_drops_suspected_injection() {
             .any(|entry| entry.capability == "web_search" && entry.outbound),
         "真的发出请求后必须有 outbound=true 的审计"
     );
+}
+
+/// 边界：外部来源在报告里必须**可点开**（裸 URL，预览自动成链），
+/// 且不得退化成 `note://…`（那是本地笔记的旧写法，预览点不开）。
+#[test]
+fn report_references_stay_clickable_for_web_sources() {
+    let fixture = Fixture::new();
+    let (host, _touched) = spawn_once_server(
+        r#"{"results":[
+            {"title":"官方文档：调度器","url":"http://127.0.0.1:9/docs","content":"调度器说明","publishedDate":"2026-01-02"}
+        ]}"#
+        .to_string(),
+    );
+    // 本地来源：先在知识库里放一篇高可靠性笔记，让报告里同时出现两类来源
+    let notes = NoteService::new(fixture.context());
+    notes
+        .create(CreateNoteInput {
+            title: "本地基线：Rust 异步运行时调度".to_string(),
+            category_id: None,
+            initial_content: Some(
+                "Rust 异步运行时调度的本地整理：主流方案对比 tokio 与 async-std 的调度实现，\
+                 实现要点在于任务唤醒与本地队列的批量窃取。"
+                    .to_string(),
+            ),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("建本地笔记");
+    let note_id = notes
+        .list(NoteListQuery::default())
+        .expect("列表")
+        .items
+        .into_iter()
+        .find(|item| item.title == "本地基线：Rust 异步运行时调度")
+        .expect("本地笔记")
+        .id;
+    notes
+        .set_source(SetSourceInput {
+            id: note_id.clone(),
+            source_type: Some("official".to_string()),
+            source_ref: Some("《本地整理》".to_string()),
+            source_reliability: Some(5),
+            valid_until: None,
+        })
+        .expect("标来源");
+
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            search_endpoint: Some(format!("http://{host}/search?q={{query}}&limit={{limit}}")),
+            ..Default::default()
+        })
+        .expect("打开联网档位");
+
+    let session = fixture
+        .research()
+        .start(ResearchRequest {
+            topic: "Rust 异步运行时调度".to_string(),
+            ..Default::default()
+        })
+        .expect("立项");
+    let research = fixture.research();
+    research.collect(&session.id, true).expect("收集（含联网）");
+    research.verify(&session.id).expect("验证");
+    let composed = research.compose(&session.id).expect("汇总");
+    let report = composed.report.as_ref().expect("报告");
+
+    assert!(!report.markdown.contains("note://"), "不得出现点不开的 note:// 定位");
+    // 只检查第 6 段：第 4 段的关系行也写 `[[笔记]]`，整篇 contains 会假绿
+    let references_section = report
+        .markdown
+        .split("## 6. 参考来源")
+        .nth(1)
+        .expect("报告必须有第 6 段参考来源");
+    let web: Vec<_> = report
+        .references
+        .iter()
+        .filter(|source| source.url.is_some())
+        .collect();
+    assert!(!web.is_empty(), "联网后报告里应当有外部来源");
+    for source in web {
+        assert!(
+            references_section.contains(source.url.as_deref().unwrap()),
+            "外部来源必须把裸 URL 写进报告（预览自动成链）：{}",
+            source.url.as_deref().unwrap()
+        );
+    }
+    let local: Vec<_> = report
+        .references
+        .iter()
+        .filter(|source| source.note_id.is_some())
+        .collect();
+    assert!(!local.is_empty(), "本地知识库里应当有材料进入来源列表");
+    for source in local {
+        assert!(
+            references_section.contains(&format!("[[{}]]", source.title)),
+            "本地来源必须写成可点击的 [[标题]]：{}\n{}",
+            source.title,
+            references_section
+        );
+    }
 }
 
 #[test]
