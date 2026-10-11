@@ -617,7 +617,7 @@ impl IndexService {
                     status: NoteStatus::Active,
                     content_hash: Some(stored.content_hash.clone()),
                     word_count: count_words(&plain_text),
-                    favorite: false,
+                    favorite: stored.frontmatter.favorite,
                     created_at,
                     updated_at,
                     last_indexed_at: None,
@@ -845,7 +845,7 @@ impl IndexService {
             status: NoteStatus::Active,
             content_hash: Some(stored.content_hash.clone()),
             word_count: count_words(&markdown_to_plain_text(&stored.body)),
-            favorite: false,
+            favorite: stored.frontmatter.favorite,
             created_at,
             updated_at,
             last_indexed_at: None,
@@ -1060,6 +1060,8 @@ impl IndexService {
                 stored.frontmatter.order.unwrap_or(0).max(0),
             )?;
             SqliteNoteRepository.set_pinned(conn, &note.id, stored.frontmatter.pinned)?;
+            // 收藏同样是「文件为准」的派生列：外部编辑器改 `favorite:` 后要能生效
+            SqliteNoteRepository.set_favorite(conn, &note.id, stored.frontmatter.favorite)?;
             Ok(())
         })?;
 

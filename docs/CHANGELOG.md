@@ -950,6 +950,31 @@ p95 44.4 ms、召回 100%；3 万篇图谱 `graph_get` 全量 **843.7 ms**（红
 反向验证过（把过滤撤掉 → 用例立刻失败，打印出 E 级来源混进结论段）。
 Rust 36 个测试目标、前端 248 用例全绿。
 
+### 缺陷修复：收藏只存在数据库里，删库重建（文档推荐的恢复手段）会静默丢掉（2026-10-11）
+
+**症状**：`note_set_favorite` 只写 `notes.favorite` 列。而文档反复讲「Markdown 是唯一事实来源」，
+并给了「删掉 `.knowledge/database.sqlite` 后重新打开工作区」这条恢复路径——
+照做之后，**收藏全部消失**（置顶、手动顺序、来源时效等都在 frontmatter 里，只有收藏不在）。
+同一个缺口也让备份恢复、整目录搬迁在收藏上静默丢数据。
+
+**修复**（与 `pinned` 完全同口径）：
+
+1. frontmatter 支持 `favorite: true`（也接受 `is_favorite` / `isFavorite`；**只在为真时写入**，
+   取消收藏会移除该字段，不留 `favorite: false` 噪声）；
+2. `note_set_favorite` 改为写回 frontmatter + 投影派生列（写文件、刷新文件快照、发变更事件）；
+3. 扫描侧把 `favorite` 一起投影：采纳新文件（含批量路径）与外部编辑同步（`apply_external_edit`）
+   都读 frontmatter；`note_save` / 来源更新 / 重命名 / 移动 / AI 追加写入等写回路径都透传该字段。
+
+**测试**：
+
+- `tests/rebuild_flow.rs`：删库重建用例增加收藏断言（`rebuilt_parent.favorite == true`）；
+- `tests/metadata_preservation_flow.rs` 增 1 项：收藏 → 文件里能看到 `favorite: true` →
+  取消后字段被移除且库里同步 → **外部手写 `favorite: true` 扫描后生效**；
+  既有「字段拉满」用例的断言清单也加上了收藏。
+  反向验证过（关掉序列化 → 3 个用例立即失败）。
+
+Rust 38 个测试目标全绿。
+
 ### 缺陷修复：备份漏了版本历史 / 模板 / 回收站；恢复出来的库还会「换身份」（2026-10-11）
 
 **症状**（两个连在一起的问题，都是静默丢数据）：

@@ -98,6 +98,7 @@ fn seeded_note(fixture: &Fixture) -> (String, String) {
         })
         .expect("来源与时效");
     notes.set_pinned(&child.id, true).expect("置顶");
+    notes.set_favorite(&child.id, true).expect("收藏");
     notes
         .reorder(personal_knowledge_os_lib::domain::note::ReorderNotesInput {
             ids: vec![child.id.clone()],
@@ -142,6 +143,7 @@ fn assert_fields_survive(fixture: &Fixture, note_id: &str, file_path: &str, why:
     );
     assert!(front.parent.is_some(), "{why}：父子层级要保留");
     assert!(front.pinned, "{why}：置顶要保留");
+    assert!(front.favorite, "{why}：收藏要保留（与置顶同口径，写在 frontmatter 里）");
     assert!(front.order.is_some(), "{why}：手动顺序要保留");
     assert_eq!(front.tags, vec!["保全".to_string()], "{why}：标签要保留");
     assert!(
@@ -265,4 +267,62 @@ fn research_append_adds_the_report_and_keeps_every_existing_field() {
     let parsed = fixture.read_frontmatter(&file_path);
     assert!(parsed.body.contains("正文第一版"), "原有正文要保留");
     assert!(parsed.body.contains("资料截至"), "报告正文要追加进去");
+}
+
+/// 收藏 = frontmatter 里的 `favorite: true`（与置顶同口径）：
+/// 开关要真的写进文件，外部手改也要生效——否则「删库重建」会静默丢收藏。
+#[test]
+fn favorite_round_trips_through_the_file() {
+    let fixture = Fixture::new();
+    let note = fixture
+        .notes()
+        .create(CreateNoteInput {
+            title: "收藏开关测试".to_string(),
+            category_id: None,
+            initial_content: Some("正文".to_string()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("建笔记")
+        .note;
+
+    // 打开收藏：文件里要有 favorite: true
+    fixture
+        .notes()
+        .set_favorite(&note.id, true)
+        .expect("收藏");
+    let parsed = fixture.read_frontmatter(&note.file_path);
+    assert!(parsed.frontmatter.favorite, "收藏要写进 frontmatter");
+    assert!(
+        std::fs::read_to_string(fixture.workspace.path().join(&note.file_path))
+            .expect("读原文")
+            .contains("favorite: true"),
+        "文件里要能直接看到 favorite: true"
+    );
+
+    // 取消收藏：字段要被移除（不留 `favorite: false` 的噪声）
+    fixture
+        .notes()
+        .set_favorite(&note.id, false)
+        .expect("取消收藏");
+    let raw = std::fs::read_to_string(fixture.workspace.path().join(&note.file_path)).expect("读原文");
+    assert!(
+        !raw.contains("favorite"),
+        "取消收藏后不应再写这个字段：\n{raw}"
+    );
+    assert!(
+        !fixture.notes().get(&note.id).expect("读回").note.favorite,
+        "库里也要跟着变成未收藏"
+    );
+
+    // 外部手改（用户自己写 favorite: true）→ 扫描后生效
+    let raw = raw.replace("status: active", "status: active\nfavorite: true");
+    std::fs::write(fixture.workspace.path().join(&note.file_path), raw).expect("外部改文件");
+    personal_knowledge_os_lib::application::index_service::IndexService::new(fixture.context())
+        .scan_workspace()
+        .expect("扫描");
+    assert!(
+        fixture.notes().get(&note.id).expect("读回").note.favorite,
+        "外部手写的 favorite: true 要在扫描后生效"
+    );
 }

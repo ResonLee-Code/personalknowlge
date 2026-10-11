@@ -208,6 +208,7 @@ impl NoteService {
             parent: parent.as_ref().map(|note| note.id.clone()),
             order: None,
             pinned: false,
+            favorite: false,
             extra: Vec::new(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &body);
@@ -352,6 +353,7 @@ impl NoteService {
             parent: existing.frontmatter.parent.clone(),
             order: existing.frontmatter.order,
             pinned: existing.frontmatter.pinned,
+            favorite: existing.frontmatter.favorite,
             relations: existing.frontmatter.relations.clone(),
             extra: existing.frontmatter.extra.clone(),
         };
@@ -476,6 +478,7 @@ impl NoteService {
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
             pinned: stored.frontmatter.pinned,
+            favorite: stored.frontmatter.favorite,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -566,6 +569,7 @@ impl NoteService {
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
             pinned: stored.frontmatter.pinned,
+            favorite: stored.frontmatter.favorite,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -697,9 +701,47 @@ impl NoteService {
     /// 收藏状态。
     pub fn set_favorite(&self, id: &str, favorite: bool) -> Result<NoteDetail> {
         let note = self.note_or_err(id)?;
+        // 收藏与置顶同口径：写回 frontmatter（`favorite: true`），再由派生列投影——
+        // 只存数据库会让「删库重建」（文档推荐的恢复手段）静默丢掉收藏。
+        let stored = self.ctx.storage.read_note(&note.file_path)?;
+        let lookup = self.ctx.category_lookup()?;
+        let category_path = note
+            .category_id
+            .as_ref()
+            .map(|id| lookup.path_string(id))
+            .unwrap_or_default();
+        let frontmatter = Frontmatter {
+            id: Some(note.id.clone()),
+            title: Some(note.title.clone()),
+            note_type: stored.frontmatter.note_type.clone(),
+            status: stored.frontmatter.status.clone(),
+            category: Some(category_path).filter(|value| !value.is_empty()),
+            tags: stored.frontmatter.tags.clone(),
+            created_at: stored.frontmatter.created_at.clone(),
+            // 收藏不是内容改动，保留原 updated_at
+            updated_at: stored
+                .frontmatter
+                .updated_at
+                .clone()
+                .or_else(|| Some(note.updated_at.clone())),
+            source_type: stored.frontmatter.source_type.clone(),
+            source_ref: stored.frontmatter.source_ref.clone(),
+            source_reliability: stored.frontmatter.source_reliability,
+            valid_until: stored.frontmatter.valid_until.clone(),
+            relations: stored.frontmatter.relations.clone(),
+            parent: stored.frontmatter.parent.clone(),
+            order: stored.frontmatter.order,
+            pinned: stored.frontmatter.pinned,
+            favorite,
+            extra: stored.frontmatter.extra.clone(),
+        };
+        let markdown = frontmatter::serialize(&frontmatter, &stored.body);
+        self.ctx.storage.write_atomic(&note.file_path, &markdown)?;
         self.ctx
             .db
             .with_conn(|conn| SqliteNoteRepository.set_favorite(conn, &note.id, favorite))?;
+        self.refresh_file_stamp(&note.id, &note.file_path);
+        self.emit_change("modified", &note.id);
         self.detail(self.note_or_err(&note.id)?)
     }
 
@@ -753,6 +795,7 @@ impl NoteService {
             parent: parent.as_ref().map(|item| item.id.clone()),
             order: stored.frontmatter.order,
             pinned: stored.frontmatter.pinned,
+            favorite: stored.frontmatter.favorite,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -797,6 +840,7 @@ impl NoteService {
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
             pinned,
+            favorite: stored.frontmatter.favorite,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -888,6 +932,7 @@ impl NoteService {
                 parent: stored.frontmatter.parent.clone(),
                 order: Some(order),
                 pinned: stored.frontmatter.pinned,
+                favorite: stored.frontmatter.favorite,
                 extra: stored.frontmatter.extra.clone(),
             };
             let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -1043,6 +1088,7 @@ impl NoteService {
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
             pinned: stored.frontmatter.pinned,
+            favorite: stored.frontmatter.favorite,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);
@@ -1092,6 +1138,7 @@ impl NoteService {
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
             pinned: stored.frontmatter.pinned,
+            favorite: stored.frontmatter.favorite,
             extra: stored.frontmatter.extra.clone(),
         };
         let markdown = frontmatter::serialize(&frontmatter, &stored.body);

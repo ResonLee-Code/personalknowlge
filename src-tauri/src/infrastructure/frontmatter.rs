@@ -33,6 +33,8 @@ pub struct Frontmatter {
     pub order: Option<i64>,
     /// 置顶文档：在所有排序下排在最前
     pub pinned: bool,
+    /// 收藏：与置顶同口径（只在为 true 时写入），删库重建后仍在
+    pub favorite: bool,
     /// 用户显式声明的类型化关系（N2）
     pub relations: Vec<RelationEntry>,
     /// 未识别的字段，按原顺序保留
@@ -156,6 +158,7 @@ fn from_mapping(mapping: &Mapping) -> Frontmatter {
             "parent" | "parent_id" | "parentId" => frontmatter.parent = as_string(value),
             "order" | "sort_order" | "sortOrder" => frontmatter.order = as_i64(value),
             "pinned" | "is_pinned" | "isPinned" => frontmatter.pinned = as_bool(value),
+            "favorite" | "is_favorite" | "isFavorite" => frontmatter.favorite = as_bool(value),
             _ => frontmatter.extra.push((key_name.to_string(), value.clone())),
         }
     }
@@ -280,6 +283,9 @@ pub fn serialize(frontmatter: &Frontmatter, body: &str) -> String {
     if frontmatter.pinned {
         yaml.push_str("pinned: true\n");
     }
+    if frontmatter.favorite {
+        yaml.push_str("favorite: true\n");
+    }
     if let Some(order) = frontmatter.order.filter(|value| *value > 0) {
         // 写成数字（不加引号）：`order: 3`，便于用户手改
         yaml.push_str(&format!("order: {order}\n"));
@@ -312,6 +318,9 @@ pub fn serialize(frontmatter: &Frontmatter, body: &str) -> String {
         "pinned",
         "is_pinned",
         "isPinned",
+        "favorite",
+        "is_favorite",
+        "isFavorite",
     ];
     if !frontmatter.extra.is_empty() {
         let mut extra = Mapping::new();

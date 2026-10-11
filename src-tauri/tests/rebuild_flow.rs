@@ -100,6 +100,7 @@ fn deleting_the_database_rebuilds_everything_from_markdown() {
         })
         .expect("写来源与时效");
     notes.set_pinned(&parent.id, true).expect("置顶");
+    notes.set_favorite(&parent.id, true).expect("收藏");
     notes
         .reorder(ReorderNotesInput { ids: vec![parent.id.clone()] })
         .expect("设置手动顺序");
@@ -144,9 +145,13 @@ fn deleting_the_database_rebuilds_everything_from_markdown() {
     assert_eq!(rebuilt_parent.id, parent.id, "父文档 id 必须稳定");
     assert_eq!(rebuilt_child.id, child.id, "子文档 id 必须稳定");
 
-    // 2) 分类 / 标签 / 置顶 / 手动顺序 / 父子层级
+    // 2) 分类 / 标签 / 置顶 / 收藏 / 手动顺序 / 父子层级
     assert_eq!(rebuilt_parent.category_id, parent.category_id);
     assert!(rebuilt_parent.pinned, "置顶要从 frontmatter 重建");
+    assert!(
+        rebuilt_parent.favorite,
+        "收藏要从 frontmatter 重建（此前只存数据库，删库就丢）"
+    );
     assert!(rebuilt_parent.sort_order > 0, "手动顺序要从 frontmatter 重建");
     assert_eq!(
         rebuilt_child.parent_id.as_deref(),

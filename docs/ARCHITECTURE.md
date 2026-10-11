@@ -150,6 +150,10 @@ research_write  → 用户确认后 note_create 或 note_save（追加留历史�
    设计文档 12.3 的 `note_01JXYZ123` 形式得以保留。
 2. **`notes` 表新增两列**：`favorite`（侧边栏「收藏」）与 `trash_path`（回收站位置）。
    其余字段与设计文档 11.2 完全一致，并提供迁移文件。
+   其中 **`favorite` 已改为派生列**（2026-10-11）：与 `pinned` 同口径，写在笔记 frontmatter 的
+   `favorite: true`（只在为真时写入），扫描 / 外部编辑时投影到列——
+   此前它只存在数据库里，「删库重建」这条文档推荐的恢复手段会静默丢收藏；
+   `trash_path` 仍是**库内运行态**（回收站位置由本机磁盘决定，不进 frontmatter）。
    后续迁移另加了若干**派生列**（`parent_id` / `declared_parent` / `sort_order` / `pinned`）：
    它们的唯一事实来源是笔记 frontmatter（`parent` / `order` / `pinned`），
    扫描时投影、外部编辑后重算、删库可从 Markdown 全量重建；

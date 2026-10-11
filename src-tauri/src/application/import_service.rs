@@ -438,6 +438,7 @@ impl ImportService {
             parent: None,
             order: None,
             pinned: false,
+            favorite: false,
             extra: source.extra.clone(),
         };
         // 正文转换：Obsidian 嵌入 → 标准图片链接；Notion 相对链接 → URL 解码

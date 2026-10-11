@@ -238,6 +238,18 @@ CREATE INDEX IF NOT EXISTS idx_notes_sort_order ON notes(sort_order);
 - 排序不改写 `updated_at`——它属于展示顺序而非内容变更；
 - 索引：`idx_notes_sort_order` 支撑「自定义顺序」列表的低成本排序。
 
+### notes 的收藏列（自 V1.2.1 起为派生列）
+
+| 列 | 含义 | 对应 frontmatter |
+| --- | --- | --- |
+| `favorite` | 收藏标记（1 = 收藏） | `favorite`（也接受 `is_favorite` / `isFavorite`） |
+
+- **派生数据（2026-10-11 起）**：应用内「收藏 / 取消收藏」写回 frontmatter 的 `favorite: true`
+  （取消时**移除该字段**，不留 `favorite: false` 噪声），外部编辑器手改后由扫描同步；
+- 此前它只存在数据库里：删除 `.knowledge/database.sqlite` 重建（文档推荐的恢复手段）
+  会静默丢掉全部收藏——现在与 `pinned` 同口径，删库重建后仍在；
+- 索引：`idx_notes_favorite` 支撑侧边栏「收藏」列表。
+
 ### notes 的置顶列（迁移 009，置顶文档）
 
 ```sql

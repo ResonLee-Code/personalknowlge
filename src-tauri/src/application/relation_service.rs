@@ -348,6 +348,7 @@ impl RelationService {
             parent: stored.frontmatter.parent.clone(),
             order: stored.frontmatter.order,
             pinned: stored.frontmatter.pinned,
+            favorite: stored.frontmatter.favorite,
             relations: relations.to_vec(),
             extra: stored.frontmatter.extra.clone(),
         };
