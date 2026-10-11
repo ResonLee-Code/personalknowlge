@@ -348,3 +348,28 @@ describe('浏览器预览后端的来源与时效（N1 对齐，C1 剪藏依赖�
     expect((await noteService.dueForReview(0)).length).toBe(1);
   });
 });
+
+// 与 Rust 后端同规则：分类不存在时必须报错，而不是把笔记挂到一个悬空分类上。
+// （浏览器预览曾被用来「验证界面」，校验不一致会让预览里的行为与桌面端分叉。）
+describe('浏览器预览后端 · 分类引用校验（与 Rust 对齐）', () => {
+  it('新建 / 单篇移动 / 批量移动 指向不存在的分类都会被拒绝', async () => {
+    await workspaceService.create('分类引用校验库', '/tmp/mock-category-ref');
+
+    await expect(
+      noteService.create({ title: '不该被创建', categoryId: 'cat_不存在' }),
+    ).rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' });
+
+    const note = await noteService.create({ title: '移动目标' });
+    await expect(
+      noteService.move(note.note.id, 'cat_不存在'),
+    ).rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' });
+
+    const report = await noteService.moveMany([note.note.id], 'cat_不存在');
+    expect(report.succeeded).toBe(0);
+    expect(report.failures[0]?.message).toContain('分类不存在');
+
+    // 失败后归属不变（没有留下悬空分类）
+    const reloaded = await noteService.get(note.note.id);
+    expect(reloaded.note.categoryId).toBeNull();
+  });
+});

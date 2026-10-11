@@ -319,6 +319,23 @@
 
 至此 `research_flow.rs` 14 项、`web_search_flow.rs` 4 项；Rust 全量仍是 29 个测试目标全绿。
 
+### 修复：浏览器预览端与后端的分类校验不一致（2026-10-11）
+
+**症状**：浏览器预览（mock 后端）里可以「新建/移动笔记到一个**不存在**的分类」——
+桌面端会返回 `CATEGORY_NOT_FOUND`，预览端却默默接受，把笔记挂到了悬空分类上。
+预览常被用来核对界面行为，这种分叉会让人误以为功能就是这样。
+
+**修复**（`src/services/mock.ts`）：新增 `assertCategoryExists()`，并按后端同规则接入三处——
+`note_create`（未知分类直接报错）、`note_move`（同）、`notes_move_batch`（**逐条记失败**，
+消息与后端一致「指定的分类不存在。」）。
+
+顺带核对：mock 的 `note_set_parent` 校验（父文档不存在 / 自己 / 成环）与后端一致 ✓；
+「未知父文档」在两端都是**静默忽略**（后端 `create` 也是这样，保持一致）。
+
+**测试**：`mockBackend.test.ts` 增 1 项（三种路径都被拒绝，且失败后分类归属不变）。
+反向验证过：临时撤掉 `createNote` 的校验，测试立刻报
+`promise resolved … instead of rejecting`。
+
 ### 不变量补测：回收站恢复不覆盖他人文件（2026-10-11）
 
 核对「删除 → 文件被别的程序占用原路径 → 恢复」这条边界：`restore_from_trash` 在目标路径

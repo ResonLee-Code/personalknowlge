@@ -1246,8 +1246,17 @@ function listNotes(query: NoteListQuery = {}) {
   };
 }
 
+/** 校验分类存在（与后端 `directory_for_category` 同规则：未知分类直接报错）。 */
+function assertCategoryExists(categoryId?: string | null) {
+  if (!categoryId) return;
+  if (!state.categories.some((category) => category.id === categoryId)) {
+    fail('CATEGORY_NOT_FOUND', '指定的分类不存在。');
+  }
+}
+
 function createNote(input: CreateNoteInput): NoteDetail {
   const workspace = requireWorkspace();
+  assertCategoryExists(input.categoryId);
   // 子文档：parentId 可以是父笔记 id，也可以是标题（与后端解析规则一致）
   const parent = findParentNote(input.parentId);
   const createdAt = now();
@@ -1803,7 +1812,9 @@ export async function handleMockInvoke(
     case 'note_move': {
       const note = state.notes.find((item) => item.id === payload.id);
       if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
-      note.categoryId = (payload.categoryId as string | null) ?? null;
+      const targetCategory = (payload.categoryId as string | null) ?? null;
+      assertCategoryExists(targetCategory);
+      note.categoryId = targetCategory;
       note.updatedAt = now();
       persist();
       return toDetail(note);
@@ -1920,11 +1931,18 @@ export async function handleMockInvoke(
       requireWorkspace();
       const input = payload.input as { ids: string[]; categoryId?: string | null };
       const failures: Array<{ noteId: string; message: string }> = [];
+      const categoryExists =
+        !input.categoryId || state.categories.some((category) => category.id === input.categoryId);
       let succeeded = 0;
       new Set(input.ids).forEach((id) => {
         const note = state.notes.find((item) => item.id === id);
         if (!note) {
           failures.push({ noteId: id, message: '笔记不存在。' });
+          return;
+        }
+        if (!categoryExists) {
+          // 与后端一致：分类不存在时逐条记失败，而不是把笔记挪到一个悬空分类
+          failures.push({ noteId: id, message: '指定的分类不存在。' });
           return;
         }
         note.categoryId = input.categoryId ?? null;
