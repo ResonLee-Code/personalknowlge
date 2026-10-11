@@ -124,9 +124,21 @@ impl NoteService {
 
     /// 组装完整笔记详情。
     pub fn detail(&self, note: Note) -> Result<NoteDetail> {
+        // 读不出文件时**绝不能假装「正文为空」**（2026-10-11 真机验收定位到的数据丢失源头）：
+        // 前端会把空正文同步进编辑器，下一次保存就把空内容写回文件——真机上四篇笔记的正文被写空，
+        // 起点就是这里把一次读取失败静默降级成了空字符串。
+        //
+        // 「文件缺失」是已知状态（扫描器会把笔记标成 `missing`），那种情况仍按空正文返回，
+        // 让界面给出「笔记缺失」的提示；**其它任何读取失败一律如实报错**，由界面显示读取失败。
         let stored = match self.ctx.storage.read_note(&note.file_path) {
             Ok(stored) => Some(stored),
-            Err(_) => None,
+            Err(error) => {
+                if note.status == NoteStatus::Missing {
+                    None
+                } else {
+                    return Err(error);
+                }
+            }
         };
         let content = stored
             .as_ref()

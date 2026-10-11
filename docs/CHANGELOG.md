@@ -163,10 +163,25 @@ note_save id=…cccc0003 title="验收笔记C"             content_len=142   ←
 三处守卫都做过反向验证（临时破坏 → 5 项测试立即红 → 还原）。真机复验：同一路径连跑一遍，
 连拍帧稳定、**四篇笔记文件字节数完全不变**（不再被写空）。
 
-> **仍未坐实的一点**（下轮继续）：日志里那次「空标题 + 空内容」的保存说明编辑器状态被整体清空过，
-> 而清空它的具体来源还没定位到（`setContent` 只有同步 effect 与编辑器 onChange 两处调用）。
-> 目前的守卫已经让这类空状态**无法再被写进文件**，但源头还欠一个结论——诊断办法已记在
-> [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) E 节（在 `note_get` 上临时加同样的日志）。
+**根因坐实（同一晚，按计划追这条线）**：源头在 `NoteService::detail()`——
+
+```rust
+let stored = match self.ctx.storage.read_note(&note.file_path) {
+    Ok(stored) => Some(stored),
+    Err(_) => None,        // ← 读取失败被静默吞掉
+};
+let content = stored.map(|s| s.body).unwrap_or_default();   // ← 于是「正文 = 空字符串」
+```
+
+**读文件失败被降级成「这篇笔记的正文是空的」**，前端把空正文同步进编辑器，
+下一次保存就把空内容写回文件——真机上 5 篇笔记被写空的**起点**就在这里。
+
+修复：只有**扫描器已经标记 `missing`** 的笔记才按空正文返回（界面据此提示「笔记缺失」，
+这也是既有约定）；**其它任何读取失败一律如实报错**，让界面显示「无法打开这篇笔记」，
+而不是给一个看起来正常的空编辑器。
+
+测试：`tests/external_interference_flow.rs` 新增 1 项——文件被移走且尚未扫描时 `get` 必须报错、
+被标成 `missing` 后仍可读（空正文）。反向验证过：改回 `Err(_) => None` 该测试立即失败。
 
 ### 缺陷修复：PDF「打印视图」报 `open_path not allowed by ACL`（2026-10-11，真机验收发现）
 

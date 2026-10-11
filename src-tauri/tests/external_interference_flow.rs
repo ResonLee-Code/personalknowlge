@@ -424,3 +424,50 @@ fn a_non_utf8_markdown_file_is_skipped_with_a_visible_warning() {
         "读不了的 GBK 文件不该被静默当成乱码入库"
     );
 }
+
+/// 回归（2026-10-11 真机验收，P0）：**读不出文件时不能假装「正文为空」**。
+///
+/// 现场：切笔记时编辑区在 A/B 之间频闪，并伴随正文被写空（四篇笔记）。
+/// 追到底是 `NoteService::detail()` 把一次读取失败 `Err(_) => None` 吞掉、
+/// 于是返回空正文——前端把空正文同步进编辑器，下一次保存就把空内容写回了文件。
+///
+/// 期望：正常笔记的文件读不到时**如实报错**；只有扫描器已经标记为 `missing` 的笔记
+/// 才允许按空正文返回（界面据此显示「笔记缺失」）。
+#[test]
+fn a_note_whose_file_disappeared_must_error_instead_of_returning_empty_content() {
+    let fixture = Fixture::new();
+    let note = fixture
+        .notes()
+        .create(CreateNoteInput {
+            title: "文件被移走的笔记".to_string(),
+            category_id: None,
+            initial_content: Some("正文不能变成空的：玄武岩索引".to_string()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("新建笔记")
+        .note;
+
+    let absolute = fixture.workspace.path().join(note.file_path.replace('\\', "/"));
+    let parked = fixture._data.path().join("parked-empty-body.md");
+    std::fs::rename(&absolute, &parked).expect("把笔记文件移出工作区");
+
+    // 还没扫描：状态仍是 active，此时读取必须失败，而不是回一个空正文
+    let error = fixture
+        .notes()
+        .get(&note.id)
+        .expect_err("文件读不到时应当报错，而不是返回空正文");
+    assert!(
+        !error.message.is_empty(),
+        "错误信息要说清楚（界面上会显示它）：{error:?}"
+    );
+
+    // 扫描把状态标成 missing 之后：按空正文返回（界面显示「笔记缺失」），这是既有行为
+    IndexService::new(fixture.context()).scan_workspace().expect("扫描");
+    let missing = fixture.notes().get(&note.id).expect("缺失状态的笔记仍可读");
+    assert_eq!(
+        missing.note.status,
+        personal_knowledge_os_lib::domain::note::NoteStatus::Missing
+    );
+    assert!(missing.content.is_empty(), "缺失笔记没有正文可读");
+}
