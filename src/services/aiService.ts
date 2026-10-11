@@ -35,4 +35,5 @@ export const aiService = {
   /** 联网检索（需已开启联网档位 + 本次确认 + 配置好检索源地址） */
   webSearch: (keyword: string, limit = 8, confirmed = false) =>
     call<WebSearchHit[]>('ai_web_search', { keyword, limit, confirmed }),
+
 };

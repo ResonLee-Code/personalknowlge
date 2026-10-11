@@ -88,6 +88,11 @@ cd .. && pnpm lint && pnpm test && pnpm build
 pnpm build && pnpm test:e2e      # 端到端 UI 验证，截图输出到 docs/screenshots
 ```
 
+> `cargo test` 里包含一条**命令契约守卫**（`src-tauri/tests/command_contract.rs`）：
+> 它把「前端 `services/*.ts` 调用的命令名」「`lib.rs` 里注册的命令」「mock 的 `case` 分支」
+> 三份清单对齐。前端用字符串调命令，编译器管不到、E2E 又只跑 mock——
+> 少了这条守卫，命令名写错就会变成**只有桌面端才暴露的静默失败**。
+
 ## 8. 文档同步规则
 
 > 文档与代码必须同步演进，避免「实现已变、文档还停在旧描述」。

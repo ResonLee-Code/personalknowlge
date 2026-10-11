@@ -153,6 +153,20 @@
 - 新命令：`ai_policy_get` / `ai_policy_set` / `ai_audit_tail` / `ai_kb_search` / `ai_web_fetch` / `ai_web_search`；
   错误码新增 `AI_DISABLED` / `NETWORK_DISABLED`（前后端一致）。
 
+### 新增守卫：命令契约（前端 ↔ 注册表 ↔ mock）（2026-10-11）
+
+前端是用字符串调 Tauri 命令的（`call('note_create', …)`），编译器管不到、E2E 又只跑 mock，
+因此「命令名写错 / 漏注册 / mock 漏实现」会变成**只有桌面端才暴露的静默失败**。
+新增 `src-tauri/tests/command_contract.rs` 把三份清单对齐并作为常规测试跑：
+
+- 前端 `services/*.ts` 调用的每个命令都必须在 `lib.rs` 注册（否则桌面端直接失败）；
+- 也必须在 mock 里有 `case` 分支（否则浏览器预览失败）；
+- `lib.rs` 注册的每个函数都要能在 `commands/` 里找到定义；
+- 断言解析规模（≥100/≥90）避免「解析不到东西 → 永远通过」的假绿。
+
+当前实测：**104 条前端命令全部两边对齐**（`note_update` 是后端保留、前端未用）。
+守卫本身做过**反向验证**：临时插入一个不存在的命令名，测试立即失败并打印该名字。
+
 ### 缺陷修复：外部新增 / 删库重建后子文档层级丢失（2026-10-11）
 
 **症状**：`.knowledge/database.sqlite` 被删除后重新打开工作区（或以文件监听方式外部新增一篇
