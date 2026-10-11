@@ -19,6 +19,7 @@ use personal_knowledge_os_lib::domain::note::{
     CreateNoteInput, NoteListQuery, ReorderNotesInput, SetParentInput, SetSourceInput,
 };
 use personal_knowledge_os_lib::domain::search::SearchQuery;
+use personal_knowledge_os_lib::infrastructure::frontmatter;
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -360,4 +361,61 @@ fn bulk_adoption_projects_hierarchy_order_pinned_metadata_links_and_relations() 
         })
         .expect("检索");
     assert!(hits.hits.iter().any(|hit| hit.note.id == parent_id), "批量导入后立即可检索");
+}
+
+#[test]
+fn renaming_a_parent_updates_title_declared_children_and_survives_a_rebuild() {
+    let fixture = Fixture::new();
+    let notes = fixture.notes();
+    let parent = notes
+        .create(CreateNoteInput {
+            title: "改名前的父文档".to_string(),
+            category_id: None,
+            initial_content: Some("父文档".to_string()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("父文档")
+        .note;
+
+    // 子文档按**标题**声明父文档（外部编辑器手写的常见写法）
+    let child_relative = "00_Inbox/按标题声明的子文档.md";
+    let child_id = "note_title_declared_child";
+    std::fs::write(
+        fixture.workspace.path().join(child_relative),
+        format!(
+            "---\nid: {child_id}\ntitle: 按标题声明的子文档\ntype: note\nstatus: active\nparent: 改名前的父文档\n---\n\n子文档正文\n"
+        ),
+    )
+    .expect("写子文档");
+    personal_knowledge_os_lib::application::index_service::IndexService::new(fixture.context())
+        .scan_workspace()
+        .expect("扫描");
+    assert_eq!(
+        notes.get(child_id).expect("子文档").note.parent_id.as_deref(),
+        Some(parent.id.as_str()),
+        "按标题声明的父文档应当先被解析"
+    );
+
+    // 父文档改名：子文档里的 `parent:` 声明必须跟着改，否则重建后会掉层级
+    notes
+        .rename(&parent.id, "改名后的父文档", false)
+        .expect("重命名父文档");
+    let parsed = frontmatter::parse(
+        &std::fs::read_to_string(fixture.workspace.path().join(child_relative)).expect("读子文档"),
+    );
+    assert_eq!(
+        parsed.frontmatter.parent.as_deref(),
+        Some("改名后的父文档"),
+        "子文档的 parent 声明要同步成新标题"
+    );
+
+    // 最强断言：删库重建之后，层级仍然在
+    fixture.drop_database_and_reopen();
+    let rebuilt = fixture.notes().get(child_id).expect("重建后读子文档");
+    assert_eq!(
+        rebuilt.note.parent_id.as_deref(),
+        Some(parent.id.as_str()),
+        "改名的父文档在删库重建后仍然要能解析出层级"
+    );
 }

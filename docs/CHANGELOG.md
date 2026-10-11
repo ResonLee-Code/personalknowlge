@@ -153,6 +153,39 @@
 - 新命令：`ai_policy_get` / `ai_policy_set` / `ai_audit_tail` / `ai_kb_search` / `ai_web_fetch` / `ai_web_search`；
   错误码新增 `AI_DISABLED` / `NETWORK_DISABLED`（前后端一致）。
 
+### 缺陷修复：重命名父文档没有同步子文档的 `parent:` 声明（2026-10-11）
+
+**症状**：V1.2.1 的说明里写着「重命名父文档会同步子文档的 `parent:` 声明」，但代码只同步了
+`[[链接]]`（`LinkService::on_note_renamed`）与类型化关系（`RelationService::on_note_renamed`），
+**没有动 `parent:` 字段**。于是按**标题**声明父文档的子文档（外部编辑器手写的常见写法）
+在父文档改名后仍指向旧标题：当下次删库重建（或换机器只剩 Markdown）时解析不到父文档，
+**层级会悄悄掉成顶层**。
+
+**修复**（`application/note_service.rs`）：新增 `sync_children_parent_declaration()`，
+重命名时把「直接子文档里按标题声明、且声明值等于旧标题」的那些 `parent:` 改写成新标题
+（按 id 声明的子文档不受影响，因为 id 稳定）。代价只与子文档数量成正比，不是全库扫描。
+
+**测试**（`tests/rebuild_flow.rs` 第 4 项）：父文档 + 按标题声明的子文档 → 改名后子文档的
+`parent:` 变成新标题 → **删库重建后层级仍在**（这条链路正是 `parent:` 声明存在的意义）。
+
+### 缺陷修复：AI 追加写入会覆盖目标笔记的来源与时效（2026-10-11）
+
+**症状**：对一篇已有来源标注的笔记选择「追加」研究报告后，这篇笔记的
+`source_type` 被改写成 `research`、`source_reliability` 被按报告来源取整（例如 5 → 2）、
+`valid_until` 被改成报告默认的 +180 天——**用户自己标的「官方文档 / 可靠性 5 / 2027-03-31」被静默覆盖**。
+
+**修复**（`application/ai/research.rs`）：
+
+- `create`：照旧写研究产物自己的 N1 元数据（新笔记本来就是研究报告）；
+- `append`：**保留目标笔记原有的来源与时效**，只在原字段为空时补上研究产物的值；
+  同时在会话步骤日志里写明「追加模式：保留目标笔记原有的来源与时效标注」；
+- 浏览器预览（mock）改成同规则；写入确认对话框在「追加」时明确提示「不会覆盖已有的来源与时效」。
+
+**测试**：新增 `src-tauri/tests/metadata_preservation_flow.rs` 3 项——
+① `note_save` 后 frontmatter 的**每个字段**都还在（来源/时效/父子/顺序/置顶/关系/自定义字段/标签，
+   且创建时间不被改写）；② `note_set_source` 只更新来源相关字段、不顺手抹掉别的；
+③ AI 追加写入后原有字段全部保留、原有正文仍在、报告被追加进去。
+
 ### 新增守卫：命令契约（前端 ↔ 注册表 ↔ mock）（2026-10-11）
 
 前端是用字符串调 Tauri 命令的（`call('note_create', …)`），编译器管不到、E2E 又只跑 mock，

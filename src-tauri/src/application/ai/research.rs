@@ -874,9 +874,10 @@ impl ResearchService {
             .map(str::to_string)
             .unwrap_or_else(|| proposal.title.clone());
         let body = write_body(&proposal, &session, input.include_speculation);
+        let appended = mode == WRITE_MODE_APPEND;
         let notes = NoteService::new(Arc::clone(&self.ctx));
 
-        let (note_id, note_title, outcome, diff_preview) = if mode == WRITE_MODE_APPEND {
+        let (note_id, note_title, outcome, diff_preview) = if appended {
             let target = input
                 .target_note_id
                 .clone()
@@ -919,13 +920,45 @@ impl ResearchService {
             )
         };
 
-        // N1 来源元数据：来源类型 / 引用 / 可靠性 / 复核时间
+        // N1 来源元数据：来源类型 / 引用 / 可靠性 / 复核时间。
+        //
+        // **新建**时写研究产物自己的元数据；**追加**时保留目标笔记原有的标注，只补空缺
+        // ——追加是在用户已有的笔记上加一段报告，不能把它原本的「官方文档 / 可靠性 5 /
+        // 2027-03-31 复核」静默改写成「research / 可靠性 2 / +180 天」。
+        let merged = if appended {
+            let existing = notes.get(&note_id)?.note;
+            let keep = existing.source_type.is_some()
+                || existing.source_ref.is_some()
+                || existing.source_reliability.is_some()
+                || existing.valid_until.is_some();
+            if keep {
+                session.steps.push(ResearchStepLog {
+                    step: "write".to_string(),
+                    at: now_iso(),
+                    detail: "追加模式：保留目标笔记原有的来源与时效标注（不覆盖用户元数据）"
+                        .to_string(),
+                });
+            }
+            (
+                existing.source_type.clone().or_else(|| Some(proposal.source_type.clone())),
+                existing.source_ref.clone().or_else(|| Some(proposal.source_ref.clone())),
+                existing.source_reliability.or(Some(proposal.source_reliability)),
+                existing.valid_until.clone().or_else(|| proposal.valid_until.clone()),
+            )
+        } else {
+            (
+                Some(proposal.source_type.clone()),
+                Some(proposal.source_ref.clone()),
+                Some(proposal.source_reliability),
+                proposal.valid_until.clone(),
+            )
+        };
         notes.set_source(SetSourceInput {
             id: note_id.clone(),
-            source_type: Some(proposal.source_type.clone()),
-            source_ref: Some(proposal.source_ref.clone()),
-            source_reliability: Some(proposal.source_reliability),
-            valid_until: proposal.valid_until.clone(),
+            source_type: merged.0,
+            source_ref: merged.1,
+            source_reliability: merged.2,
+            valid_until: merged.3,
         })?;
 
         let source_note_id = if input.create_source_note {

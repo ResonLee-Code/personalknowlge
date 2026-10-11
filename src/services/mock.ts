@@ -2476,10 +2476,18 @@ export async function handleMockInvoke(
       }
       const written = state.notes.find((item) => item.id === noteId);
       if (written) {
-        written.sourceType = proposal.sourceType;
-        written.sourceRef = proposal.sourceRef;
-        written.sourceReliability = proposal.sourceReliability;
-        written.validUntil = proposal.validUntil ?? null;
+        if (outcome === 'appended') {
+          // 追加模式：保留目标笔记原有的来源与时效，只补空缺（与后端同规则）
+          written.sourceType = written.sourceType ?? proposal.sourceType;
+          written.sourceRef = written.sourceRef ?? proposal.sourceRef;
+          written.sourceReliability = written.sourceReliability ?? proposal.sourceReliability;
+          written.validUntil = written.validUntil ?? proposal.validUntil ?? null;
+        } else {
+          written.sourceType = proposal.sourceType;
+          written.sourceRef = proposal.sourceRef;
+          written.sourceReliability = proposal.sourceReliability;
+          written.validUntil = proposal.validUntil ?? null;
+        }
         persist();
       }
       let sourceNoteId: string | null = null;

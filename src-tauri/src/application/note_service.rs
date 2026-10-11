@@ -502,6 +502,12 @@ impl NoteService {
         if let Err(error) = self.links().on_note_renamed(&note.id, &note.title, &title) {
             tracing::warn!(target: "links", "重连双向链接失败：{}", error.message);
         }
+        // 子文档的 `parent:` 声明（按标题写的那种）也要跟着改名，否则重建后就找不到父文档了
+        match self.sync_children_parent_declaration(&note.id, &note.title, &title) {
+            Ok(0) => {}
+            Ok(count) => tracing::debug!(target: "notes", "重命名时同步了 {count} 篇子文档的 parent 声明"),
+            Err(error) => tracing::warn!(target: "notes", "同步子文档 parent 声明失败：{}", error.message),
+        }
         self.emit_change("renamed", &note.id);
         self.detail(self.note_or_err(&note.id)?)
     }
@@ -909,6 +915,55 @@ impl NoteService {
             Some(id) if Some(id.as_str()) != for_child => self.note(&id),
             _ => Ok(None),
         }
+    }
+
+    /// 父文档**改名**时，把子文档里「按标题声明」的 `parent:` 一起改成新标题。
+    ///
+    /// 为什么必须做：`parent:` 可以写 id，也可以写标题。按 id 写的子文档不受改名影响；
+    /// 但按标题写的子文档如果留着旧标题，删库重建（或换机器只剩 Markdown）时就解析不到父文档，
+    /// 层级会悄悄掉成顶层——这正是「文件是唯一事实来源」不能接受的。
+    ///
+    /// 只处理 `parent_id` 指向本笔记的**直接子文档**，且只改「声明值不等于 id」的那些，
+    /// 因此代价与子文档数量成正比（不是全库扫描）。
+    pub fn sync_children_parent_declaration(&self, parent_id: &str, old_title: &str, new_title: &str) -> Result<usize> {
+        if old_title == new_title {
+            return Ok(0);
+        }
+        let children: Vec<Note> = self
+            .ctx
+            .db
+            .with_conn(|conn| {
+                SqliteNoteRepository.active_ids_under_parent(
+                    conn,
+                    self.workspace_id(),
+                    Some(parent_id),
+                )
+            })?
+            .into_iter()
+            .filter_map(|id| self.note(&id).ok().flatten())
+            .collect();
+        let mut rewritten = 0usize;
+        for child in children {
+            let Ok(stored) = self.ctx.storage.read_note(&child.file_path) else {
+                continue;
+            };
+            let declared = stored.frontmatter.parent.as_deref().map(str::trim).unwrap_or("");
+            // 按 id 声明的（声明值就是父 id）无需改写
+            if declared.is_empty() || declared == parent_id {
+                continue;
+            }
+            if !declared.eq_ignore_ascii_case(old_title) {
+                continue;
+            }
+            let mut frontmatter = stored.frontmatter.clone();
+            frontmatter.parent = Some(new_title.to_string());
+            frontmatter.updated_at = Some(now_iso());
+            let markdown = frontmatter::serialize(&frontmatter, &stored.body);
+            self.ctx.storage.write_atomic(&child.file_path, &markdown)?;
+            self.refresh_file_stamp(&child.id, &child.file_path);
+            rewritten += 1;
+        }
+        Ok(rewritten)
     }
 
     /// 外部编辑后同步父文档（frontmatter 里的 `parent` 可能是 id 或标题）。

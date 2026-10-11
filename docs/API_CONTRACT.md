@@ -444,8 +444,10 @@ interface ReviewDueNote {
 
 - 同标题**不覆盖**：`create` 永远新建；`append` 必须显式给目标（或提案里唯一命中），
   且走 `note_save` → 自动留历史快照，可在「版本历史」里回滚；
-- 写入后由后端补 N1 元数据：`source_type: research`、`source_ref`、`source_reliability`
-  （按最低来源级别取整）、`valid_until`（默认 +180 天）；
+- 写入后由后端补 N1 元数据：`create` 写研究产物自己的 `source_type: research` / `source_ref` /
+  `source_reliability`（按最低来源级别取整）/ `valid_until`（默认 +180 天）；
+  **`append` 保留目标笔记原有的来源与时效标注，只补空缺**（追加不该把用户自己标的
+  「官方文档 / 可靠性 5 / 复核日」静默改写成研究产物的元数据）；
 - 会话状态推进为 `written`（`writtenNoteId` 回填）；已写入的会话再调 `research_write`
   会返回 `INVALID_INPUT`，需要重新生成提案。
 

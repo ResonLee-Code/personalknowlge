@@ -730,6 +730,12 @@ export function ResearchPage() {
                   没有同标题笔记可追加：请改用「新建」。
                 </p>
               ) : null}
+              {writeMode === 'append' ? (
+                <p className="rounded-md bg-[var(--surface-muted)] p-2 text-xs text-[var(--ink-muted)]">
+                  追加只会在正文里加一段报告，<strong>不会覆盖</strong>目标笔记已有的来源与时效标注
+                  （只在原字段为空时补上）。
+                </p>
+              ) : null}
 
               <label className="inline-flex items-center gap-2 text-sm">
                 <input
