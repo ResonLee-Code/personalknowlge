@@ -2138,12 +2138,42 @@ export async function handleMockInvoke(
     }
     case 'notes_reorder': {
       const input = (payload.input ?? {}) as ReorderNotesInput;
-      const ids = (input.ids ?? []).filter((id) => typeof id === 'string' && id.length > 0);
+      // 与 Rust `NoteService::reorder` 同规则：去空去重 → 锚点定层 → **同层归一化**
+      // （传入顺序在前、其余同层按当前顺序追加）→ 写 1..N。
+      // 以前只改传入的那些，其余兄弟保持着旧序号甚至 0，在「自定义顺序」下会插到前面，
+      // 导致预览端拖一次得到的顺序与桌面端不一致。
+      const ids: string[] = [];
+      (input.ids ?? []).forEach((raw) => {
+        const trimmed = typeof raw === 'string' ? raw.trim() : '';
+        if (trimmed && !ids.includes(trimmed)) ids.push(trimmed);
+      });
       if (ids.length === 0) fail('INVALID_INPUT', '排序列表为空。');
+
+      const active = state.notes.filter((note) => note.status === 'active');
+      const anchor = ids
+        .map((id) => active.find((note) => note.id === id))
+        .find((note) => Boolean(note));
+      if (!anchor) fail('NOTE_NOT_FOUND', '排序目标不存在或已被删除。');
+      const parentId = anchor.parentId ?? null;
+      // 同层兄弟按当前显示顺序（order 升序 → 更新时间倒序 → id 倒序），与后端一致
+      const siblings = active
+        .filter((note) => (note.parentId ?? null) === parentId)
+        .sort((left, right) => {
+          const byOrder = (left.sortOrder ?? 0) - (right.sortOrder ?? 0);
+          if (byOrder !== 0) return byOrder;
+          const byUpdated = right.updatedAt.localeCompare(left.updatedAt);
+          if (byUpdated !== 0) return byUpdated;
+          return left.id > right.id ? -1 : 1;
+        });
+      const ordered = [
+        ...ids.filter((id) => siblings.some((note) => note.id === id)),
+        ...siblings.filter((note) => !ids.includes(note.id)).map((note) => note.id),
+      ];
+
       let updated = 0;
-      ids.forEach((id, index) => {
+      ordered.forEach((id, index) => {
         const note = state.notes.find((item) => item.id === id);
-        if (!note) return; // 已删除的笔记跳过
+        if (!note) return;
         const order = index + 1;
         if ((note.sortOrder ?? 0) === order) return;
         note.sortOrder = order;
@@ -2151,7 +2181,7 @@ export async function handleMockInvoke(
       });
       if (updated > 0) {
         persist();
-        emit('notes://changed', { kind: 'modified', noteId: ids[0] });
+        emit('notes://changed', { kind: 'modified', noteId: ordered[0] });
       }
       return updated;
     }

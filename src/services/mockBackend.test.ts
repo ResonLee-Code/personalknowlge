@@ -560,4 +560,72 @@ describe('浏览器预览后端 · 列表排序（与 Rust 对齐）', () => {
     const updated = await noteService.list({ sort: 'updatedDesc' });
     expect(updated.items[0]?.title).toBe('二号');
   });
+
+});
+
+// 拖拽排序必须与后端 `NoteService::reorder` 同规则：**同层归一化**——
+// 传入顺序在前、其余同层笔记按原顺序追加，整体写 1..N。
+// 以前预览端只改传入的那些，其余兄弟保留旧序号（甚至 0），在「自定义顺序」下会插到最前，
+// 于是预览里拖一次得到的顺序与桌面端不同。
+describe('浏览器预览后端 · 拖拽排序（与 Rust 对齐）', () => {
+  it('同层归一化：传入在前、其余按原顺序追加；其它层不受影响', async () => {
+    // 用假时钟把「其余同层」的相对顺序钉死：同序号时后端按 `updated_at DESC` 排，
+    // 若四篇落在同一秒就只能靠 id 兜底——而 mock 的 id 是随机串，测不出确定顺序。
+    vi.useFakeTimers();
+    let created;
+    try {
+      await workspaceService.create('排序归一化库', '/tmp/mock-reorder');
+      const category = await categoryService.create('排序层', null); // 与初始化自带的分类不撞名（重名会被拒）
+
+      const at = (offsetSeconds: number) =>
+        vi.setSystemTime(new Date(Date.UTC(2026, 9, 11, 10, 0, offsetSeconds)));
+      at(0);
+      const a = await noteService.create({ title: '甲', categoryId: category.id });
+      at(1);
+      const b = await noteService.create({ title: '乙', categoryId: category.id });
+      at(2);
+      const c = await noteService.create({ title: '丙', categoryId: category.id });
+      at(3);
+      const d = await noteService.create({ title: '丁', categoryId: category.id });
+      // 另一层：甲的子文档，拖同一层时不该被动到（继承父分类，因此仍在同一分类列表里）
+      const child = await noteService.create({ title: '甲的子文档', parentId: a.note.id });
+      created = { a, b, c, d, child, category };
+    } finally {
+      vi.useRealTimers();
+    }
+    const { a, b, c, d, child, category } = created!;
+
+    // 只把「丁、乙」提到前面
+    await noteService.reorder({ ids: [d.note.id, b.note.id] });
+
+    const layer = ['甲', '乙', '丙', '丁'];
+    const titles = (await noteService.list({ categoryId: category.id, sort: 'manual' })).items
+      .map((item) => item.title)
+      .filter((title) => layer.includes(title));
+    // 丁、乙在前（传入顺序）；其余同层按**当前显示顺序**追加——
+    // 同序号时后端是 `updated_at DESC`，所以创建更晚的「丙」在「甲」前面
+    expect(titles).toEqual(['丁', '乙', '丙', '甲']);
+
+    // 不同层（子文档）保持原样，不受这次排序影响：
+    // 子文档继承父分类、也在同一分类列表里，但它是独立的一层，序号仍是 0
+    const childAfter = await noteService.get(child.note.id);
+    expect(childAfter.note.sortOrder).toBe(0);
+
+    // 传重复 id 会被去重（不会出现两条同序号）
+    const updated = await noteService.reorder({ ids: [c.note.id, c.note.id, a.note.id] });
+    expect(updated).toBeGreaterThan(0);
+    const manual = (await noteService.list({ categoryId: category.id, sort: 'manual' })).items;
+    const layerNotes = manual.filter((item) => layer.includes(item.title));
+    expect(new Set(layerNotes.map((item) => item.sortOrder)).size).toBe(layerNotes.length);
+    expect(layerNotes.slice(0, 2).map((item) => item.title)).toEqual(['丙', '甲']);
+
+    // 全部不存在 → NOTE_NOT_FOUND（后端同规则）
+    await expect(noteService.reorder({ ids: ['note_不存在'] })).rejects.toMatchObject({
+      code: 'NOTE_NOT_FOUND',
+    });
+    // 空列表 → INVALID_INPUT
+    await expect(noteService.reorder({ ids: [] })).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    });
+  });
 });

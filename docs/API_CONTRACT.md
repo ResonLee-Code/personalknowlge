@@ -311,7 +311,9 @@ interface ReviewDueNote {
 | `notes_reorder` | `{ input: { ids: string[] } }` | `usize`（实际写入 order 的篇数） |
 
 - `ids` 是**同一层**兄弟笔记的新顺序（靠前者在上），位次 1 起写入 frontmatter 的 `order:`
-  并投影到 `notes.sort_order`；空数组返回 `INVALID_INPUT`；不存在的 id 会被跳过（不报错）；
+  并投影到 `notes.sort_order`；空数组返回 `INVALID_INPUT`；
+  **个别**不存在的 id 会被跳过（不报错），但**全部** id 都不存在时返回 `NOTE_NOT_FOUND`
+  （「排序目标不存在或已被删除」）——浏览器预览端同规则；
 - **按层归一化**：若 `ids` 只覆盖同层的一部分，其余同层活跃笔记会保持原相对顺序
   **排在后面**，保证该层在「自定义顺序」下是确定的；
 - 排序**不改写 `updated_at`**（展示顺序不是内容变更），因此「最近修改」排序结果不变；
