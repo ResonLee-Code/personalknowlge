@@ -25,6 +25,37 @@ describe('ReviewDueCard（V1.2.1 D4 待复核）', () => {
     expect(screen.queryByTestId('review-due-card')).not.toBeInTheDocument();
   });
 
+  /**
+   * 回归：读取「待复核」失败时，卡片以前与「没有待复核笔记」完全一样（都是什么都不显示）——
+   * 用户会以为没有要复核的东西。失败必须看得见，并给重试。
+   */
+  it('读取失败时明确报错并可重试，不与「没有待复核」混同', async () => {
+    const retry = vi.fn();
+    render(
+      <ReviewDueCard
+        items={[]}
+        error="磁盘暂时不可用"
+        onRetry={retry}
+        onOpen={() => undefined}
+      />,
+    );
+
+    const error = screen.getByTestId('review-due-error');
+    expect(error).toHaveTextContent('待复核读取失败：磁盘暂时不可用');
+    expect(screen.queryByTestId('review-due-card')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('review-due-retry'));
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('有错误时不因为 items 非空而假装正常', () => {
+    render(
+      <ReviewDueCard items={[item()]} error="磁盘暂时不可用" onOpen={() => undefined} />,
+    );
+    expect(screen.getByTestId('review-due-error')).toBeInTheDocument();
+    expect(screen.queryByTestId('review-due-card')).not.toBeInTheDocument();
+  });
+
   it('已过期的排前面，并分别标注过期与到期天数', async () => {
     render(
       <ReviewDueCard

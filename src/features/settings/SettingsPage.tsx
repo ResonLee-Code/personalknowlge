@@ -30,11 +30,22 @@ export function SettingsPage() {
   const setTheme = useUiStore((state) => state.setTheme);
 
   const [backups, setBackups] = useState<BackupInfo[]>([]);
+  /** 备份列表读取失败的原因：失败不能显示成「暂无备份文件」（那会让人以为备份没了） */
+  const [backupListError, setBackupListError] = useState<string | null>(null);
   const [validation, setValidation] = useState<Record<string, BackupValidation | null>>({});
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void backupService.list().then(setBackups).catch(() => setBackups([]));
+    void backupService
+      .list()
+      .then((items) => {
+        setBackups(items);
+        setBackupListError(null);
+      })
+      .catch((error: unknown) => {
+        setBackups([]);
+        setBackupListError(errorMessage(error));
+      });
   }, []);
 
   if (!settings) {
@@ -46,6 +57,7 @@ export function SettingsPage() {
     try {
       const info = await backupService.create();
       setBackups(await backupService.list());
+      setBackupListError(null);
       toast.success(`备份完成：${info.fileName}`);
     } catch (error) {
       toast.error(errorMessage(error));
@@ -268,7 +280,11 @@ export function SettingsPage() {
             </Button>
           </Row>
           <div className="space-y-2 px-3 py-2">
-            {backups.length === 0 ? (
+            {backupListError ? (
+              <p data-testid="backup-list-error" className="text-xs text-amber-600">
+                读取备份列表失败：{backupListError}
+              </p>
+            ) : backups.length === 0 ? (
               <p className="text-xs text-[var(--ink-subtle)]">暂无备份文件。</p>
             ) : (
               backups.map((backup) => (

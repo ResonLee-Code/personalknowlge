@@ -191,4 +191,20 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     await waitFor(() => expect(policy).toHaveBeenCalledTimes(2));
     expect(await screen.findByTestId('ai-enabled')).not.toBeChecked();
   });
+
+  /**
+   * 回归：审计读取失败以前被静默吞掉，界面显示成「还没有 AI 行为记录」——
+   * 而这里正是用来看「谁在什么时候动过 AI」的地方，说成「没有记录」是在误导。
+   */
+  it('审计读取失败时明确报错，而不是显示成「还没有 AI 行为记录」', async () => {
+    vi.spyOn(aiService, 'auditTail').mockRejectedValue({
+      code: 'IO_ERROR',
+      message: '审计文件不可读',
+    });
+    render(<AiSettingsPanel />);
+
+    const error = await screen.findByTestId('ai-audit-error');
+    expect(error).toHaveTextContent('审计文件不可读');
+    expect(screen.queryByText('还没有 AI 行为记录。')).not.toBeInTheDocument();
+  });
 });

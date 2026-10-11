@@ -11,11 +11,37 @@ import type { ReviewDueNote } from '@/types';
  */
 export function ReviewDueCard({
   items,
+  error,
+  onRetry,
   onOpen,
 }: {
   items: ReviewDueNote[];
+  /** 读取失败的原因：**不能**让失败显示成「没有待复核」 */
+  error?: string | null;
+  onRetry?: () => void;
   onOpen: (noteId: string) => void;
 }) {
+  if (error) {
+    return (
+      <section
+        data-testid="review-due-error"
+        className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200"
+      >
+        <CalendarClock className="h-4 w-4" />
+        <span>待复核读取失败：{error}</span>
+        {onRetry ? (
+          <button
+            type="button"
+            data-testid="review-due-retry"
+            className="rounded border border-amber-500/50 px-2 py-0.5 text-xs hover:bg-amber-500/10"
+            onClick={onRetry}
+          >
+            重试
+          </button>
+        ) : null}
+      </section>
+    );
+  }
   if (items.length === 0) return null;
 
   const overdueCount = items.filter((item) => item.overdueDays > 0).length;

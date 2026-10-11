@@ -12,7 +12,7 @@ import {
   Search,
   Tag,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,7 @@ import { Skeleton } from '@/components/ui/badge';
 import { UnresolvedLinksCard } from '@/components/notes/UnresolvedLinksCard';
 import { ReviewDueCard } from '@/features/dashboard/ReviewDueCard';
 import { reportAction } from '@/lib/actionFeedback';
-import { formatRelative } from '@/lib/format';
+import { errorMessage, formatRelative } from '@/lib/format';
 import { ROUTES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { noteService } from '@/services/noteService';
@@ -44,8 +44,22 @@ export function DashboardPage() {
   const pathOf = useCategoriesStore((state) => state.pathOf);
   const [recent, setRecent] = useState<NoteSummary[]>([]);
   const [dueForReview, setDueForReview] = useState<ReviewDueNote[]>([]);
+  // 待复核读取失败要看得出来：否则「读取失败」与「没有要复核的」长得一模一样
+  const [dueError, setDueError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
+
+  const loadDueForReview = useCallback(async () => {
+    // 待复核（D4）：失败不影响首页其它区块，但**必须说出来**——
+    // 以前失败被 `.catch(() => [])` 吞成空列表，界面看起来就是「没有要复核的」。
+    try {
+      setDueForReview(await noteService.dueForReview(14));
+      setDueError(null);
+    } catch (error) {
+      setDueForReview([]);
+      setDueError(errorMessage(error));
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,15 +71,13 @@ export function DashboardPage() {
         setRecent(result);
         setLoading(false);
       }
-      // 待复核（D4）：失败不影响首页其它区块
-      const due = await noteService.dueForReview(14).catch(() => [] as ReviewDueNote[]);
-      if (!cancelled) setDueForReview(due);
+      await loadDueForReview();
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [workspace?.id]);
+  }, [workspace?.id, loadDueForReview]);
 
   return (
     <div className="h-full w-full overflow-auto">
@@ -205,7 +217,12 @@ export function DashboardPage() {
         </section>
 
         {/* 待复核（D4）：只在有时效到期的笔记时出现 */}
-        <ReviewDueCard items={dueForReview} onOpen={(id) => navigate(ROUTES.note(id))} />
+        <ReviewDueCard
+          items={dueForReview}
+          error={dueError}
+          onRetry={() => void loadDueForReview()}
+          onOpen={(id) => navigate(ROUTES.note(id))}
+        />
 
         <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4">
           <div className="mb-3 flex items-center justify-between">

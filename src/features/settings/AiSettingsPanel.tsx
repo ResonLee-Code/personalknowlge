@@ -26,6 +26,8 @@ import type { AiAuditEntry, AiPolicy } from '@/types';
 export function AiSettingsPanel() {
   const [policy, setPolicy] = useState<AiPolicy | null>(null);
   const [audit, setAudit] = useState<AiAuditEntry[]>([]);
+  /** 审计读取失败的原因：失败不能显示成「还没有 AI 行为记录」 */
+  const [auditError, setAuditError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [denylistDraft, setDenylistDraft] = useState('');
@@ -45,8 +47,12 @@ export function AiSettingsPanel() {
     }
     try {
       setAudit(await aiService.auditTail(5));
-    } catch {
-      // 审计列表是次要信息：读取失败不打断设置页，下面会显示「暂无记录」
+      setAuditError(null);
+    } catch (error) {
+      // 不打断设置页，但**不能**显示成「还没有 AI 行为记录」——那会让用户以为
+      // 没人用过 AI，而这里恰恰是用来看「谁在什么时候动过 AI」的地方。
+      setAudit([]);
+      setAuditError(errorMessage(error));
     }
   }, []);
 
@@ -61,8 +67,13 @@ export function AiSettingsPanel() {
       const next = await aiService.setPolicy(input);
       setPolicy(next);
       if (message) toast.success(message);
-      const entries = await aiService.auditTail(5).catch(() => []);
-      setAudit(entries);
+      try {
+        setAudit(await aiService.auditTail(5));
+        setAuditError(null);
+      } catch {
+        // 审计刷新失败：保留上一次的列表，并记下原因（下面会显示）
+        setAuditError('审计刷新失败：下次打开设置页可重试');
+      }
     } catch (error) {
       toast.error(errorMessage(error));
     } finally {
@@ -294,7 +305,11 @@ export function AiSettingsPanel() {
             刷新
           </Button>
         </div>
-        {audit.length === 0 ? (
+        {auditError ? (
+          <p data-testid="ai-audit-error" className="text-[11px] text-amber-600">
+            读取审计失败：{auditError}
+          </p>
+        ) : audit.length === 0 ? (
           <p className="text-[11px] text-[var(--ink-subtle)]">还没有 AI 行为记录。</p>
         ) : (
           <ul data-testid="ai-audit-list" className="space-y-0.5 text-[11px] text-[var(--ink-muted)]">
