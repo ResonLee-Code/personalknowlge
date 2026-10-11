@@ -2,6 +2,7 @@ import { BookOpen, Database, FileCode2, Shield, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { SHORTCUTS } from '@/lib/constants';
+import { errorMessage } from '@/lib/format';
 import { appService } from '@/services/appService';
 import type { AppInfo } from '@/types';
 
@@ -18,9 +19,20 @@ const STACK = [
 export function AboutPage() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [logPath, setLogPath] = useState<string | null>(null);
+  /** 读取失败的原因：不能只把版本/平台显示成「—」——用户来这页就是为了看这些 */
+  const [infoError, setInfoError] = useState<string | null>(null);
 
   useEffect(() => {
-    void appService.info().then(setInfo).catch(() => setInfo(null));
+    void appService
+      .info()
+      .then((value) => {
+        setInfo(value);
+        setInfoError(null);
+      })
+      .catch((error: unknown) => {
+        setInfo(null);
+        setInfoError(errorMessage(error));
+      });
     void appService.logPath().then(setLogPath).catch(() => setLogPath(null));
   }, []);
 
@@ -58,6 +70,11 @@ export function AboutPage() {
             <Database className="h-4 w-4" />
             运行信息
           </h2>
+          {infoError ? (
+            <p data-testid="about-info-error" className="mb-2 text-xs text-amber-600">
+              读取运行信息失败：{infoError}
+            </p>
+          ) : null}
           <dl className="grid gap-1.5 text-xs text-[var(--ink-muted)] sm:grid-cols-2">
             <div className="flex justify-between gap-2">
               <dt>应用版本</dt>

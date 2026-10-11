@@ -17,7 +17,7 @@
 | Rust 全量测试 | ✅ 39 个测试目标全绿（库单测 116 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
-| 前端单元 / 组件测试 | ✅ 51 个文件、270 用例全通过 | `CI=true pnpm test` |
+| 前端单元 / 组件测试 | ✅ 52 个文件、273 用例全通过 | `CI=true pnpm test` |
 | 前端生产构建 | ✅ 构建成功 | `CI=true pnpm build` |
 | 端到端主流程 | ✅ 1 条主流程通过（34 个编号步骤 + 补充断言，浏览器预览后端） | `CI=true pnpm test:e2e`（截图见 `docs/screenshots/`）；重负载下时序敏感，配置了 1 次重试与 10s 断言超时（原因写在 `playwright.config.ts` 注释里） |
 
@@ -34,6 +34,7 @@
 | 保存状态诚实性（降级可见） | `note_save` 成功但索引更新失败时，状态徽标显示琥珀色「已保存（检索索引待重建）」+ 原因可悬停，**不再与正常保存长得一样**；空白原因不降级；保存失败仍按失败展示 | `SaveStatusBadge.test.tsx`（4 项，反向验证过） |
 | 加载失败不误导（关系面板） | 新增关系里搜索目标笔记失败时显示「读取笔记失败：<原因>」+ 重试，**不再显示成「没有匹配的笔记」**；确实没结果时才显示空态 | `RelationsPanel.test.tsx`（4 项，含本项，反向验证过） |
 | 加载失败不误导（待复核 / 审计 / 备份列表） | 首页「待复核」失败 → 卡片显示「读取失败 + 重试」而不是**整块消失**；设置 → AI「最近行为」失败 → 报错而不是「还没有 AI 行为记录」；设置 → 备份列表失败 → 报错而不是「暂无备份文件」 | `ReviewDueCard.test.tsx`（+2）/ `AiSettingsPanel.test.tsx`（+1）/ `SettingsPage.test.tsx`（2 项，均反向验证过） |
+| 加载失败不误导（反链面板 / 关于页） | 编辑器反链读取失败 → 「读取反向链接失败 + 重试」且头部显示「读取失败」（不再显示「还没有笔记引用这篇」/「被 0 篇引用」）；关于页 `app_info` 读取失败 → 说明原因，`—` 不冒充「不知道」 | `BacklinkPanel.test.tsx`（+1）/ `AboutPage.test.tsx`（2 项，均反向验证过） |
 | 版本历史命名版本 | 保存 / 命名 / 改名 / 清除与还原 | `tests/history_flow.rs` |
 | 单篇复制到分类 | 副本带「副本」后缀、原作保留、分类正确 | `tests/batch_flow.rs` |
 | AI 闸门 | 默认口径下 `web_fetch` 指向不可达地址只返回 `AI_DISABLED` / `NETWORK_DISABLED`（**未触网**）；放行后真实抓取并记 `outbound=true` | `tests/ai_policy_flow.rs` |

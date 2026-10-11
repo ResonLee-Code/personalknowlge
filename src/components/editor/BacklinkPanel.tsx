@@ -33,6 +33,8 @@ export function BacklinkPanel({ noteId, refreshKey = 0 }: BacklinkPanelProps) {
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [outgoing, setOutgoing] = useState<OutgoingLink[]>([]);
   const [creating, setCreating] = useState<string | null>(null);
+  /** 加载失败的原因：不打断编辑，但**不能**把失败显示成「还没有笔记引用」 */
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   /** 供手动刷新与「创建笔记」后复用最新一次加载逻辑 */
   const loadRef = useRef<() => Promise<void>>(async () => {});
@@ -40,17 +42,25 @@ export function BacklinkPanel({ noteId, refreshKey = 0 }: BacklinkPanelProps) {
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      // 链接是派生数据，读取失败不应打断编辑，仅在控制台留痕
-      const [nextBacklinks, nextOutgoing] = await Promise.all([
-        linkService.backlinks(noteId),
-        linkService.outgoing(noteId),
-      ]).catch((error: unknown) => {
+      // 链接是派生数据，读取失败不该打断编辑；但**必须说出来**——
+      // 以前失败被吞成空列表，面板显示「还没有笔记引用这篇」，是在撒谎。
+      try {
+        const [nextBacklinks, nextOutgoing] = await Promise.all([
+          linkService.backlinks(noteId),
+          linkService.outgoing(noteId),
+        ]);
+        if (cancelled) return;
+        setBacklinks(nextBacklinks);
+        setOutgoing(nextOutgoing);
+        setLoadError(null);
+      } catch (error) {
+        if (cancelled) return;
         console.warn('[links] 加载反向链接失败', errorMessage(error));
-        return [[], []] as [Backlink[], OutgoingLink[]];
-      });
+        setBacklinks([]);
+        setOutgoing([]);
+        setLoadError(errorMessage(error));
+      }
       if (cancelled) return;
-      setBacklinks(nextBacklinks);
-      setOutgoing(nextOutgoing);
       setLoadedFor(noteId);
     };
     loadRef.current = run;
@@ -109,9 +119,15 @@ export function BacklinkPanel({ noteId, refreshKey = 0 }: BacklinkPanelProps) {
           <Link2 className="h-3.5 w-3.5 text-[var(--brand)]" />
           反向链接
         </button>
-        <span className="rounded-full bg-[var(--surface-muted)] px-2 py-0.5 text-[11px] text-[var(--ink-subtle)]">
-          被 {backlinks.length} 篇引用
-        </span>
+        {loadError ? (
+          <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-600">
+            读取失败
+          </span>
+        ) : (
+          <span className="rounded-full bg-[var(--surface-muted)] px-2 py-0.5 text-[11px] text-[var(--ink-subtle)]">
+            被 {backlinks.length} 篇引用
+          </span>
+        )}
         {unresolved.length > 0 ? (
           <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-600">
             未解析 {unresolved.length}
@@ -135,6 +151,21 @@ export function BacklinkPanel({ noteId, refreshKey = 0 }: BacklinkPanelProps) {
               <Skeleton className="h-9 w-full" />
               <Skeleton className="h-9 w-2/3" />
             </div>
+          ) : loadError ? (
+            <p
+              data-testid="backlink-load-error"
+              className="flex flex-wrap items-center gap-2 text-xs text-amber-600"
+            >
+              读取反向链接失败：{loadError}
+              <button
+                type="button"
+                data-testid="backlink-load-retry"
+                className="rounded border border-amber-500/50 px-1.5 py-0.5 hover:bg-amber-500/10"
+                onClick={() => void refresh()}
+              >
+                重试
+              </button>
+            </p>
           ) : backlinks.length === 0 ? (
             <p className="text-xs leading-relaxed text-[var(--ink-subtle)]">
               还没有笔记引用这篇笔记。在其它笔记里写 [[标题]] 即可建立连接。

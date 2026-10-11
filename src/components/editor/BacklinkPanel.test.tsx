@@ -128,4 +128,28 @@ describe('BacklinkPanel', () => {
     outgoing.mockResolvedValue([]);
     await waitFor(() => expect(backlinks.mock.calls.length).toBeGreaterThan(1));
   });
+
+  /**
+   * 回归：反链读取失败以前被 `.catch` 吞成空列表，面板显示「还没有笔记引用这篇笔记」——
+   * 用户会以为自己的笔记真的没被引用。失败必须看得出来，并给重试。
+   */
+  it('读取失败时明确报错并可重试，不显示成「还没有笔记引用」', async () => {
+    backlinks
+      .mockRejectedValueOnce({ code: 'IO_ERROR', message: '链接表读不出来' })
+      .mockResolvedValue([]);
+    outgoing.mockResolvedValue([]);
+
+    renderPanel();
+
+    expect(await screen.findByTestId('backlink-load-error')).toHaveTextContent('链接表读不出来');
+    expect(screen.queryByText(/还没有笔记引用这篇笔记/)).not.toBeInTheDocument();
+    // 头部计数也不能是「被 0 篇引用」这种假结论
+    expect(screen.getByText('读取失败')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('backlink-load-retry'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('backlink-load-error')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText(/还没有笔记引用这篇笔记/)).toBeInTheDocument();
+  });
 });
