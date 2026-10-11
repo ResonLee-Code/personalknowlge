@@ -165,6 +165,14 @@ pnpm build && pnpm test:e2e      # 端到端 UI 验证，截图输出到 docs/sc
   `src-tauri/tauri.conf.json`（发布工作流的 preflight 会拦截不一致的标签）；
 - 另外 `docs/CHANGELOG.md` 的版本小节也要同步，否则用户看到的「当前构建」会对不上。
 
+### 文档链接守卫
+
+`docs/**.md` 与 `README.md` 里的相对链接由 `src/lib/docsLinks.test.ts` 检查
+（随 `pnpm test` 一起跑）：目标文件不在就失败，并一次列出全部问题。
+只查**被 Git 跟踪**的 Markdown——`docs/yuque-manuals/books/` 下的语雀手册正文是第三方抓取内容
+（默认不入库），其中的伪链接不属于本项目要维护的引用。
+写文档时把「示例链接」用行内代码包起来（`` `[文字](路径.md)` ``），否则会被当成真实引用。
+
 ## 9. 跨平台产物更新规则
 
 - 修改代码后**不要自动**重新生成另一平台的安装包；

@@ -219,7 +219,7 @@ MarkdownPreview
   → 前端读取为 data URL
   → invoke attachment_save { noteId, fileName, mimeType, dataBase64 }
   → AttachmentService：Base64 解码 → attachments/YYYY-MM/ 原子写入
-  → 返回 linkPath（相对当前笔记目录）→ 插入正文 ![](linkPath)
+  → 返回 linkPath（相对当前笔记目录）→ 插入正文 `![](linkPath)`
 Markdown 预览
   → img src 是工作区相对路径时 invoke attachment_read → data URL 内联显示
 ```
