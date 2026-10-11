@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -42,5 +43,34 @@ describe('版本身份四处一致', () => {
     expect(cargo, 'Cargo.toml 里没解析到版本号（解析器坏了？）').toBeTruthy();
     expect(locked, 'Cargo.lock 里没解析到本包版本（解析器坏了？）').toBeTruthy();
     expect(new Set(Object.values(versions)).size, `版本号不一致：${JSON.stringify(versions)}`).toBe(1);
+  });
+
+  /**
+   * 安装指南 / 验收清单里写的「数据库 schema N」也必须与代码里的 `SCHEMA_VERSION` 一致。
+   *
+   * 起因：迁移 010 把 schema 升到 10 时，`LINUX_INSTALL_GUIDE.md` 还写着 schema 9——
+   * 这类「文档里的单一事实」散落在多个文件里，最容易漏改。
+   * 只匹配「数据库 schema N」这种**当前状态**措辞，历史叙述（例如「旧库 schema 5」）不受影响。
+   */
+  it('文档里的「数据库 schema N」与代码里的 SCHEMA_VERSION 一致', () => {
+    const migrations = read('src-tauri/src/infrastructure/db/migrations.rs');
+    const schemaVersion = /pub const SCHEMA_VERSION: i64 = (\d+);/.exec(migrations)?.[1];
+    expect(schemaVersion, 'migrations.rs 里没解析到 SCHEMA_VERSION（解析器坏了？）').toBeTruthy();
+
+    const files = execFileSync('git', ['ls-files'], { cwd: repoRoot, encoding: 'utf8' })
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => (line.endsWith('.md') && !line.includes('CHANGELOG')) || line === 'README.md');
+
+    const mismatched: string[] = [];
+    for (const relative of files) {
+      const content = read(relative);
+      for (const match of content.matchAll(/数据库 schema (\d+)/g)) {
+        if (match[1] !== schemaVersion) {
+          mismatched.push(`${relative} → 写着 schema ${match[1]}，代码是 ${schemaVersion}`);
+        }
+      }
+    }
+    expect(mismatched, `文档与代码的 schema 版本不一致：\n${mismatched.join('\n')}`).toEqual([]);
   });
 });
