@@ -98,4 +98,26 @@ describe('QuickSwitcherDialog', () => {
     await userEvent.type(input, '不存在的标题');
     expect(await screen.findByText('没有匹配的标题')).toBeInTheDocument();
   });
+
+  it('读取笔记失败时如实提示并给出「重试」（不假装「没有匹配」）', async () => {
+    useUiStore.setState({ quickSwitcherOpen: true });
+    list.mockRejectedValueOnce({ code: 'DATABASE_ERROR', message: '读取失败：数据库忙' });
+    render(
+      <MemoryRouter initialEntries={['/notes']}>
+        <Routes>
+          <Route path="/notes" element={<Harness />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('读取笔记失败')).toBeInTheDocument();
+    expect(screen.getByText(/数据库忙/)).toBeInTheDocument();
+    expect(screen.queryByText('没有匹配的标题')).not.toBeInTheDocument();
+
+    // 重试会重新读取，成功后进入正常列表
+    await userEvent.click(screen.getByRole('button', { name: '重试' }));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect((await screen.findAllByTestId('quick-switch-item')).length).toBe(2);
+    expect(screen.queryByText('读取笔记失败')).not.toBeInTheDocument();
+  });
 });

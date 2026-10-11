@@ -1,13 +1,14 @@
 import { CornerDownLeft, FileText, Loader2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ROUTES } from '@/lib/constants';
 import { matchTitle } from '@/lib/fuzzy';
-import { formatRelative } from '@/lib/format';
+import { errorMessage, formatRelative } from '@/lib/format';
 import { noteService } from '@/services/noteService';
 import { useNotesStore } from '@/stores/notesStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -31,21 +32,24 @@ function QuickSwitcherPanel({ onClose }: { onClose: () => void }) {
   const refreshScope = useNotesStore((state) => state.refresh);
   const [keyword, setKeyword] = useState('');
   const [notes, setNotes] = useState<NoteSummary[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      const result = await noteService
-        .list({ status: 'active', sort: 'titleAsc', pageSize: 500 })
-        .catch(() => null);
-      if (!cancelled) setNotes(result?.items ?? []);
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
+  /** 读取标题列表；失败时**保留 null**（渲染「加载失败 + 重试」，而不是假装「没有匹配」） */
+  const load = useCallback(async () => {
+    try {
+      const result = await noteService.list({ status: 'active', sort: 'titleAsc', pageSize: 500 });
+      setNotes(result.items);
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(errorMessage(error));
+    }
   }, []);
+
+  useEffect(() => {
+    // 放到微任务里再执行：effect 体内同步 setState 会触发级联渲染（仓库里统一的写法）
+    void Promise.resolve().then(() => load());
+  }, [load]);
 
   const results = useMemo(() => {
     const source = notes ?? [];
@@ -97,7 +101,18 @@ function QuickSwitcherPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="max-h-[60vh] min-h-[80px] overflow-auto p-2">
-          {results.length === 0 ? (
+          {loadError ? (
+            <EmptyState
+              icon={FileText}
+              title="读取笔记失败"
+              description={loadError}
+              action={
+                <Button size="sm" variant="secondary" onClick={() => void load()}>
+                  重试
+                </Button>
+              }
+            />
+          ) : results.length === 0 ? (
             <EmptyState
               icon={FileText}
               title={notes === null ? '正在加载笔记…' : '没有匹配的标题'}

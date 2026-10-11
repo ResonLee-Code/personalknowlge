@@ -1,5 +1,5 @@
 import { Loader2, RefreshCw, Sparkles } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -30,30 +30,30 @@ export function AiSettingsPanel() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [denylistDraft, setDenylistDraft] = useState('');
   const [allowlistDraft, setAllowlistDraft] = useState('');
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  /** 读取策略；失败要**说清楚**（原来会一直显示「正在读取…」，看起来像卡住） */
+  const load = useCallback(async () => {
+    try {
+      const next = await aiService.policy();
+      setPolicy(next);
+      setLoadError(null);
+      setDenylistDraft(next.domainDenylist.join('\n'));
+      setAllowlistDraft(next.domainAllowlist.join('\n'));
+    } catch (error) {
+      setLoadError(errorMessage(error));
+    }
+    try {
+      setAudit(await aiService.auditTail(5));
+    } catch {
+      // 审计列表是次要信息：读取失败不打断设置页，下面会显示「暂无记录」
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void aiService
-      .policy()
-      .then((next) => {
-        if (cancelled) return;
-        setPolicy(next);
-        setDenylistDraft(next.domainDenylist.join('\n'));
-        setAllowlistDraft(next.domainAllowlist.join('\n'));
-      })
-      .catch(() => {
-        // 未打开工作区等场景：静默降级为「不可用」，不打断设置页
-      });
-    void aiService
-      .auditTail(5)
-      .then((entries) => {
-        if (!cancelled) setAudit(entries);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    // 放到微任务里再执行：effect 体内同步 setState 会触发级联渲染（仓库里统一的写法）
+    void Promise.resolve().then(() => load());
+  }, [load]);
 
   const apply = async (input: Parameters<typeof aiService.setPolicy>[0], message?: string) => {
     setBusy(true);
@@ -75,6 +75,17 @@ export function AiSettingsPanel() {
       .split(/[\n,]/)
       .map((item) => item.trim())
       .filter(Boolean);
+
+  if (!policy && loadError) {
+    return (
+      <div className="space-y-2 px-3 py-3 text-xs">
+        <p className="text-rose-600 dark:text-rose-300">读取 AI 策略失败：{loadError}</p>
+        <Button size="sm" variant="secondary" onClick={() => void load()}>
+          重试
+        </Button>
+      </div>
+    );
+  }
 
   if (!policy) {
     return (

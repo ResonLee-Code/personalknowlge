@@ -175,4 +175,20 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     await userEvent.click(screen.getByTestId('ai-local-score'));
     await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ localModelScore: true }));
   });
+
+  it('读取策略失败时给出明确提示与「重试」，而不是一直显示正在读取', async () => {
+    const policy = vi
+      .spyOn(aiService, 'policy')
+      .mockRejectedValueOnce({ code: 'NOT_INITIALIZED', message: '尚未打开任何工作区。' })
+      .mockResolvedValueOnce(conservative);
+    render(<AiSettingsPanel />);
+
+    expect(await screen.findByText(/读取 AI 策略失败/)).toBeInTheDocument();
+    expect(screen.getByText(/尚未打开任何工作区/)).toBeInTheDocument();
+    expect(screen.queryByText('正在读取 AI 策略…')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '重试' }));
+    await waitFor(() => expect(policy).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId('ai-enabled')).not.toBeChecked();
+  });
 });
