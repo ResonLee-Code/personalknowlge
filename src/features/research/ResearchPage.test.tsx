@@ -1,16 +1,22 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ResearchPage } from '@/features/research/ResearchPage';
 import { aiService } from '@/services/aiService';
+import { subscribe } from '@/services/api';
 import { researchService } from '@/services/researchService';
 import type { AiPolicy, ResearchSession } from '@/types';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
+
+vi.mock('@/services/api', async () => {
+  const actual = await vi.importActual<typeof import('@/services/api')>('@/services/api');
+  return { ...actual, subscribe: vi.fn(async () => () => undefined) };
+});
 
 const enabledPolicy: AiPolicy = {
   enabled: true,
@@ -441,5 +447,39 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     expect(external).toHaveAttribute('href', 'https://weak.test/post');
     expect(external).toHaveAttribute('target', '_blank');
     expect(external.getAttribute('title')).toContain('可能已过时');
+  });
+
+  // §9.2：长步骤（联网抓取可达预算上限）要能看到实时进度——
+  // 后端逐步推 `ai://research-progress`（只含元数据），页面显示当前说明 / 已抓页数 / 来源数。
+  it('收集过程中显示后端推来的实时进度（步骤说明 / 已抓页数 / 来源数）', async () => {
+    vi.spyOn(researchService, 'start').mockResolvedValue(planned());
+    // 收集一直不返回：界面停在「进行中」，正是需要看到进度的时刻
+    vi.spyOn(researchService, 'collect').mockImplementation(() => new Promise(() => {}));
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+    await userEvent.click(await screen.findByTestId('research-collect'));
+
+    // 取出页面注册的进度事件处理函数，模拟后端推事件
+    const handler = vi
+      .mocked(subscribe)
+      .mock.calls.find(([event]) => event === 'ai://research-progress')?.[1];
+    expect(handler, '页面必须订阅 ai://research-progress').toBeTruthy();
+
+    act(() => {
+      handler?.({
+        sessionId: 'research_1',
+        step: 'collect',
+        detail: '已抓取正文 3 页（预算 ≤12 页）',
+        pagesFetched: 3,
+        sources: 5,
+      });
+    });
+
+    const line = await screen.findByTestId('research-progress');
+    expect(line).toHaveTextContent('已抓取正文 3 页（预算 ≤12 页）');
+    expect(line).toHaveTextContent('已抓 3 页');
+    expect(line).toHaveTextContent('来源 5 条');
   });
 });

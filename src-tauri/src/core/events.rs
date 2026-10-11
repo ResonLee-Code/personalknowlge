@@ -15,6 +15,8 @@ pub mod events {
     pub const INDEX_STATUS: &str = "search://index-status";
     /// 工作区元数据变化（笔记新增/删除/移动）。
     pub const NOTES_CHANGED: &str = "notes://changed";
+    /// 研究助手进度（每一步、每个抓取页的实时状态；**只含元数据，不含笔记正文**）。
+    pub const RESEARCH_PROGRESS: &str = "ai://research-progress";
 }
 
 pub trait EventSink: Send + Sync {

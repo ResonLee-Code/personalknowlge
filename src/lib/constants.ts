@@ -22,6 +22,8 @@ export const EVENTS = {
   filesChanged: 'workspace://files-changed',
   notesChanged: 'notes://changed',
   indexStatus: 'search://index-status',
+  /** 研究助手进度（只含元数据：步骤 / 已抓页数 / 来源数） */
+  researchProgress: 'ai://research-progress',
 } as const;
 
 /** 默认工作区目录约定（与 Rust 端保持一致）。 */

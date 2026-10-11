@@ -30,6 +30,7 @@ use super::web_search;
 use crate::application::context::WorkspaceContext;
 use crate::application::note_service::NoteService;
 use crate::core::error::{AppError, ErrorCode, Result};
+use crate::core::events::events as event_names;
 use crate::core::ids::ulid;
 use crate::core::text::first_sentence;
 use crate::core::time::{date_offset_days, now_iso, today_date};
@@ -111,6 +112,23 @@ impl ResearchService {
 
     fn tools(&self) -> AiTools {
         AiTools::new(Arc::clone(&self.ctx))
+    }
+
+    /// 推送研究进度（§9.2：每一步、每个抓取页都要让界面看到）。
+    ///
+    /// **只发元数据**：会话 id / 步骤 / 人读说明 / 已抓页数 / 已采纳来源数——
+    /// 不含笔记正文、不含网页内容（与审计同一条隐私口径）。
+    fn emit_progress(&self, session_id: &str, step: &str, detail: &str, pages: usize, sources: usize) {
+        self.ctx.events.emit(
+            event_names::RESEARCH_PROGRESS,
+            serde_json::json!({
+                "sessionId": session_id,
+                "step": step,
+                "detail": detail,
+                "pagesFetched": pages,
+                "sources": sources,
+            }),
+        );
     }
 
     /// 本次打分该用哪个决策模型：策略里显式开启本地模型打分且地址/模型名齐全时用它，
@@ -263,6 +281,7 @@ impl ResearchService {
             dropped_sources: Vec::new(),
         };
         self.save(&session)?;
+        self.emit_progress(&session.id, "plan", "已生成研究计划与本地基线", 0, session.sources.len());
         self.policy().audit(
             "research_start",
             false,
@@ -300,6 +319,7 @@ impl ResearchService {
 
         let tools = self.tools();
         let notes = NoteService::new(Arc::clone(&self.ctx));
+        self.emit_progress(session_id, "collect", "正在检索本地知识库…", 0, 0);
         let hits = tools.kb_search(&plan.topic, MAX_SOURCES * 2)?;
 
         let mut sources: Vec<ResearchSource> = Vec::new();
@@ -424,6 +444,13 @@ impl ResearchService {
                                 web_fetched += 1;
                                 let body = first_sentence(&page.markdown);
                                 snippet = if body.trim().is_empty() { snippet } else { body };
+                                self.emit_progress(
+                                    session_id,
+                                    "collect",
+                                    &format!("已抓取正文 {web_fetched} 页（预算 ≤{} 页）", budget.max_pages),
+                                    web_fetched,
+                                    sources.len() + 1,
+                                );
                             }
                         }
                         if web_search::looks_like_injection(&format!("{} {}", hit.title, snippet)) {
@@ -510,6 +537,18 @@ impl ResearchService {
             ),
         });
         self.save(&session)?;
+        self.emit_progress(
+            session_id,
+            "collect",
+            &format!(
+                "收集完成：来源 {} 条（本地 {} 条 / 外部 {} 条）",
+                session.sources.len(),
+                session.sources.len() - web_collected,
+                web_collected
+            ),
+            web_fetched,
+            session.sources.len(),
+        );
         // 只有真的发了外部请求才记 outbound=true
         self.policy().audit(
             "research_collect",
@@ -666,6 +705,7 @@ impl ResearchService {
             ),
         });
         self.save(&session)?;
+        self.emit_progress(&session.id, "verify", "验证完成：交叉验证与冲突判定已写入报告草稿", 0, session.sources.len());
         self.policy().audit(
             "research_verify",
             false,
@@ -790,6 +830,7 @@ impl ResearchService {
             detail: format!("已生成报告：{composer_label}"),
         });
         self.save(&session)?;
+        self.emit_progress(&session.id, "compose", "汇总完成：六段报告已生成", 0, session.sources.len());
         self.policy().audit(
             "research_compose",
             false,
@@ -857,6 +898,7 @@ impl ResearchService {
             detail: "已生成写入提案（等待用户确认后落库）".to_string(),
         });
         self.save(&session)?;
+        self.emit_progress(&session.id, "proposal", "写入提案已生成，等待确认", 0, session.sources.len());
         self.policy().audit(
             "research_proposal",
             false,
@@ -898,6 +940,13 @@ impl ResearchService {
             });
             session.updated_at = now_iso();
             self.save(&session)?;
+            self.emit_progress(
+                &session.id,
+                "write",
+                "已放弃本次写入：未落库，材料仍保留为草稿",
+                0,
+                session.sources.len(),
+            );
             self.policy()
                 .audit("research_write", false, "ok", started.elapsed().as_millis() as u64, Some("abandoned"));
             return Ok(ResearchWriteResult {
@@ -1048,6 +1097,7 @@ impl ResearchService {
             ),
         });
         self.save(&session)?;
+        self.emit_progress(&session.id, "write", "已按你的确认写入知识库", 0, session.sources.len());
         self.policy().audit(
             "research_write",
             false,
@@ -1088,6 +1138,7 @@ impl ResearchService {
             detail: "已中止：已有材料保留为草稿".to_string(),
         });
         self.save(&session)?;
+        self.emit_progress(&session.id, "abort", "已中止：已有材料保留为草稿", 0, session.sources.len());
         self.policy()
             .audit("research_abort", false, "ok", 0, Some("aborted"));
         Ok(session)

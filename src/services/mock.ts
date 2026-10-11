@@ -1111,6 +1111,14 @@ function researchRequireStatus(session: ResearchSession, expected: ResearchStatu
 
 function researchStep(session: ResearchSession, step: string, detail: string) {
   session.steps.push({ step, at: now(), detail });
+  // 与后端一致：每推进一步都发一次进度事件（**只含元数据**，不含正文）
+  emit('ai://research-progress', {
+    sessionId: session.id,
+    step,
+    detail,
+    pagesFetched: 0,
+    sources: session.sources.length,
+  });
 }
 
 function plainText(markdown: string): string {

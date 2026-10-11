@@ -16,14 +16,16 @@ import { MarkdownPreview } from '@/components/editor/MarkdownPreview';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
-import { ROUTES } from '@/lib/constants';
+import { EVENTS, ROUTES } from '@/lib/constants';
 import { errorMessage, formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { aiService } from '@/services/aiService';
+import { subscribe } from '@/services/api';
 import { researchService } from '@/services/researchService';
 import type {
   AiPolicy,
   ResearchSession,
+  ResearchProgress,
   ResearchSessionSummary,
   ResearchReport,
   ResearchSourceLevel,
@@ -103,6 +105,8 @@ export function ResearchPage() {
   /** 本次页面生命周期内是否已经为「联网收集」做过单次确认（§9.7） */
   const [networkConfirmed, setNetworkConfirmed] = useState(false);
   const [networkAskOpen, setNetworkAskOpen] = useState(false);
+  /** 后端推来的实时进度（§9.2：当前步骤 / 已抓页数 / 已采纳来源数；只含元数据） */
+  const [progress, setProgress] = useState<ResearchProgress | null>(null);
 
   const refreshHistory = useCallback(async () => {
     try {
@@ -132,6 +136,26 @@ export function ResearchPage() {
       });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // 订阅研究进度事件：长步骤（联网抓取可达数分钟）时让用户看得见「进行到哪了」。
+  // 事件通道不可用（浏览器预览 / 测试环境）时静默降级，不影响主流程。
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void subscribe<ResearchProgress>(EVENTS.researchProgress, (payload) => {
+      if (disposed) return;
+      setProgress(payload);
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten?.();
     };
   }, []);
 
@@ -452,6 +476,22 @@ export function ResearchPage() {
                   </div>
                 ) : null}
               </section>
+
+              {/*
+                实时进度（§9.2）：长步骤（联网抓取可达预算上限）时给出「进行到哪了」，
+                只显示后端推来的元数据——当前步骤 / 说明 / 已抓页数 / 已采纳来源数。
+              */}
+              {busy !== null && progress ? (
+                <p
+                  data-testid="research-progress"
+                  className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-muted)]"
+                >
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>{progress.detail}</span>
+                  {progress.pagesFetched > 0 ? <span>已抓 {progress.pagesFetched} 页</span> : null}
+                  {progress.sources > 0 ? <span>来源 {progress.sources} 条</span> : null}
+                </p>
+              ) : null}
 
               {session.plan ? (
                 <section
@@ -842,5 +882,6 @@ export function ResearchPage() {
         </div>
       ) : null}
     </div>
+
   );
 }

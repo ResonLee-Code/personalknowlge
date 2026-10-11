@@ -866,6 +866,15 @@ export interface ResearchDroppedSource {
   reason: string;
 }
 
+/** 研究进度事件负载（事件 `ai://research-progress`；**只含元数据**，不含正文） */
+export interface ResearchProgress {
+  sessionId: string;
+  step: string;
+  detail: string;
+  pagesFetched: number;
+  sources: number;
+}
+
 export interface ResearchSessionSummary {
   id: string;
   topic: string;

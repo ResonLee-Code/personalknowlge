@@ -382,6 +382,11 @@ fn event_names_match_the_frontend_constants() {
         .map(str::to_string)
         .collect();
 
-    assert_eq!(rust_events.len(), 3, "Rust 事件名解析异常：{rust_events:?}");
+    // 这里只做「解析没坏」的下限断言（新增事件是正常演进），
+    // 关键是下面的集合相等：两端只要有一边漏写，实时刷新就会静默失效。
+    assert!(
+        rust_events.len() >= 3,
+        "Rust 事件名解析异常（疑似解析器坏了）：{rust_events:?}"
+    );
     assert_eq!(ts_events, rust_events, "事件名不一致（写错就是实时刷新静默失效）");
 }
