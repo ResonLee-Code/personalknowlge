@@ -17,7 +17,7 @@
 | Rust 全量测试 | ✅ 39 个测试目标全绿（库单测 116 项 + 1 项 ignore 的基准 + 集成测试） | `cd src-tauri && cargo test --offline` |
 | 前端类型检查 | ✅ 无错误 | `npx tsc --noEmit` |
 | 前端 ESLint | ✅ 无告警 | `npx eslint .` |
-| 前端单元 / 组件测试 | ✅ 55 个文件、287 用例全通过 | `CI=true pnpm test` |
+| 前端单元 / 组件测试 | ✅ 55 个文件、288 用例全通过 | `CI=true pnpm test` |
 | 前端生产构建 | ✅ 构建成功 | `CI=true pnpm build` |
 | 端到端主流程 | ✅ 1 条主流程通过（34 个编号步骤 + 补充断言，浏览器预览后端） | `CI=true pnpm test:e2e`（截图见 `docs/screenshots/`）；重负载下时序敏感，配置了 1 次重试与 10s 断言超时（原因写在 `playwright.config.ts` 注释里） |
 
@@ -146,7 +146,8 @@
 | 设置项白名单 + 预览端排序对齐 | 主题 / 新建位置 / 编辑器模式只接受已知值（未知忽略并保留上一个有效值，`"SPLIT"` 这类大小写不同也算未知）；浏览器预览端的列表排序与桌面端**逐字对齐**（置顶最前、每种排序带 `id` 兜底、标题用码点序而非拼音序） | `workspace_flow.rs`（设置用例扩展）+ `mockBackend.test.ts`（+3，含「预览端 settings_update 只认已知字段 / 夹取数值 / 枚举白名单」，均反向验证过） || 设置项白名单 + 预览端排序对齐 | 主题 / 新建位置 / 编辑器模式只接受已知值（未知忽略并保留上一个有效值，`"SPLIT"` 这类大小写不同也算未知）；浏览器预览端的列表排序与桌面端**逐字对齐**（置顶最前、每种排序带 `id` 兜底、标题用码点序而非拼音序） | `workspace_flow.rs`（设置用例扩展）+ `mockBackend.test.ts`（+3，含「预览端 settings_update 只认已知字段 / 夹取数值 / 枚举白名单」，均反向验证过） |
 | 预览端拖拽排序与后端一致 | `notes_reorder` 同层归一化（传入在前、其余按当前显示顺序追加、写 1..N）、不存在的 id 个别跳过 / **全部不存在报 `NOTE_NOT_FOUND`**、空数组报 `INVALID_INPUT` | `mockBackend.test.ts`（29 项，含本项，反向验证过） || 预览端拖拽排序与后端一致 | `notes_reorder` 同层归一化（传入在前、其余按当前显示顺序追加、写 1..N）、不存在的 id 个别跳过 / **全部不存在报 `NOTE_NOT_FOUND`**、空数组报 `INVALID_INPUT` | `mockBackend.test.ts`（29 项，含本项，反向验证过） |
 | 预览端分类改名 / 移动 / 删除与后端一致 | 重命名：空名 / 斜杠 / 同级重名被拒 + 改目录名 + **子树笔记路径按前缀搬迁**；移动：防自指与成环、目标必须存在、重算序号与目录名前缀并搬迁路径；删除：三种策略归属与计数各不相同（`moveToParent` 归父级、其余归未分类） | `mockBackend.test.ts`（32 项，含 3 项本项，反向验证过） || 预览端分类改名 / 移动 / 删除与后端一致 | 重命名：空名 / 斜杠 / 同级重名被拒 + 改目录名 + **子树笔记路径按前缀搬迁**；移动：防自指与成环、目标必须存在、重算序号与目录名前缀并搬迁路径；删除：三种策略归属与计数各不相同（`moveToParent` 归父级、其余归未分类） | `mockBackend.test.ts`（32 项，含 3 项本项，反向验证过） |
-| 预览端命令边界取值与后端一致 | `search_quick.limit` 夹取 1–30、`note_recent.limit` 夹取 1–100（`Number.isFinite` 判断，0 不被当成缺省）；空关键词回退成「按时间浏览」 | `mockBackend.test.ts`（34 项，含本项，反向验证过） |
+| 预览端命令边界取值与后端一致 | `search_quick.limit` 夹取 1–30、`note_recent.limit` 夹取 1–100（`Number.isFinite` 判断，0 不被当成缺省）；空关键词回退成「按时间浏览」 | `mockBackend.test.ts`（34 项，含本项，反向验证过） || 预览端命令边界取值与后端一致 | `search_quick.limit` 夹取 1–30、`note_recent.limit` 夹取 1–100（`Number.isFinite` 判断，0 不被当成缺省）；空关键词回退成「按时间浏览」 | `mockBackend.test.ts`（34 项，含本项，反向验证过） |
+| 预览端不伪造成功（备份） | 「立即备份」「校验备份」在预览模式返回 `BACKUP_FAILED`（请到桌面应用），**不再给出假路径 / 假体积 / 恒 true 的校验结果**；只读的列表与目录查询仍可用 | `mockBackend.test.ts`（35 项，含本项，反向验证过） |
 | AI 闸门 · 主机解析与「只连本机」 | 主机解析抽成**一份共用实现**（闸门 / 白黑名单 / 来源分级 / 本地模型地址共用，杜绝两处口径漂移）：小写 → 去 `www.`、端口、userinfo，IPv6 字面量去方括号；本地模型地址只放行 `localhost` / `127.0.0.1` / `[::1]`，**拒绝** `localhost.evil.com`、`evil.com#@localhost`、十进制 IP、`0.0.0.0` 等写法；IPv6 在「域名规则」与「主机解析」两侧口径一致 | `ai::host` 单测（2 项）+ `ai::policy` 单测（2 项，双向反向验证） |
 | 联网检索 | 可配置检索源 + 分级 + 预算 + 注入丢弃 | `tests/web_search_flow.rs` |
 | 待复核提醒 | `note_due_for_review` + 首页卡片 | `tests/review_flow.rs` + `ReviewDueCard.test.tsx` |

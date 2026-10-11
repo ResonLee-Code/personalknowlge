@@ -3316,29 +3316,13 @@ export async function handleMockInvoke(
       return state.backups;
     case 'backup_directory':
       return '（浏览器预览模式不提供备份）';
-    case 'backup_create': {
-      const info: BackupInfo = {
-        fileName: `KnowledgeBackup_${now().slice(0, 19).replace(/[-:T]/g, '')}.zip`,
-        path: '(mock)/backups',
-        createdAt: now(),
-        sizeBytes: 1024,
-        noteCount: state.notes.filter((note) => note.status === 'active').length,
-        attachmentCount: 0,
-        includesDatabase: true,
-      };
-      state.backups = [info, ...state.backups];
-      persist();
-      return info;
-    }
+    case 'backup_create':
     case 'backup_validate':
-      return {
-        valid: true,
-        checks: [{ name: '模拟校验', passed: true, detail: '浏览器预览模式' }],
-        noteCount: state.notes.length,
-        attachmentCount: 0,
-        createdAt: now(),
-        workspaceName: state.workspace?.name ?? null,
-      };
+      // 预览模式没有真实工作区可备份：**不能伪造成功**（以前会给出一个假路径与假体积，
+      // 校验还恒为 valid:true，界面显示「备份完成」——用户会以为盘上真有一个备份包）。
+      // 与导出 / 恢复同口径：明确说「请到桌面应用里做」。
+      fail('BACKUP_FAILED', '浏览器预览模式无法创建或校验备份，请在桌面应用中使用「备份」。');
+      break;
     case 'backup_restore':
     case 'export_markdown':
       fail('BACKUP_FAILED', '浏览器预览模式不支持备份恢复与导出。');

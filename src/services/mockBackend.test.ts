@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { backupService } from '@/services/backupService';
 import { clipService } from '@/services/clipService';
 import { linkService } from '@/services/linkService';
 import { graphService } from '@/services/graphService';
@@ -802,5 +803,22 @@ describe('浏览器预览后端 · 列表/检索的边界夹取（与 Rust 对�
     // 只断言「夹取行为」本身，不写死总数（避免受其它用例留下的数据影响）
     expect((await noteService.recent(3)).length).toBe(3);
     expect((await noteService.recent(0)).length).toBe(1);
+  });
+
+});
+
+// 预览模式没有真实工作区：备份 **不能伪造成功**。以前 `backup_create` 会返回一个假路径、
+// 假体积，`backup_validate` 恒为 `valid: true`，界面显示「备份完成」——
+// 用户会以为盘上真有一个备份包。与导出 / 恢复同口径：明确说「请到桌面应用里做」。
+describe('浏览器预览后端 · 备份不支持时如实报错', () => {
+  it('创建 / 校验备份都返回「请到桌面应用」而不是伪造成功', async () => {
+    await workspaceService.create('备份预览库', '/tmp/mock-backup');
+    await expect(backupService.create()).rejects.toMatchObject({ code: 'BACKUP_FAILED' });
+    await expect(backupService.validate('(mock)/backups')).rejects.toMatchObject({
+      code: 'BACKUP_FAILED',
+    });
+    // 列表与目录查询是只读信息：照旧可用（列表为空、目录给出说明）
+    expect(await backupService.list()).toEqual([]);
+    expect(await backupService.directory()).toContain('浏览器预览模式');
   });
 });
