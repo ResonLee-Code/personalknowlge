@@ -782,4 +782,25 @@ describe('浏览器预览后端 · 设置写入（与 Rust 对齐）', () => {
     expect(applied.listSort).toBe('manual');
     expect(applied.autosaveDelayMs).toBe(1500);
   });
+
+});
+
+// 命令级的边界夹取也要与后端一致：`search_quick` 限 1–30、`note_recent` 限 1–100
+// （后端 `SearchService::quick_search` / `NoteService::recent` 就是这么夹的）。
+// 预览端以前把入参原样传给分页，超限时返回的条数与桌面端不同。
+describe('浏览器预览后端 · 列表/检索的边界夹取（与 Rust 对齐）', () => {
+  it('search_quick 夹取 1–30、note_recent 夹取 1–100', async () => {
+    await workspaceService.create('夹取库', '/tmp/mock-clamp');
+    for (let index = 0; index < 40; index += 1) {
+      await noteService.create({ title: `夹取笔记 ${index}`, initialContent: '关键词' });
+    }
+
+    expect((await searchService.quick('关键词', 999)).length).toBe(30);
+    expect((await searchService.quick('关键词', 0)).length).toBe(1);
+    expect((await searchService.quick('关键词', 5)).length).toBe(5);
+
+    // 只断言「夹取行为」本身，不写死总数（避免受其它用例留下的数据影响）
+    expect((await noteService.recent(3)).length).toBe(3);
+    expect((await noteService.recent(0)).length).toBe(1);
+  });
 });

@@ -2098,7 +2098,13 @@ export async function handleMockInvoke(
     }
     case 'note_recent':
       requireWorkspace();
-      return listNotes({ pageSize: Number(payload.limit ?? 10) }).items;
+      // 与后端 `NoteService::recent` 同规则：limit 夹取 1–100
+      return listNotes({
+        pageSize: Math.min(
+          100,
+          Math.max(1, Number.isFinite(Number(payload.limit ?? 10)) ? Number(payload.limit ?? 10) : 10),
+        ),
+      }).items;
     case 'note_list_deleted':
       requireWorkspace();
       return listNotes({ status: 'deleted' }).items;
@@ -3298,9 +3304,12 @@ export async function handleMockInvoke(
       return searchNotes(payload.query as SearchQuery);
     case 'search_quick': {
       requireWorkspace();
+      // 与后端 `quick_search` 同规则：limit 夹取 1–30（后端 SearchService::quick_search）
+      const raw = Number(payload.limit ?? 10);
+      const limit = Math.min(30, Math.max(1, Number.isFinite(raw) ? raw : 10));
       return searchNotes({
         keyword: String(payload.keyword ?? ''),
-        pageSize: Number(payload.limit ?? 10),
+        pageSize: limit,
       }).hits.map((hit) => hit.note);
     }
     case 'backup_list':

@@ -46,6 +46,24 @@ export interface AppError {
 | `settings_get` | — | `AppSettings` |
 | `settings_update` | `{ input: UpdateSettingsInput }` | `AppSettings` |
 
+边界取值（浏览器预览端同规则）：`note_recent` 的 `limit` 夹取 **1–100**、
+`search_quick` 的 `limit` 夹取 **1–30**（后端本来就是这么夹的，预览端此前把入参原样传给分页，
+超限时返回条数与桌面端不同）；`note_list` 的 `pageSize` 夹取 1–500，
+`search_notes` 的 `pageSize` 夹取 1–100。**空关键词**不是错误：`search_notes` 会回退成
+「按时间浏览」（仍受分类 / 标签 / 收藏筛选约束）。
+| `note_list_deleted` / `note_list_missing` | — | `NoteSummary[]` |
+| `note_delete` | `{ id }` | `void`（移入回收站） |
+| `note_restore` | `{ id }` | `NoteDetail` |
+| `note_purge` | `{ id }` | `void` |
+| `note_rename` | `{ id, title, renameFile? }` | `NoteDetail` |
+| `note_move` | `{ id, categoryId }` | `NoteDetail` |
+| `note_duplicate` | `{ id }` | `NoteDetail` |
+| `note_set_favorite` | `{ id, favorite }` | `NoteDetail` |
+| `note_set_tags` | `{ id, tags: string[] }` | `NoteDetail` |
+| `note_count` | `{ status? }` | `number` |
+| `note_import` | `{ input: ImportNotesInput }` | `ImportReport` |
+| `note_export` | `{ input: ExportNoteInput }` | `ExportNoteResult` |
+
 `WorkspaceOpenResult`：`{ workspace, stats, settings, indexStatus, warnings, initialized, scan }`。
 `workspace_create` 在目录已初始化时返回 `WORKSPACE_ALREADY_EXISTS`，不会破坏已有数据；
 `workspace_open` 可打开普通目录并就地初始化（`initialized = true`）。
@@ -59,18 +77,6 @@ export interface AppError {
 | `note_save` / `note_update` | `{ input: SaveNoteInput }` | `SaveNoteResult` |
 | `note_list` | `{ query: NoteListQuery }` | `NoteListResult` |
 | `note_recent` | `{ limit? }` | `NoteSummary[]` |
-| `note_list_deleted` / `note_list_missing` | — | `NoteSummary[]` |
-| `note_delete` | `{ id }` | `void`（移入回收站） |
-| `note_restore` | `{ id }` | `NoteDetail` |
-| `note_purge` | `{ id }` | `void` |
-| `note_rename` | `{ id, title, renameFile? }` | `NoteDetail` |
-| `note_move` | `{ id, categoryId }` | `NoteDetail` |
-| `note_duplicate` | `{ id }` | `NoteDetail` |
-| `note_set_favorite` | `{ id, favorite }` | `NoteDetail` |
-| `note_set_tags` | `{ id, tags: string[] }` | `NoteDetail` |
-| `note_count` | `{ status? }` | `number` |
-| `note_import` | `{ input: ImportNotesInput }` | `ImportReport` |
-| `note_export` | `{ input: ExportNoteInput }` | `ExportNoteResult` |
 
 `SaveNoteInput`：`{ id, content, baseContentHash?, title?, categoryId?, tags? }`。
 `ImportNotesInput`：`{ paths: string[], categoryId? }`（`paths` 可以是文件或目录，目录会递归展开）；
