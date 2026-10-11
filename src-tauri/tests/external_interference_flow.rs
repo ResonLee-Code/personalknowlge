@@ -214,3 +214,60 @@ fn a_missing_note_recovers_when_its_file_comes_back() {
         "恢复后应当重新进入检索索引"
     );
 }
+
+/// 回收站恢复时的路径冲突：原路径已经被**别的文件**占用时，绝不能覆盖它。
+///
+/// 场景：删除一篇笔记（进回收站 `/.trash/原路径`）→ 用户或外部工具在原路径放了一个新文件 →
+/// 恢复该笔记。期望：那个新文件**原封不动**，笔记被恢复到唯一的新路径并保持可用。
+#[test]
+fn restoring_from_trash_does_not_clobber_a_file_that_took_the_old_path() {
+    let fixture = Fixture::new();
+    let note = fixture
+        .notes()
+        .create(CreateNoteInput {
+            title: "先删后恢复的笔记".to_string(),
+            category_id: None,
+            initial_content: Some("原始正文".to_string()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("新建笔记")
+        .note;
+    let original_path = note.file_path.clone();
+
+    fixture.notes().delete(&note.id).expect("移入回收站");
+    assert!(!fixture.workspace.path().join(&original_path).exists());
+
+    // 在原路径写上「别人的文件」
+    let occupied = fixture.workspace.path().join(&original_path);
+    if let Some(parent) = occupied.parent() {
+        std::fs::create_dir_all(parent).expect("建目录");
+    }
+    std::fs::write(&occupied, "这是别的文件，不能被覆盖").expect("占位文件");
+
+    let restored = fixture.notes().restore(&note.id).expect("从回收站恢复");
+    assert_ne!(
+        restored.note.file_path, original_path,
+        "原路径被占用时必须换一个唯一路径，而不是覆盖"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&occupied).expect("读占位文件"),
+        "这是别的文件，不能被覆盖",
+        "占位文件被覆盖了——这是静默数据丢失"
+    );
+    assert_eq!(
+        restored.note.status,
+        personal_knowledge_os_lib::domain::note::NoteStatus::Active
+    );
+    let restored_file = fixture
+        .workspace
+        .path()
+        .join(restored.note.file_path.replace('\\', "/"));
+    assert!(restored_file.exists(), "笔记文件要真的落在新路径上");
+    assert!(
+        std::fs::read_to_string(&restored_file)
+            .expect("读恢复后的文件")
+            .contains("原始正文"),
+        "恢复的应当是笔记自己的内容"
+    );
+}
