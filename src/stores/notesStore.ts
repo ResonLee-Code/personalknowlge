@@ -2,6 +2,7 @@ import { toast } from 'sonner';
 import { create } from 'zustand';
 
 import { errorMessage } from '@/lib/format';
+import { createRequestGuard } from '@/lib/latestRequest';
 import { noteService } from '@/services/noteService';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useTagsStore } from '@/stores/tagsStore';
@@ -141,6 +142,10 @@ function queryFromScope(
   }
 }
 
+/** 列表与详情的「最后发起的请求才算数」守卫（快速切换不会错位） */
+const listGuard = createRequestGuard();
+const detailGuard = createRequestGuard();
+
 export const useNotesStore = create<NotesState>((set, get) => ({
   items: [],
   total: 0,
@@ -190,14 +195,17 @@ export const useNotesStore = create<NotesState>((set, get) => ({
 
   refresh: async () => {
     const { scope, sort, keyword, rootOnly } = get();
+    const isLatest = listGuard.begin();
     set({ loading: true, error: null });
     try {
       const result = await noteService.list(queryFromScope(scope, sort, keyword, rootOnly));
+      if (!isLatest()) return; // 期间又刷新过（换了筛选 / 关键词），丢弃这次结果
       set({ items: result.items, total: result.total });
     } catch (error) {
+      if (!isLatest()) return;
       set({ error: errorMessage(error), items: [], total: 0 });
     } finally {
-      set({ loading: false });
+      if (isLatest()) set({ loading: false });
     }
   },
 
@@ -208,14 +216,18 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   openDetail: async (id) => {
+    const isLatest = detailGuard.begin();
     set({ detailLoading: true });
     try {
       const detail = await noteService.get(id);
+      // 快速点过几篇笔记时，先发出的响应可能后到：只接受最后一次
+      if (!isLatest()) return;
       set({ detail, selectedId: id, saveStatus: 'idle', saveError: null, conflict: null });
     } catch (error) {
+      if (!isLatest()) return;
       set({ error: errorMessage(error), detail: null });
     } finally {
-      set({ detailLoading: false });
+      if (isLatest()) set({ detailLoading: false });
     }
   },
 

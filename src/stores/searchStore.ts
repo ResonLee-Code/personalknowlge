@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 import { errorMessage } from '@/lib/format';
+import { createRequestGuard } from '@/lib/latestRequest';
 import { searchService } from '@/services/searchService';
 import type { IndexStatus, SearchQuery, SearchResponse, SearchSort } from '@/types';
 
@@ -25,6 +26,9 @@ interface SearchState {
   refreshStatus: () => Promise<void>;
   rebuildIndex: () => Promise<boolean>;
 }
+
+/** 「最后发起的检索才算数」守卫：连续输入时旧结果不会覆盖新结果 */
+const searchGuard = createRequestGuard();
 
 export const useSearchStore = create<SearchState>((set, get) => ({
   keyword: '',
@@ -61,6 +65,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
 
   run: async () => {
     const { keyword, categoryId, tagId, favoriteOnly, updatedAfter, sort, page, pageSize } = get();
+    const isLatest = searchGuard.begin();
     set({ loading: true, error: null });
     const query: SearchQuery = {
       keyword,
@@ -74,11 +79,13 @@ export const useSearchStore = create<SearchState>((set, get) => ({
     };
     try {
       const response = await searchService.search(query);
+      if (!isLatest()) return; // 又发起了新检索（继续输入 / 改筛选），丢弃这次结果
       set({ response });
     } catch (error) {
+      if (!isLatest()) return;
       set({ error: errorMessage(error), response: null });
     } finally {
-      set({ loading: false });
+      if (isLatest()) set({ loading: false });
     }
   },
 

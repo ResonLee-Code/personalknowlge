@@ -319,6 +319,23 @@
 
 至此 `research_flow.rs` 14 项、`web_search_flow.rs` 4 项；Rust 全量仍是 29 个测试目标全绿。
 
+### 缺陷修复：快速切换时的异步竞态（2026-10-11）
+
+**症状**：连着快速点几篇笔记时，先发出的详情请求可能**后返回**——旧响应会覆盖新状态，
+界面「跳回」上一篇（列表/选中是 B，正文却是 A）。同类问题在连续输入检索词时也存在：
+旧关键词的结果可能盖掉新关键词的结果。
+
+**根因**：`notesStore.openDetail` / `refresh` 与 `searchStore.run` 拿到响应就无条件写 store，
+没有「只有最新一次请求才算数」的判断。
+
+**修复**：新增 `src/lib/latestRequest.ts` 的 `createRequestGuard()`（`begin()` 返回
+「这次是否仍是最新」的判定函数），并在三处接入：详情（`openDetail`）、列表（`refresh`）、
+检索（`run`）——过期响应直接丢弃，`loading` 也只由最新一次请求收起。
+
+**测试**：`src/stores/raceGuard.test.ts` 3 项（守卫本身的语义；**慢的 A 后到不能覆盖快的 B**；
+旧关键词结果不能覆盖新关键词结果）。反向验证过：临时撤掉 `openDetail` 的守卫，
+测试立刻报 `expected 'note_a' to be 'note_b'`。
+
 ### 新增守卫：事件名与错误码契约（2026-10-11）
 
 把「IPC 契约」的两条静默失效路径也纳入守卫（`tests/dto_contract.rs` 现 13 项）：
