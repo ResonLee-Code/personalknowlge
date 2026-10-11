@@ -134,6 +134,9 @@
 | release 档能否编译（新增 ureq / dom_query 之后） | ✅ | `cd src-tauri && cargo build --release --offline` → `Finished release profile in 1m 04s` |
 | release 二进制体积与架构 | ✅ | 9,792,448 bytes（9.79 MB），`Mach-O 64-bit executable arm64`（V1.2.0 为 7.79 MB，差值是剪藏 + 联网检索的依赖） |
 | 版本号四处一致（当前都是 1.2.0） | ✅ | 发布工作流的 preflight 现在会校验 `package.json` / `Cargo.toml` / `Cargo.lock` / `tauri.conf.json` 四处 |
+| Windows 安装脚本不会打出错版本号 | ✅ | `installer.nsi` 未传 `APP_VERSION` 时 `!error` 直接失败（原来默认 1.0.0） |
+| Linux 打包依赖齐全 | ✅（静态核对） | 工作流与本机脚本都补了 `libfuse2`（AppImage 走 linuxdeploy 需要 FUSE 2，Ubuntu 22.04 默认没有） |
+| 三平台工作流结构与产物 | ✅（静态核对） | preflight / macos / windows / linux / release 五个作业齐全；Windows 产出 `setup.exe` + 便携 `zip` + `SHA256SUMS-windows.txt`，Linux 产出 `deb/rpm/AppImage` + `SHA256SUMS-linux.txt` |
 
 | 项目 | 命令 / 检查 |
 | --- | --- |

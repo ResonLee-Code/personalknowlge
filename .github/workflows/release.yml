@@ -218,6 +218,7 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
+            libfuse2 \
             build-essential \
             pkg-config \
             libssl-dev

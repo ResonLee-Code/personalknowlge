@@ -319,6 +319,19 @@
 
 至此 `research_flow.rs` 14 项、`web_search_flow.rs` 4 项；Rust 全量仍是 29 个测试目标全绿。
 
+### 打包链路静态核对（脚本 / 工作流，2026-10-11）
+
+恢复打包前又过了一遍打包链路，修掉两处会在真打包时咬人的地方：
+
+- `scripts/windows/installer.nsi` 原来在没传 `-DAPP_VERSION` 时**默认 1.0.0**——
+  直接跑 makensis 就会产出一个版本号是错的安装包。现在改成 `!error`：**没传版本号直接构建失败**
+  （`build-installer.sh` 本来就从 `Cargo.toml` 读版本传入）；
+- Linux 打包依赖补 `libfuse2`（工作流 + 本地脚本）：AppImage 走 linuxdeploy，需要 FUSE 2，
+  而 Ubuntu 22.04 默认只带 FUSE 3——少这个包会在最后一步打包失败；
+- 顺带核对：三平台工作流作业（preflight / macos / windows / linux / release）结构完整，
+  Windows 作业确实产出带版本号的 `setup.exe` + 便携 `zip` + `SHA256SUMS-windows.txt`，
+  Linux 作业产出 `deb/rpm/AppImage` + `SHA256SUMS-linux.txt`，与文档承诺一致。
+
 ### 打包前预检（版本校验四处 + release 档编译，2026-10-11）
 
 打包仍按你的指令暂停，但把「恢复打包时最容易翻车」的两件事先验掉：

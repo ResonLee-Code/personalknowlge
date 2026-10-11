@@ -1,7 +1,7 @@
 ; Personal Knowledge OS - Windows 安装脚本（NSIS 3.x / Unicode）
 ;
-; 由 scripts/windows/build-installer.sh 或 build-installer.ps1 调用，需传入：
-;   -DAPP_VERSION=1.0.0        版本号
+; 由 scripts/windows/build-installer.sh（macOS/Linux 交叉编译路径）调用，需传入：
+;   -DAPP_VERSION=x.y.z        版本号（必填，从 src-tauri/Cargo.toml 读取后传入）
 ;   -DSOURCE_DIR=<目录>        存放 personal-knowledge-os.exe 与 WebView2Loader.dll 的目录
 ;   -DOUTPUT_DIR=<目录>        安装包输出目录
 ;   -DICON_FILE=<icon.ico>     安装程序图标（可选）
@@ -17,7 +17,8 @@
 !include "FileFunc.nsh"
 
 !ifndef APP_VERSION
-  !define APP_VERSION "1.0.0"
+  ; 没有传入版本号时**直接报错**：宁可构建失败，也不要打出一个版本号是猜的安装包
+  !error "APP_VERSION 未定义：请用 -DAPP_VERSION=x.y.z 传入（build-installer.sh 会自动从 Cargo.toml 读取）"
 !endif
 !ifndef SOURCE_DIR
   !define SOURCE_DIR "..\..\src-tauri\target\release"
