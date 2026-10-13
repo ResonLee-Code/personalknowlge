@@ -80,7 +80,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 版本：本机验证口径是 v22.16；pnpm 11 要求 **≥ v22.13**，
+          # 之前写 20 会在 Setup Node 之后直接报「This version of pnpm requires at least Node.js v22.13」。
+          node-version: 22
           cache: pnpm
 
       - name: Setup Rust
@@ -111,7 +113,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 版本：本机验证口径是 v22.16；pnpm 11 要求 **≥ v22.13**，
+          # 之前写 20 会在 Setup Node 之后直接报「This version of pnpm requires at least Node.js v22.13」。
+          node-version: 22
           cache: pnpm
 
       - name: Setup Rust
@@ -160,7 +164,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 版本：本机验证口径是 v22.16；pnpm 11 要求 **≥ v22.13**，
+          # 之前写 20 会在 Setup Node 之后直接报「This version of pnpm requires at least Node.js v22.13」。
+          node-version: 22
           cache: pnpm
 
       - name: Setup Rust
@@ -235,7 +241,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 版本：本机验证口径是 v22.16；pnpm 11 要求 **≥ v22.13**，
+          # 之前写 20 会在 Setup Node 之后直接报「This version of pnpm requires at least Node.js v22.13」。
+          node-version: 22
           cache: pnpm
 
       - name: Setup Rust
