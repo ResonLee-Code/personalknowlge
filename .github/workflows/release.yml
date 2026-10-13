@@ -73,8 +73,9 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 11
+        # 不写 version：版本由 package.json 的 packageManager 决定。
+        # 两处都写会直接失败（ERR_PNPM_BAD_PM_VERSION：Multiple versions of pnpm specified）——
+        # 2026-10-14 第一次跑流水线就是这么挂的。
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -103,8 +104,9 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 11
+        # 不写 version：版本由 package.json 的 packageManager 决定。
+        # 两处都写会直接失败（ERR_PNPM_BAD_PM_VERSION：Multiple versions of pnpm specified）——
+        # 2026-10-14 第一次跑流水线就是这么挂的。
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -151,8 +153,9 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 11
+        # 不写 version：版本由 package.json 的 packageManager 决定。
+        # 两处都写会直接失败（ERR_PNPM_BAD_PM_VERSION：Multiple versions of pnpm specified）——
+        # 2026-10-14 第一次跑流水线就是这么挂的。
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -225,8 +228,9 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 11
+        # 不写 version：版本由 package.json 的 packageManager 决定。
+        # 两处都写会直接失败（ERR_PNPM_BAD_PM_VERSION：Multiple versions of pnpm specified）——
+        # 2026-10-14 第一次跑流水线就是这么挂的。
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -296,12 +300,12 @@ jobs:
 
             | 平台 | 文件 | 说明 |
             | --- | --- | --- |
-            | macOS（arm64） | `*.dmg` | 未签名；首次打开请右键 →「打开」放行 |
+            | macOS（arm64） | `*.dmg` | **ad-hoc 签名**（无 Developer ID、无公证）：下载副本首次打开会提示「无法验证开发者」，请到 系统设置 → 隐私与安全性 →「仍要打开」放行。若看到的是「**已损坏**」，说明这一版没走 ad-hoc 签名 |
             | Windows（x64） | `*_x64-setup.exe` / `*_x64-portable.zip` | 未签名；SmartScreen 提示后放行 |
             | Linux（x64） | `*.deb` / `*.rpm` / `*.AppImage` | 需要 WebKitGTK 4.1；AppImage 需 `chmod +x` |
 
             校验值见 `SHA256SUMS-*.txt`。安装与验收清单：
-            [macOS](./docs/ACCEPTANCE_V1.2.0.md) · [Windows](./docs/WINDOWS_INSTALL_GUIDE.md) · [Linux](./docs/LINUX_INSTALL_GUIDE.md)
+            [macOS（当前版本）](./docs/ACCEPTANCE_V1.3.0.md) · [Windows](./docs/WINDOWS_INSTALL_GUIDE.md) · [Linux](./docs/LINUX_INSTALL_GUIDE.md)
           files: |
             dist/**/*.dmg
             dist/**/*.exe
