@@ -1,5 +1,9 @@
+# pnpm 11 用它决定「哪些依赖允许跑构建脚本」。
+# ⚠️ 这里以前留的是 pnpm 交互提示的**占位字符串**（`set this to true or false`），
+# 结果 pnpm 认为 esbuild 未获批准：本地全新安装会打 `ERR_PNPM_IGNORED_BUILDS`，
+# **CI 上直接让 `pnpm install --frozen-lockfile` 退出 1**（2026-10-14 流水线第一跳就挂在这）。
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true
 # pnpm 11 起，构建设置从 package.json 的 `pnpm` 字段迁移到本文件。
 onlyBuiltDependencies:
   - esbuild
