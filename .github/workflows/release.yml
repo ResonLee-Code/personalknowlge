@@ -88,6 +88,22 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Linux 上 tauri/wry 的链接需要这些系统开发包；preflight 里也要跑 cargo test，
+      # 所以这里必须装（清单与 linux 打包 job 一致）——否则 cargo test 直接链接失败。
+      - name: 安装 Linux 系统依赖（跑 cargo test 用）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2 \
+            build-essential \
+            pkg-config \
+            libssl-dev
+
       - name: 前端与 Rust 测试
         run: |
           pnpm install --frozen-lockfile
