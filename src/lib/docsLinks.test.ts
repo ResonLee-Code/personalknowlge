@@ -98,6 +98,12 @@ describe('文档相对链接', () => {
         } catch {
           exists = false;
         }
+        // 例外：**指向语雀手册归档**的链接。
+        // `docs/yuque-manuals/books/` 是刻意不入库的第三方抓取内容（该目录自带 .gitignore），
+        // 它的索引 README 里那 25 条 `./books/<slug>/README.md` 在**全新 clone 上必然不存在**——
+        // 那是"本地档案索引"，不是项目引用。CI 上就是因为这条挂过一次（2026-10-14 首次跑流水线）。
+        // 只放行落在归档目录里的目标；同一个文件里指向项目其它文档的链接照旧受检查。
+        if (target.startsWith(resolve(repoRoot, 'docs/yuque-manuals'))) continue;
         if (!exists) {
           missing.push(`${file.replace(`${repoRoot}/`, '')} → ${link}`);
         }
