@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input, Label } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { SOURCE_TYPE_LABELS } from '@/lib/freshness';
 import { errorMessage } from '@/lib/format';
 import { noteService } from '@/services/noteService';
@@ -51,7 +52,7 @@ export function SourceDialog({
       toast.success('已更新来源与时效');
       onSaved();
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('保存来源与时效失败', errorMessage(error));
     } finally {
       setBusy(false);
     }

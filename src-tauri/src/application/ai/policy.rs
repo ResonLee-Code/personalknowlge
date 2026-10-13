@@ -22,6 +22,36 @@ use super::super::context::WorkspaceContext;
 /// 审计文件名（放在既有 `.knowledge/logs/` 下）。
 const AUDIT_FILE: &str = "ai-audit.jsonl";
 
+/// 决策档的默认端点（Perplexity Decisions；Jev 同结构，只是换 base_url）。
+pub const SYSTEM_ONE_DEFAULT_BASE: &str = "https://api.perplexity.ai";
+/// Perplexity Decisions 的默认模型。
+pub const PERPLEXITY_DECIDER_MODEL: &str = "pplx-decider-v1.1-27b";
+/// TypeSafe Jev 的默认模型。
+pub const JEV_DEFAULT_MODEL: &str = "jev-latest";
+
+/// 按端点猜默认模型：TypeSafe 的域名 → `jev-latest`，其余 → Perplexity 的 decider。
+///
+/// 之所以"按域名猜"：两者的请求/响应结构完全一致，唯一的差别就是端点与模型名，
+/// 所以只用一个 `system_one` 档 + 两个预设即可，不必再分两个 provider。
+pub fn default_decision_model(base_url: &str) -> &'static str {
+    let lowered = base_url.to_ascii_lowercase();
+    if lowered.contains("typesafe") {
+        JEV_DEFAULT_MODEL
+    } else {
+        PERPLEXITY_DECIDER_MODEL
+    }
+}
+
+/// 决策档的生效配置。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecisionConfig {
+    pub base_url: String,
+    pub model: String,
+    pub key: String,
+    /// 出站代理（为空 = 跟随系统/环境）
+    pub proxy: Option<String>,
+}
+
 pub struct AiPolicyService {
     ctx: Arc<WorkspaceContext>,
 }
@@ -48,6 +78,7 @@ impl AiPolicyService {
     pub fn policy(&self) -> AiPolicy {
         let mut policy = self.ctx.settings().ai;
         policy.remote_model_key_set = credential_store::remote_model_key_set(&self.ctx.data_dir);
+        policy.decision_key_set = credential_store::decision_key_set(&self.ctx.data_dir);
         policy
     }
 
@@ -58,7 +89,41 @@ impl AiPolicyService {
         })?;
         let mut policy = updated.ai;
         policy.remote_model_key_set = credential_store::remote_model_key_set(&self.ctx.data_dir);
+        policy.decision_key_set = credential_store::decision_key_set(&self.ctx.data_dir);
         Ok(policy)
+    }
+
+    /// 决策档的**生效配置**（D4）：provider 预设 + 用户覆盖。
+    ///
+    /// 只有「开了、配好、已授权」时才返回 `Some`——**不构造 Provider 就一个字节都不会发**，
+    /// 与在线模型/向量档同一套结构性纪律。
+    pub fn decision_config(&self) -> Option<DecisionConfig> {
+        let policy = self.policy();
+        if !policy.enabled || policy.decision_provider.as_deref() != Some("system_one") {
+            return None;
+        }
+        if policy.decision_authorized_at.is_none() {
+            return None;
+        }
+        let key = credential_store::decision_key(&self.ctx.data_dir)?;
+        let base_url = policy
+            .decision_base_url
+            .clone()
+            .unwrap_or_else(|| SYSTEM_ONE_DEFAULT_BASE.to_string());
+        let base_url = normalize_remote_base_url(&base_url)?;
+        let model = policy
+            .decision_model
+            .clone()
+            .unwrap_or_else(|| default_decision_model(&base_url).to_string());
+        if model.trim().is_empty() {
+            return None;
+        }
+        Some(DecisionConfig {
+            base_url,
+            model,
+            key,
+            proxy: policy.outbound_proxy.clone(),
+        })
     }
 
     /// 闸门一：AI 总开关（关闭时所有能力直接拒绝）。
@@ -193,6 +258,36 @@ impl AiPolicyService {
         let normalized = normalize_remote_base_url(base)?;
         let key = credential_store::remote_model_key(&self.ctx.data_dir)?;
         Some((normalized, model.to_string(), key))
+    }
+
+    /// 自检用：在线模型的 `(基地址, 模型名)`（已规范化）与「API Key 是否在手」。
+    ///
+    /// 与 `remote_model()` 的区别：**不要求配置完整**——自检恰恰要能回答「缺哪一项」，
+    /// 所以缺什么就如实回什么（缺地址/模型名 → `None`；缺 Key → `false`）。
+    pub fn remote_diagnosis(&self) -> (Option<(String, String)>, bool) {
+        let policy = self.ctx.settings().ai;
+        let base_name = policy.remote_model().and_then(|(base, model)| {
+            normalize_remote_base_url(base).map(|base| (base, model.to_string()))
+        });
+        let key_present = credential_store::remote_model_key(&self.ctx.data_dir).is_some();
+        (base_name, key_present)
+    }
+
+    /// 逐次外发确认（Track C2）：`confirm_each_outbound` 打开时，**每一次**外发都要显式确认。
+    ///
+    /// 返回 `false` 时调用方**不得构造在线档**——"未确认 = 零请求"是结构保证，
+    /// 而不是靠调用时记得判断。
+    pub fn outbound_confirmed(&self, confirmed: bool) -> bool {
+        !self.policy().confirm_each_outbound || confirmed
+    }
+
+    /// 设置里显式配置的出站代理（为空 = 交给环境变量 / 系统代理，见 `core::net`）。
+    pub fn outbound_proxy(&self) -> Option<String> {
+        self.ctx
+            .settings()
+            .ai
+            .outbound_proxy
+            .filter(|value| !value.trim().is_empty())
     }
 
     /// 闸门四：在线模型外发（总开关 + 配置完整 + 已授权）。
@@ -340,6 +435,8 @@ pub fn apply_policy(policy: &mut AiPolicy, input: &UpdateAiPolicyInput) {
         // 地址变更 = 换了个「内容会发给谁」的收件人：旧授权立即作废
         if policy.remote_model_base_url != next {
             policy.remote_model_authorized_at = None;
+            // 向量档与在线模型共用地址：换了收件人，向量授权同样作废
+            policy.vector_authorized_at = None;
         }
         policy.remote_model_base_url = next;
     }
@@ -365,6 +462,87 @@ pub fn apply_policy(policy: &mut AiPolicy, input: &UpdateAiPolicyInput) {
         // 首次（或换地址后）授权：地址与模型名都填好才允许记时间戳，
         // 否则会出现「授权了一个空配置」的假状态。
         policy.remote_model_authorized_at = Some(now_iso());
+    }
+    if let Some(enabled) = input.confirm_each_outbound {
+        // 逐次外发确认（Track C2）：与「首次授权」是两件事，互不影响。
+        policy.confirm_each_outbound = enabled;
+    }
+    if let Some(enabled) = input.vector_enabled {
+        policy.vector_enabled = enabled;
+    }
+    if let Some(model) = &input.remote_embedding_model {
+        let trimmed = model.trim();
+        let next = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+        // 换嵌入模型 = 换了「谁来算向量」：旧授权与旧向量都作废（向量由 vector_index 清）
+        if policy.remote_embedding_model != next {
+            policy.vector_authorized_at = None;
+        }
+        policy.remote_embedding_model = next;
+    }
+    if input.confirm_vector == Some(true)
+        && policy.remote_model().is_some()
+        && policy.remote_embedding_model.is_some()
+    {
+        // 授权也要"配置齐全才记时间戳"，避免出现「授权了一个空配置」的假状态
+        policy.vector_authorized_at = Some(now_iso());
+    }
+    if let Some(provider) = &input.decision_provider {
+        // 只认 `rule` / `system_one`：写错一律退回规则档（不猜）
+        let next = match provider.trim().to_ascii_lowercase().as_str() {
+            "system_one" => Some("system_one".to_string()),
+            _ => None,
+        };
+        if policy.decision_provider != next {
+            // 换档位 = 换了「材料发给谁」：旧授权作废
+            policy.decision_authorized_at = None;
+        }
+        policy.decision_provider = next;
+    }
+    if let Some(base) = &input.decision_base_url {
+        let trimmed = base.trim();
+        let next = if trimmed.is_empty() {
+            None
+        } else {
+            normalize_remote_base_url(trimmed)
+        };
+        if policy.decision_base_url != next {
+            policy.decision_authorized_at = None;
+        }
+        policy.decision_base_url = next;
+    }
+    if let Some(model) = &input.decision_model {
+        let trimmed = model.trim();
+        let next = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+        if policy.decision_model != next {
+            policy.decision_authorized_at = None;
+        }
+        policy.decision_model = next;
+    }
+    if input.confirm_decision == Some(true) && policy.decision_provider.as_deref() == Some("system_one") {
+        // 端点与模型名都能解析出来才允许记时间戳（同上：不制造"授权了空配置"）
+        let base = policy
+            .decision_base_url
+            .clone()
+            .unwrap_or_else(|| SYSTEM_ONE_DEFAULT_BASE.to_string());
+        if normalize_remote_base_url(&base).is_some() {
+            policy.decision_authorized_at = Some(now_iso());
+        }
+    }
+    if let Some(proxy) = &input.outbound_proxy {
+        let trimmed = proxy.trim();
+        policy.outbound_proxy = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
     }
     if let Some(budget) = &input.budget {
         policy.budget = budget.clamped();

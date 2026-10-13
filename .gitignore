@@ -36,3 +36,9 @@ blob-report/
 
 # local playground workspaces created while developing
 .playground/
+
+# 真机验收的运行产物：**报告进仓库、截图不进**。
+# 每轮真跑都会重新生成 11 张 PNG（约 20 MB/轮），进仓库会随发版一轮轮堆积；
+# 报告（report.md / report.json）才是可复核的结论表，截图是本地证据。
+# 需要给某轮留证时单独强制加：`git add -f docs/acceptance/<时间戳>/01-editor-input.png`
+docs/acceptance/*/*.png

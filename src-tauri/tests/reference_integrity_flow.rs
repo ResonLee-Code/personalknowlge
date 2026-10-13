@@ -196,8 +196,8 @@ fn research_write_with_a_missing_category_fails_and_keeps_the_session_retryable(
         .start(ResearchRequest { topic: "调研素材".to_string(), ..Default::default() })
         .expect("立项");
     let session = research.collect(&session.id, false).expect("收集");
-    let session = research.verify(&session.id).expect("验证");
-    let session = research.compose(&session.id).expect("汇总");
+    let session = research.verify(&session.id, false).expect("验证");
+    let session = research.compose(&session.id, false).expect("汇总");
     let session = research.proposal(&session.id).expect("提案");
     let before = fixture.notes().list(NoteListQuery::default()).expect("笔记列表").total;
 

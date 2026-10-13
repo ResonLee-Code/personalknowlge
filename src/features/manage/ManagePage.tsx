@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/badge';
 import { ROUTES } from '@/lib/constants';
+import { reportFailure } from '@/lib/actionFeedback';
 import { errorMessage, formatRelative } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { noteService } from '@/services/noteService';
@@ -139,7 +140,7 @@ export function ManagePage() {
         await noteService.restore(id);
         restored += 1;
       } catch (cause) {
-        toast.error(errorMessage(cause));
+        reportFailure('恢复失败', errorMessage(cause));
         break;
       }
     }

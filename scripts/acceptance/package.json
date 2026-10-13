@@ -1,0 +1,6 @@
+{
+  "name": "pkos-acceptance-scripts",
+  "private": true,
+  "type": "commonjs",
+  "description": "E 节真机验收脚本（Node 执行器；本目录刻意是 CommonJS，仓库根是 ESM）。"
+}

@@ -278,6 +278,8 @@ impl AttachmentService {
 
         // 1) 先用「路径 → 条目索引」建表：正文里出现的是结尾片段（可能带 ../）
         let mut by_suffix: HashMap<String, Vec<usize>> = HashMap::new();
+        // 「文件名 → 条目索引」：只写文件名的引用用它匹配（§9 `![[图.png]]` 这种写法）
+        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
         let mut items: Vec<AttachmentEntry> = Vec::with_capacity(files.len());
         for relative in &files {
             let absolute = self.ctx.paths.resolve_relative(relative)?;
@@ -303,6 +305,7 @@ impl AttachmentService {
                 .entry(relative.clone())
                 .or_default()
                 .push(index);
+            by_name.entry(file_name.clone()).or_default().push(index);
             items.push(AttachmentEntry {
                 relative_path: relative.clone(),
                 file_name,
@@ -314,6 +317,7 @@ impl AttachmentService {
         }
 
         // 2) 遍历活跃笔记正文，找出写了 `attachments/...` 的引用
+        //    （并额外认「只写文件名」的写法，见 `extract_attachment_names` 的说明）
         let notes = self.ctx.db.with_conn(|conn| {
             SqliteNoteRepository.list_by_status(conn, &self.ctx.workspace.id, NoteStatus::Active)
         })?;
@@ -324,6 +328,23 @@ impl AttachmentService {
             let mut seen: HashSet<usize> = HashSet::new();
             for target in extract_attachment_targets(&stored.body) {
                 let Some(indexes) = by_suffix.get(&target) else {
+                    continue;
+                };
+                for index in indexes {
+                    if !seen.insert(*index) {
+                        continue;
+                    }
+                    items[*index].references.push(AttachmentReference {
+                        note_id: note.id.clone(),
+                        title: note.title.clone(),
+                    });
+                }
+            }
+            // 「只写文件名」的引用（`![[图.png]]`、`![图](图.png)`）——**保守方向**：
+            // 同名文件在多个目录时把**每一个**都算成被引用。宁可漏报孤儿（少删一个没用的文件），
+            // 也不能把还在用的文件报成孤儿（那会删掉用户的东西）。
+            for name in extract_attachment_names(&stored.body) {
+                let Some(indexes) = by_name.get(&name) else {
                     continue;
                 };
                 for index in indexes {
@@ -406,6 +427,49 @@ fn extract_attachment_targets(body: &str) -> Vec<String> {
         }
     }
     targets
+}
+
+/// 从正文里提取「只写了文件名」的引用，用于把 `![[图.png]]` / `![图](图.png)`
+/// 这类写法也算成引用。
+///
+/// **为什么要单独认文件名**（F3 的"引用"口径）：
+/// - 本应用自己写入的是**相对路径**（`../attachments/2026-10/a.png`，见 `relative_from`），
+///   这条由 `extract_attachment_targets` 负责；
+/// - 但用户从 Obsidian 迁过来、或手写 markdown 时常用**只写文件名**的习惯写法，
+///   这类引用如果认不出来，附件就会被标成「未引用」——**下一次清理就会删掉还在用的图**。
+///
+/// 判定口径（写进 `docs/API_CONTRACT.md`，改这里必须同步改文档）：
+/// 1. 只认**看起来是文件**的目标（含 `.` 且不像网址）；
+/// 2. wikilink（`[[…]]` / `![[…]]`）与 markdown 链接（`[](…)` / `![](…)`）都认；
+/// 3. 目标里带 `attachments/` 的交给路径匹配，这里只返回**最后一段文件名**；
+/// 4. 同名文件有多个时，全部算被引用（宁可漏报孤儿，也不能误删在用的文件）。
+fn extract_attachment_names(body: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let push = |raw: &str, names: &mut Vec<String>| {
+        let trimmed = raw.trim().trim_matches(['<', '>', '"', '\'']);
+        if trimmed.is_empty() || trimmed.contains("://") {
+            return;
+        }
+        let last = trimmed.rsplit('/').next().unwrap_or(trimmed).trim();
+        // 只认"像文件"的名字：有点号（含扩展名）且不是纯点号
+        if !last.contains('.') || last.trim_matches('.').is_empty() {
+            return;
+        }
+        let value = last.to_string();
+        if !names.contains(&value) {
+            names.push(value);
+        }
+    };
+
+    // wikilink：`[[目标]]` / `[[目标|别名]]` / `![[目标#锚点]]`
+    for link in crate::core::text::parse_wikilinks(body) {
+        push(&link.target, &mut names);
+    }
+    // markdown 链接与图片：`[文字](目标)` / `![alt](目标 "标题")`
+    for link in crate::core::text::parse_markdown_links(body) {
+        push(&link.target, &mut names);
+    }
+    names
 }
 
 fn mime_for_extension(extension: &str) -> &'static str {

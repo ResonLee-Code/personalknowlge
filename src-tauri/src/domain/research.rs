@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::ai::ResearchBudget;
+use crate::domain::ai::{DecisionTrace, ResearchBudget};
 
 /// 会话状态（只能单向推进；`Aborted` 后不再接受后续步骤）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +116,31 @@ pub enum SourceOrigin {
     Web,
 }
 
+/// 逐次外发确认预览里的一条片段（Track C2）：**将要发出去的东西长这样**。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchOutboundSnippet {
+    pub title: String,
+    pub snippet: String,
+}
+
+/// 「这一次会把什么发给谁」的预览（Track C2）。
+///
+/// 只读：不发送、不写审计。用于在真正调用在线模型前，把**目标主机 + 将要发送的片段**
+/// 摆在用户面前。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchOutboundPreview {
+    /// 这一步是否真的会把内容发出去
+    pub will_send: bool,
+    /// 目标主机（不外发时为 `None`；**不含 Key**）
+    pub host: Option<String>,
+    /// 将要发送的片段（标题 + 摘要）
+    pub snippets: Vec<ResearchOutboundSnippet>,
+    /// 为什么（会发 / 不发）
+    pub reason: String,
+}
+
 /// 研究请求（`research_start` 的输入）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -161,6 +186,10 @@ pub struct ResearchPlan {
     pub scope: Option<String>,
     /// 3–5 个子问题（受预算上限约束）
     pub sub_questions: Vec<SubQuestion>,
+    /// **本次实际使用的检索查询（D5/N9 查询扩展）**：第一条永远是课题原文，
+    /// 其余是按「括号短语 / 连接词切分 / 拉丁词」扩展出来的。空 = 未做扩展（旧会话）。
+    #[serde(default)]
+    pub queries: Vec<String>,
     /// 本地知识库里的已知基线
     pub local_baseline: Vec<KbBaseline>,
     /// 时间窗（天）
@@ -198,6 +227,15 @@ pub struct ResearchSource {
     pub applicable_version: Option<String>,
     /// 摘要片段（外部来源只存摘要，不整篇复制）
     pub snippet: String,
+    /// 命中在**原文里的精确区间**（N5，本地来源才有）：`[char_start, char_end)`。
+    /// 供 `RetrievedChunk` 携带真实区间（此前是 0..长度 的占位值）。
+    #[serde(default)]
+    pub char_start: Option<i64>,
+    #[serde(default)]
+    pub char_end: Option<i64>,
+    /// 命中所在分块的标题路径（N5；空串 = 标题之前）
+    #[serde(default)]
+    pub heading: Option<String>,
     /// 是否可能已过时（发布时间早于时间窗且无更新版本）
     pub stale: bool,
     /// 决策层给出的「来源可信度」0–1（§9.6：Jev 或规则档；写入时与级别一起看）
@@ -248,6 +286,8 @@ pub enum WarningKind {
     ModelGenerated,
     /// 有检索结果被域名策略（黑名单 / 白名单）丢弃，未进入来源列表
     DroppedSources,
+    /// **证据不足**（D5/N9）：材料撑不起结论，报告如实说「不够」，不硬答
+    InsufficientEvidence,
 }
 
 /// 被域名策略丢弃的检索结果（§9.3：黑名单强制丢弃，且要在报告里可见）。
@@ -271,6 +311,60 @@ pub struct ResearchWarning {
     pub references: Vec<usize>,
 }
 
+/// 证据缺口的一类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EvidenceGapKind {
+    /// 一条材料都没有
+    NoMaterial,
+    /// 有子问题完全没有材料
+    PartialCoverage,
+    /// 没有任何「≥2 个独立来源」
+    NoCrossCheck,
+    /// 可用来源太少（< 3）
+    ThinEvidence,
+    /// 只有 E 级（不可用）线索
+    WeakOnly,
+    /// 可用来源全部可能已过时
+    StaleOnly,
+}
+
+/// 一处证据缺口：说清**差在哪、影响哪些子问题、涉及哪些来源**。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceGap {
+    pub kind: EvidenceGapKind,
+    pub message: String,
+    #[serde(default)]
+    pub sub_question_ids: Vec<String>,
+    #[serde(default)]
+    pub references: Vec<usize>,
+}
+
+/// **证据充分性评估（D5 / N9）**：研究的"够不够"结论。
+///
+/// 与结论段的交叉验证共用同一套"独立来源"口径（`application/ai/evidence.rs`），
+/// 避免"评估说够、结论段却一条都进不去"。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceAssessment {
+    /// 是否足以支撑结论段
+    pub sufficient: bool,
+    /// 0–1 的展示用分数（**判定看 `sufficient` 与 `gaps`**，分数只用于观察趋势）
+    pub score: f32,
+    pub covered_sub_questions: usize,
+    pub total_sub_questions: usize,
+    /// 去重后的独立来源数（同一站点多篇只算一个）
+    pub independent_sources: usize,
+    /// 可用来源数（已排除 E 级）
+    pub usable_sources: usize,
+    pub gaps: Vec<EvidenceGap>,
+    /// 人话结论（报告顶部与界面直接显示）
+    pub verdict: String,
+    /// 差的话该怎么补；够则空
+    pub recommendation: String,
+}
+
 /// 报告第 4 段：与本地知识库的关系。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -288,11 +382,22 @@ pub struct ResearchReport {
     pub generated_at: String,
     /// 「资料截至 YYYY-MM-DD」
     pub data_cutoff: String,
+    /// **证据充分性（D5/N9）**：材料够不够撑结论，缺口是什么。
+    /// 旧会话（本字段之前生成的报告）反序列化时取默认值（= 未评估）。
+    #[serde(default)]
+    pub evidence: EvidenceAssessment,
     /// 生成者标识（D1/D2 为模板实现，接模型后换成 provider id）
     pub composer: String,
     /// 打分用的决策模型标识（规则档 `rule`；Jev 接入后变成 `jev` / `local.*`）
     #[serde(default)]
     pub decision_provider: String,
+    /// 冲突判定用的档位（Track C5）：`rule`（规则档，极性词）或模型档
+    /// （`local.ollama` / `remote.openai-compatible`，多个用 ` / ` 连接）
+    #[serde(default)]
+    pub conflict_provider: Option<String>,
+    /// 本次打分的**可解释 Trace**（Track D2/N6）：缓存是否命中、试过哪些档、为什么失败。
+    #[serde(default)]
+    pub decision_trace: Option<DecisionTrace>,
     /// 第 1 段：结论先行（**只放交叉验证过的**）
     pub conclusions: Vec<ResearchClaim>,
     /// 第 2 段：关键事实（**只放交叉验证过的**）
@@ -436,6 +541,9 @@ pub struct ResearchSession {
     /// 本次打分用的决策模型标识（规则档 `rule` / `local.ollama:<模型>`）
     #[serde(default)]
     pub decision_provider: Option<String>,
+    /// 本次打分的可解释 Trace（Track D2/N6）：verify 时写进报告
+    #[serde(default)]
+    pub decision_trace: Option<DecisionTrace>,
     /// 被域名策略丢弃的检索结果（黑名单强制 / 白名单之外）：来源列表里没有它们，
     /// 但必须在报告附录（警告块）里能看到，避免「悄悄少了东西」
     #[serde(default)]
@@ -512,6 +620,7 @@ mod tests {
                 topic: "Rust 异步".into(),
                 scope: None,
                 sub_questions: vec![],
+                queries: vec![],
                 local_baseline: vec![],
                 time_window_days: 730,
                 budget: ResearchBudget::default(),
@@ -525,6 +634,7 @@ mod tests {
             abort_reason: None,
             written_note_id: None,
             decision_provider: None,
+            decision_trace: None,
             dropped_sources: Vec::new(),
         };
         assert!(session.summary_line().contains("Rust 异步"));

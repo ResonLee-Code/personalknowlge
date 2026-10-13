@@ -168,6 +168,75 @@ CREATE TABLE IF NOT EXISTS search_documents_map (
 映射表把 `note_id` 关联到 FTS 的 **rowid**，删除改走主键。迁移时会清空既有 FTS 索引，
 应用下次打开工作区自动重建一次。
 
+### note_chunks（迁移 011，分块索引 · N5）
+
+```sql
+CREATE TABLE IF NOT EXISTS note_chunks (
+    note_id     TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    heading     TEXT NOT NULL,   -- 标题路径（`A > B`）；空串 = 位于任何标题之前
+    char_start  INTEGER NOT NULL,
+    char_end    INTEGER NOT NULL,
+    PRIMARY KEY (note_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_note_chunks_note ON note_chunks(note_id);
+```
+
+用途：让**检索命中能跳回原文的精确区间**——命中带 `SearchHit.location`
+（`{ heading, charStart, charEnd }`），编辑器据此滚过去并选中那一段。
+
+- 只存"分块在哪里"，**不存正文**：正文是 Markdown 文件的投影，删库重扫可完整重建；
+- 区间是**正文（不含 frontmatter）里的字符下标**（Unicode 标量值），
+  与 `read_note` 的 `body`、编辑器里的正文同一坐标系；
+- 分块规则：标题行断开；一段超上限（900 字）时**从行边界**断开（绝不切断一行）。
+  实现见 `src-tauri/src/core/chunk.rs`；
+- **升级路径**：老库「有笔记索引、没有分块」时，打开工作区会判定索引落后并**自动重建**一次。
+
+### decision_cache（迁移 012，决策缓存 · D2/N6）
+
+```sql
+CREATE TABLE IF NOT EXISTS decision_cache (
+    cache_key  TEXT PRIMARY KEY,   -- sha256(kind + 查询 + 候选内容 + 候选链档位)
+    kind       TEXT NOT NULL,
+    provider   TEXT NOT NULL,
+    payload    TEXT NOT NULL,      -- DecisionResult[] 的 JSON
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    hits       INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_decision_cache_expires ON decision_cache(expires_at);
+```
+
+用途：同一批材料在一次研究会话里会被反复判定（打分 / 冲突 / 后续步骤），
+每次都调模型既慢又费额度。
+
+- 键是**内容寻址**的：材料内容一变，键就变 → **天然不命中**，不需要额外的失效逻辑；
+  候选链（可用档位）也算进键里，**用户开关模型后不会命中旧档位的结果**；
+- TTL 10 分钟兜底；**过期或坏数据一律当作没有**并顺手删掉（不留着坑人）；
+- 全部是派生数据：删掉整张表只是让下次重算一遍。
+
+### chunk_embeddings（迁移 013，向量索引 · D3/N7）
+
+```sql
+CREATE TABLE IF NOT EXISTS chunk_embeddings (
+    note_id      TEXT NOT NULL,
+    chunk_index  INTEGER NOT NULL,
+    model        TEXT NOT NULL,   -- 嵌入模型标识（含 provider 前缀）
+    dim          INTEGER NOT NULL,
+    vector       BLOB NOT NULL,   -- f32 小端数组
+    content_hash TEXT NOT NULL,   -- 分块内容指纹（增量构建据此跳过没变的）
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (note_id, chunk_index, model)
+);
+```
+
+用途：让检索多一路**向量召回**，与 BM25 用 RRF 融合。
+
+- **只存向量与指纹**，不存正文（正文仍以 Markdown 文件为准）；删掉这张表只是重算一遍；
+- 主键带 `model`：换嵌入模型要各存一份，**不同模型的向量不能混用**；
+- 检索是**本地暴力余弦**（不引入向量数据库依赖）；10 万条以内够用，超过要重新评估（已知边界）；
+- 构建**必须显式确认**（会把片段文本发给嵌入端点一次），且是**增量**的。
+
 ### notes 的文件快照列（迁移 005）
 
 | 列 | 含义 |
@@ -352,7 +421,10 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 `004_note_assets`（类型化关系 + 来源时效）、`005_note_file_stamp`（文件快照）、
 `006_search_rowid_map`（FTS rowid 映射）、`007_note_parent`（子文档层级）、
 `008_notes_sort_order`（手动排序）、`009_notes_pinned`（置顶）、
-`010_note_declared_parent`（父文档声明原文，用于重试解析层级），`SCHEMA_VERSION = 10`。
+`010_note_declared_parent`（父文档声明原文，用于重试解析层级）、
+`011_note_chunks`（N5 分块索引：标题路径 + 原文字符区间）、
+`012_decision_cache`（D2/N6 决策缓存：内容寻址的键 + 过期时间）、
+`013_chunk_embeddings`（D3/N7 向量索引：分块向量 + 内容指纹），`SCHEMA_VERSION = 13`。
 
 ## 6. 数据恢复能力
 

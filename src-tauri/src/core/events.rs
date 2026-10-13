@@ -17,6 +17,11 @@ pub mod events {
     pub const NOTES_CHANGED: &str = "notes://changed";
     /// 研究助手进度（每一步、每个抓取页的实时状态；**只含元数据，不含笔记正文**）。
     pub const RESEARCH_PROGRESS: &str = "ai://research-progress";
+    /// 报告「推测段」的生成增量（Track C1 流式）。`text` 是**当前这一档的累计文本**，
+    /// 只是预览：最终以命令返回的报告为准。
+    pub const RESEARCH_COMPOSE_DELTA: &str = "ai://research-compose-delta";
+    /// 向量索引构建进度（D3）：`{ done, total, skipped }`，只含计数、不含正文。
+    pub const VECTOR_INDEX_PROGRESS: &str = "ai://vector-index-progress";
 }
 
 pub trait EventSink: Send + Sync {

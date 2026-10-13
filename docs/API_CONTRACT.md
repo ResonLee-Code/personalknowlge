@@ -138,8 +138,13 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 
 `SearchQuery`：`{ keyword, categoryId?, tagId?, favoriteOnly?, updatedAfter?, updatedBefore?, sort?, page?, pageSize?, scopeNoteId? }`。
 `SearchResponse`：`{ keyword, hits, total, page, pageSize, tookMs, indexStale }`；
-每个 `SearchHit` 含 `{ note, score, titleMatched, snippet, matchedTerms }`，
+每个 `SearchHit` 含 `{ note, score, titleMatched, snippet, matchedTerms, location? }`，
 `snippet` 为已切分好的高亮片段（`{ text, matched }[]`），前端无需再计算下标。
+`location`（N5）是命中在**原文里的精确区间** `{ heading, charStart, charEnd }`：
+`heading` 是分块的标题路径（空串 = 标题之前），区间是**正文（不含 frontmatter）里的
+字符下标**（Unicode 标量值）。前端据此跳进编辑器并选中那一段；换算到 CodeMirror 的
+UTF-16 下标用 `src/lib/highlightRange.ts` 的 `codepointRangeToUtf16`。
+没能定位（例如只命中标签/分类）时为 `null`——**不猜位置**。
 
 ## 7. 备份与导出（设计文档 14.7）
 
@@ -275,6 +280,24 @@ interface ReviewDueNote {
 | `attachment_list` | — | `{ items: AttachmentEntry[], totalBytes, referencedCount }`；每个条目含 `relativePath / fileName / month / bytes / modifiedAt / references[]` |
 | `attachment_delete` | `{ relativePath }` | `u64`（释放的字节数） |
 | `attachment_references` | `{ relativePath }` | `AttachmentReference[]`（引用它的笔记） |
+
+**「引用」的判定口径（2026-10-14 定，Track F3）**——`references` / `referencedCount` 都按它算，
+改判定必须同步改这里与 `src-tauri/src/application/attachment_service.rs` 的注释：
+
+| 正文里的写法 | 是否算引用 | 说明 |
+| --- | --- | --- |
+| `![图](../attachments/2026-10/a.png)` | ✅ | 应用自己写入的相对路径（含 `../`）；匹配的是「`attachments/` 之后的那段」，前缀不影响 |
+| `![[attachments/2026-10/a.png]]` | ✅ | 用户手写的 wikilink（带路径） |
+| `![[20261014-004146-图-01m4v2.png]]` | ✅ | **只写文件名**：按**完整文件名精确匹配**（wikilink 与普通 markdown 链接都认） |
+| `[看图](20261014-004146-图-01m4v2.png)` | ✅ | 同上 |
+| `![[图.png]]`（用户最初的文件名） | ❌ | **悬空引用**：附件落盘会被重命名成 `<时间戳>-<名字>-<短id>.<扩展名>`，指向的文件并不存在，预览里也打不开——把它算成"被引用"只会让真正没人用的文件永远清不掉 |
+| 正文完全没提 | ❌ | 这才是「未引用」（界面上标「未引用」，可用「只看未引用」筛出来清理） |
+
+两点纪律：
+
+1. **保守方向**：判定有疑问时算"被引用"（少报孤儿），绝不把可能还在用的文件报成孤儿；
+   同名的多个附件无法区分时**全部**算被引用；
+2. **只读**：判定只扫活跃笔记正文，不改动任何文件；删除仍是逐条确认的动作（`attachment_delete`）。
 
 - 引用识别：遍历活跃笔记正文，提取 `attachments/…` 形式的路径（含 `../attachments/…` 相对写法）；
 - 删除只允许 `attachments/` 目录内的文件，越界路径直接拒绝；
@@ -412,7 +435,15 @@ interface ReviewDueNote {
 | `ai_policy_get` | — | `AiPolicy`（默认 `enabled=false` / `network=localOnly` / `allowFetchBody=false`） |
 | `ai_policy_set` | `{ input: UpdateAiPolicyInput }` | `AiPolicy` |
 | `ai_audit_tail` | `{ limit }` | `AiAuditEntry[]`（新的在前，不含正文） |
+| `ai_model_presets` | — | `LocalModelPreset[]`（本地模型低配预设，值来自后端常量） |
+| `ai_diagnose` | — | `AiDiagnosis`（模型自检：写报告用哪一档、为什么） |
 | `ai_kb_search` | `{ keyword, limit }` | `KbHit[]`（复用 FTS5，不联网） |
+| `ai_retrieval_search` | `{ keyword, limit }` | `RetrievalReport`（多通道 + RRF 融合；**通道状态**如实标注，不联网） |
+| `ai_vector_index_status` | — | `VectorIndexStatus`（建了多少 / 用的哪个模型 / 为什么不可用） |
+| `ai_vector_index_preview` | — | `VectorIndexPreview`（要发多少、发给谁）；**只读**，不发请求 |
+| `ai_vector_index_build` | `{ confirm }` | `VectorIndexReport`；`confirm` 必须为 `true`（会把片段文本发给嵌入端点） |
+| `ai_vector_index_clear` | — | `i64`（清掉的向量条数；派生数据，随时可重建） |
+| `ai_decision_probe` | — | `DecisionProbeReport`（契约探针：准确率/自洽性/一致性/耗时/用量）；**只读** |
 | `ai_web_fetch` | `{ url, confirmed }` | `ClippedPage` |
 | `ai_web_search` | `{ keyword, limit, confirmed }` | `WebSearchHit[]`（需联网档位 + 本次确认 + 已配置检索源） |
 
@@ -426,6 +457,19 @@ interface ReviewDueNote {
   本地模型（Ollama HTTP）。地址**只接受本机**（`localhost` / `127.0.0.1` / `::1`，其余清空），
   两个开关**默认关闭**，都关时一个请求都不发；开启后模型不可用会**自动降级**到规则档 / 模板实现。
   复用 `ai_policy_get` / `ai_policy_set`，无新增命令；
+- `AiPolicy.confirmEachOutbound`（Track C2，**可选闸门**，默认关闭）：开启后，
+  **每一次**把内容交给在线模型都必须由调用方带上「本次已确认」；否则在线档**根本不参与**
+  （零请求），自动降级到本地 / 模板。与「首次授权」（`remoteModelAuthorizedAt`）互不影响。
+  `research_compose` 的 `confirmOutbound` 与 `research_collect` 的 `confirmed` 就是这一次的确认；
+  复用 `ai_policy_get` / `ai_policy_set`，无新增命令；
+- `ai_model_presets`（Track C3）：本地模型的「低配机型预设」（当前 `qwen2.5:3b` ≈1.9 GB /
+  `qwen2.5:7b` ≈4.7 GB）。**值只写在后端常量**（`application/ai/presets.rs`），前端只展示与填充，
+  避免两处各写一份；体积是**近似下载体积**，以 Ollama 实际下载为准；该命令不需要工作区上下文；
+- `ai_diagnose`（Track C4）：模型自检——「写报告」当前用哪一档（`online` / `local` / `template`）。
+  **只读**；只在需要时探测**本机** `GET /api/tags`（超时 3 秒），**绝不联系在线端点**，
+  因此**不要求 AI 已开启**（用来查"为什么没生效"）。返回 `AiDiagnosis`（`tier` / `providerId` /
+  `reason` / `checks[]`），`providerId` 与研究报告的 `composer` 同源；每次判定都会给出
+  逐档 `detail`（未配置 / 缺 Key / 未授权 / 连不上 / 模型未 pull）；
 - `AiPolicy.remoteModel*`（V1.2.1 补充，在线模型 / OpenAI 兼容端点）：
   `remoteModelBaseUrl` / `remoteModelName` / `remoteModelCompose` / `remoteModelScore` /
   `remoteModelAuthorizedAt` / `remoteModelKeySet`。地址**只接受 `https://` 公网域名**
@@ -450,8 +494,9 @@ interface ReviewDueNote {
 | `research_get` | `{ sessionId }` | `ResearchSession` | 读取会话（刷新页面后恢复现场） |
 | `research_list` | `{ limit }` | `ResearchSessionSummary[]` | 最近的会话（新的在前） |
 | `research_collect` | `{ sessionId, confirmed }` | `ResearchSession` | 收集材料：本地 FTS5 +（D3）外部检索；`confirmed` 表示本次联网已获用户确认 |
-| `research_verify` | `{ sessionId }` | `ResearchSession` | 按子问题汇总，≥2 个独立来源才算交叉验证 |
-| `research_compose` | `{ sessionId }` | `ResearchSession` | 渲染固定六段报告（顶部「资料截至 YYYY-MM-DD」） |
+| `research_verify` | `{ sessionId, confirmOutbound? }` | `ResearchSession` | 按子问题汇总，≥2 个独立来源才算交叉验证；冲突判定见 C5（模型档优先，回退规则档） |
+| `research_compose` | `{ sessionId, confirmOutbound? }` | `ResearchSession` | 渲染固定六段报告（顶部「资料截至 YYYY-MM-DD」）；`confirmOutbound` 见 C2 闸门 |
+| `research_outbound_preview` | `{ sessionId }` | `ResearchOutboundPreview` | 逐次外发确认的预览（将要发送的片段 + 目标主机）；**只读**，不发请求 |
 | `research_proposal` | `{ sessionId }` | `ResearchSession` | 写入提案（默认 Inbox、写前 diff、同标题提示）；**不落库** |
 | `research_write` | `{ input: ResearchWriteInput }` | `ResearchWriteResult` | 用户确认后落库：`create` / `append` / `abandon` |
 | `research_abort` | `{ sessionId, reason? }` | `ResearchSession` | 中止；已得材料保留为草稿 |
@@ -463,12 +508,64 @@ interface ReviewDueNote {
 - 报告结构（顺序固定）：① 结论先行（只放交叉验证过的）② 关键事实 ③ 争议与不确定性
   ④ 与本知识库的关系（`[[标题]]`）⑤ 待验证清单 ⑥ 参考来源；推测段由模板 Provider 生成，
   默认不写入笔记，需要时在写入确认里勾选；
+- **查询扩展（N9）**：`research_start` 生成的 `ResearchPlan.queries`（字符串数组，≤6 条）就是
+  `research_collect` 实际逐条检索用的一组查询——第一条永远是课题原文，其余来自规则扩展
+  （括号短语 / 连接词切分 / 拉丁词）。`ResearchPlan.queries` 为空（旧会话）时按课题原文单条检索；
+- **证据充分性（N9）**：`research_compose` 在定稿前评估材料够不够，结果写在
+  `ResearchReport.evidence`（`{ sufficient, score, coveredSubQuestions, totalSubQuestions,
+  independentSources, usableSources, gaps[], verdict, recommendation }`）。
+  判定不满足时：报告顶部与结论段**明说"证据不足、本次不给结论"**，并追加一条
+  `WarningKind = insufficientEvidence` 的警告；`gaps[].kind` 取值
+  `noMaterial` / `partialCoverage` / `noCrossCheck` / `thinEvidence` / `weakOnly` / `staleOnly`。
+  判定用的"独立来源"与结论段交叉验证共用同一口径（同一站点多篇只算一个）；
 - **决策层打分**（D5）：`ResearchSource.credibility`（0–1，模型分与级别折算各半）与
   `ResearchClaim.confidence`（支持来源均值 × 交叉验证折扣：≥2 独立来源 ×1.0、单一来源 ×0.6）；
   `ResearchReport.decisionProvider` 写明打分来源（规则档 `rule`）。后端默认用 `RuleDecisionProvider`，
   `ResearchService::with_decision_model()` 可注入其他 `DecisionModel`（Jev 接入点）；
   实际生效的 provider 按 `decisionCandidates` 的顺序试：**在线（已授权）→ 本地 → 规则档**，
   生成侧同理（在线 → 本地 → 模板实现），哪一档成功就把标识写进报告；
+- **推测段流式**（Track C1）：`research_compose` 期间后端推事件 `ai://research-compose-delta`，
+  负载 `{ sessionId, providerId, text, state }`——`text` 是**当前这一档的累计文本**（不是增量），
+  `state` 取 `streaming` / `failed` / `done`。本地档走 `POST /api/generate` 的 `stream: true`（NDJSON），
+  在线档走 `chat/completions` 的 `stream: true`（SSE）；不支持流式的档（模板）退化为"一次性 + 一次回调"。
+  它**只是预览**：这一档失败时后端发**空串 + `failed`**（界面据此清掉预览，**不留下半截内容**）并
+  自动降级到下一档；最终以命令返回的报告（`report.speculation`）为准。`providerId` 与报告 `composer`
+  是同一个完整标识（含模型名）；
+- **冲突语义档**（Track C5）：`research_verify` 判定「来源之间是否互相矛盾」时，优先用模型档
+  （本地 / 在线）直接判 CONFLICT，输出不合法或模型不可用则**回退规则档**（极性词）；
+  实际用的档位写进 `ResearchReport.conflictProvider`（`rule` / `local.ollama` /
+  `remote.openai-compatible`，多个用 ` / ` 连接）。该判定会外发片段，因此 `research_verify`
+  也接受 `confirmOutbound`（未确认时在线档不参与，零请求）；
+- **决策层骨架**（Track D2/N6）：打分统一走 `DecisionEngine`（先查缓存 → 逐档试 → 记 Trace），
+  缓存键**内容寻址**（`kind + 查询 + 候选内容 + 候选链档位`），因此材料一变就不命中、
+  改模型配置也不会命中旧档位的结果；TTL 10 分钟。报告新增 `decisionTrace`
+  （`{ kind, cache: 'hit'|'miss', provider, candidates, attempts: [{ provider, ok, detail }], tookMs }`），
+  只记元数据、**不含正文**；缓存表是派生数据（迁移 012），删掉只是重算一遍；
+- **检索通道化**（Track D3/N7 第一步）：`ai_retrieval_search` 返回
+  `{ channels: [{ id, available, note }], hits: [{ noteId, chunkIndex, heading, snippet, charStart, charEnd, score, providers }] }`。
+  目前只有 `bm25` 通道（**关键词检索永远可用**）；同一条分块被多个通道召回时**并成一条**
+  并标注 `providers`；**单个通道不可用只标注、不影响其它通道**。融合用 RRF（`k=60`）。
+  这一步**不外发**——向量档（在线嵌入）是下一步，未构建时如实标 `available: false`；
+- **向量检索**（Track D3/N7 第二步）：`AiPolicy.vectorEnabled`（默认关闭）+ 嵌入模型名单独一项
+  `remoteEmbeddingModel`（嵌入**复用在线模型的地址与 Key**，但模型名不同）。
+  授权 `vectorAuthorizedAt`：查询词会发给嵌入端点，需确认一次（`confirmVector: true`）；
+  换地址或换嵌入模型 → 授权作废。构建**必须带 `confirm: true`**，是增量的一次性动作
+  （分块内容指纹没变就不重嵌），进度走事件 `ai://vector-index-progress`（`{done,total,skipped}`）。
+  向量档不可用（没开/没授权/没构建/出错）时**只标注并跳过**，关键词检索照常；
+  事件 `ai://vector-index-progress` 的负载只有计数，**不含正文**；
+- **Jev（D4/N8）**：官方契约见 [JEV_CONTRACT.md](./JEV_CONTRACT.md)；
+  `search_notes` 的 `SearchHit.location` 另外带 `chunkIndex`（检索通道做去重身份用）；
+- **决策模型档**（Track D4/N8 起步）：`AiPolicy.decisionProvider`（`rule` 默认 / `system_one`）
+  + `decisionBaseUrl` + `decisionModel` + `decisionAuthorizedAt` + `decisionKeySet`。
+  **Jev 与 Perplexity Decisions 协议相同**（`{model,state,questions}` → `{model,answers,usage}`），
+  所以只有一个 `system_one` 档、两套预设；请求走 `Authorization: Bearer`，
+  端点路径按域名切（`/v1/decisions` / `/v1/systemone`）。
+  一次最多 128 个问题（我们按 120 分批）；`score` 用有序档位数组，归一化后映射到
+  `DecisionChoice`；`judge_conflict` 用一个 `noul`，`≥0.5` 判冲突。
+  Key **只写不读**（`credential_store` 里的 `decisionApiKey`，与在线模型 Key 分开存）。
+  `ai_decision_probe` 用我们自己的中文题给出准确率/自洽性/两次一致性/矛盾判别/耗时/用量；
+  policy 新增 `outboundProxy`：按「显式设置 → 环境变量 → macOS 系统代理」解析出站代理，
+  **本机地址永不代理**；
 - 审计：每一步都写 `research_*` 记录（不含正文）；**默认口径下 `outbound` 恒为 `false`**。
 
 ### 24.1 写入纪律（`research_write`）

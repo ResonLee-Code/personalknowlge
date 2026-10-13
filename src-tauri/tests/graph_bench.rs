@@ -2,9 +2,14 @@
 //!
 //! 默认不跑（标注 `#[ignore]`），手动执行：
 //! ```bash
-//! cargo test --offline --test graph_bench -- --ignored --nocapture
+//! BENCH_NOTES=30000 cargo test --offline --test graph_bench -- --ignored --nocapture
 //! ```
 //! 生成的合成工作区在临时目录中，进程结束即清理。
+//!
+//! **发布前必跑（Track E2）**：一条命令入口是 `pnpm bench`（脚本 `scripts/bench/run.sh`），
+//! 它按 **3 万篇**规格跑本基准并在**超阈值时以非零码退出**。阈值可用环境变量覆盖：
+//! `BENCH_MAX_GRAPH_MS`（默认 1500，M3 红线）、`BENCH_SCAN_TIMEOUT_S`（默认 600）。
+//! 基准最后会打印一行机器可读的 `PKOS_BENCH graph …`，脚本靠它确认「基准真的跑了」。
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -27,6 +32,15 @@ fn note_count() -> usize {
         .and_then(|value| value.parse().ok())
         .unwrap_or(3000)
 }
+
+/// 读一个浮点阈值，读不到就用默认值（发布前守护的口径见文件头）。
+fn env_f64(name: &str, default: f64) -> f64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(default)
+}
+
 /// 每篇笔记的出链数量（形成 ~6000 条边的稠密图谱）
 const LINKS_PER_NOTE: usize = 2;
 
@@ -48,6 +62,8 @@ fn dir_size(path: &std::path::Path) -> u64 {
 #[test]
 #[ignore = "性能基准，手动执行：cargo test --offline --test graph_bench -- --ignored --nocapture"]
 fn bench_graph_with_3000_notes() {
+    let max_graph_ms = env_f64("BENCH_MAX_GRAPH_MS", 1500.0);
+    let scan_timeout_s = env_f64("BENCH_SCAN_TIMEOUT_S", 600.0);
     let data = tempfile::tempdir().expect("应用数据目录");
     let workspace: TempDir = tempfile::tempdir().expect("工作区目录");
     let root = workspace.path().to_path_buf();
@@ -120,8 +136,8 @@ fn bench_graph_with_3000_notes() {
             break;
         }
         assert!(
-            started.elapsed().as_secs() < 60,
-            "扫描超时：入库 {} 篇，active={}，最后一次错误：{}",
+            started.elapsed().as_secs_f64() < scan_timeout_s,
+            "扫描超时（{scan_timeout_s} s）：入库 {} 篇，active={}，最后一次错误：{}",
             added, active, last_error
         );
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -224,13 +240,33 @@ fn bench_graph_with_3000_notes() {
     );
     println!("database.sqlite         : {:.1} MB", db_bytes as f64 / 1024.0 / 1024.0);
     println!(".knowledge 目录合计     : {:.1} MB", knowledge_bytes as f64 / 1024.0 / 1024.0);
+    println!("护栏（发布前必跑）      : graph_get 全量 < {max_graph_ms:.0} ms、节点数 == 笔记数 + 1");
     println!("=================================================\n");
 
-    // 基准同时充当回归护栏：全量查询必须在 1.5s 内返回（M3 验收口径）
+    // 机器可读摘要：`scripts/bench/run.sh` 靠这一行确认基准真的跑完（防「空跑变绿灯」）
+    println!(
+        "PKOS_BENCH graph notes={note_total} graph_all_ms={:.1} graph_filtered_ms={:.1} \
+         graph_focus2hop_ms={:.1} graph_no_orphans_ms={:.1} scan_s={:.2} links_rebuild_s={:.2} \
+         fts_s={:.2} db_mb={:.2} nodes={} edges={} total_nodes={} total_edges={}",
+        all_elapsed.as_secs_f64() * 1000.0,
+        filtered_elapsed.as_secs_f64() * 1000.0,
+        focused_elapsed.as_secs_f64() * 1000.0,
+        orphans_elapsed.as_secs_f64() * 1000.0,
+        scan_elapsed.as_secs_f64(),
+        link_elapsed.as_secs_f64(),
+        index_elapsed.as_secs_f64(),
+        db_bytes as f64 / 1024.0 / 1024.0,
+        all.nodes.len(),
+        all.edges.len(),
+        all.total_nodes,
+        all.total_edges
+    );
+
+    // 基准同时充当回归护栏：全量查询必须在 1.5s 内返回（M3 验收口径，可用 BENCH_MAX_GRAPH_MS 覆盖）
+    let all_ms = all_elapsed.as_secs_f64() * 1000.0;
     assert!(
-        all_elapsed.as_millis() < 1500,
-        "graph_get 全量查询超过 1.5s：{:?}",
-        all_elapsed
+        all_ms < max_graph_ms,
+        "graph_get 全量查询 {all_ms:.1} ms 超过红线 {max_graph_ms:.0} ms"
     );
     assert_eq!(all.total_nodes, note_total + 1, "欢迎笔记 + 合成笔记");
 }

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiSettingsPanel } from '@/features/settings/AiSettingsPanel';
 import { aiService } from '@/services/aiService';
-import type { AiPolicy } from '@/types';
+import type { AiDiagnosis, AiPolicy, LocalModelPreset } from '@/types';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -27,8 +27,60 @@ const conservative: AiPolicy = {
   remoteModelScore: false,
   remoteModelAuthorizedAt: null,
   remoteModelKeySet: false,
+  confirmEachOutbound: false,
+  vectorEnabled: false,
+  decisionKeySet: false,
   budget: { maxSubquestions: 5, maxPages: 12, maxDurationSecs: 480 },
   auditMaxEntries: 500,
+};
+
+/** 预设夹具：与后端常量同形（`application/ai/presets.rs`） */
+const PRESETS: LocalModelPreset[] = [
+  {
+    name: 'qwen2.5:3b',
+    label: 'Qwen2.5 3B（轻量）',
+    approxBytes: 1_900_000_000,
+    approxSize: '≈1.9 GB',
+    memoryHint: '内存吃紧时选它',
+    note: '低配机首选；中文写作与摘要够用，长文理解弱于 7B',
+  },
+  {
+    name: 'qwen2.5:7b',
+    label: 'Qwen2.5 7B（均衡）',
+    approxBytes: 4_700_000_000,
+    approxSize: '≈4.7 GB',
+    memoryHint: '内存充裕时更稳',
+    note: '质量更稳；首次加载更慢，磁盘占用更大',
+  },
+];
+
+/** 自检结论夹具：三种"为什么用模板"的典型之一 —— 在线未授权 + 本地连不上 */
+const DIAGNOSIS: AiDiagnosis = {
+  enabled: true,
+  tier: 'template',
+  providerId: 'template.draft',
+  reason: '没有可用的模型（在线未配置或未授权、本地不可用），报告走模板实现，不会外发任何内容。',
+  checks: [
+    {
+      tier: 'online',
+      label: '在线模型（内容会离开本机）',
+      available: false,
+      detail: '已配置但未授权：内容会离开本机，需在「在线模型」里确认一次',
+    },
+    {
+      tier: 'local',
+      label: '本地模型（只连本机）',
+      available: false,
+      detail: '连不上 http://127.0.0.1:11434——Ollama 没在运行？',
+    },
+    {
+      tier: 'template',
+      label: '模板实现（始终可用）',
+      available: true,
+      detail: '不联网、不调用模型；结论段会标注「未接模型」',
+    },
+  ],
+  note: null,
 };
 
 describe('AiSettingsPanel（V1.2.1 D1）', () => {
@@ -36,6 +88,7 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     vi.restoreAllMocks();
     vi.spyOn(aiService, 'policy').mockResolvedValue(conservative);
     vi.spyOn(aiService, 'auditTail').mockResolvedValue([]);
+    vi.spyOn(aiService, 'modelPresets').mockResolvedValue(PRESETS);
   });
 
   it('默认展示最保守口径：总开关关闭、联网仅本地、抓取正文关闭', async () => {
@@ -349,5 +402,208 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     const error = await screen.findByTestId('ai-audit-error');
     expect(error).toHaveTextContent('审计文件不可读');
     expect(screen.queryByText('还没有 AI 行为记录。')).not.toBeInTheDocument();
+  });
+
+  /**
+   * Track C3：低配机型预设。体积与内存提示必须**直接显示**（不靠悬停）——
+   * 这正是 B1 那类问题（原因藏在 tooltip 里等于没给）的同类要求。
+   */
+  it('预设直接显示体积与内存提示，不用悬停', async () => {
+    render(<AiSettingsPanel />);
+
+    const section = await screen.findByTestId('ai-local-presets');
+    expect(section).toHaveTextContent('Qwen2.5 3B（轻量）');
+    expect(section).toHaveTextContent('≈1.9 GB');
+    expect(section).toHaveTextContent('内存吃紧时选它');
+    expect(section).toHaveTextContent('Qwen2.5 7B（均衡）');
+    expect(section).toHaveTextContent('≈4.7 GB');
+  });
+
+  it('点预设会写入设置，并回填到模型名输入框', async () => {
+    const setPolicy = vi.spyOn(aiService, 'setPolicy').mockResolvedValue({
+      ...conservative,
+      localModelName: 'qwen2.5:3b',
+    });
+    render(<AiSettingsPanel />);
+
+    await userEvent.click(await screen.findByTestId('ai-local-preset-qwen2.5:3b'));
+
+    await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ localModelName: 'qwen2.5:3b' }));
+    expect(screen.getByTestId('ai-local-model')).toHaveValue('qwen2.5:3b');
+  });
+
+  /** Track C4：自检要如实说明"为什么是这一档"，未点之前不显示结论。 */
+  it('没点自检时不显示结论', async () => {
+    render(<AiSettingsPanel />);
+    await screen.findByTestId('ai-enabled');
+    expect(screen.queryByTestId('ai-diagnosis')).not.toBeInTheDocument();
+  });
+
+  it('点自检会显示当前档位、原因与逐档核对', async () => {
+    const diagnose = vi.spyOn(aiService, 'diagnose').mockResolvedValue(DIAGNOSIS);
+    render(<AiSettingsPanel />);
+
+    await userEvent.click(await screen.findByTestId('ai-diagnose'));
+
+    await waitFor(() => expect(diagnose).toHaveBeenCalledTimes(1));
+    const panel = await screen.findByTestId('ai-diagnosis');
+    expect(screen.getByTestId('ai-diagnosis-tier')).toHaveTextContent('模板实现');
+    expect(panel).toHaveTextContent('template.draft');
+    expect(screen.getByTestId('ai-diagnosis-reason')).toHaveTextContent('不会外发任何内容');
+    // 逐档核对要把"为什么不生效"说清楚，而不是只给一个档位名
+    expect(panel).toHaveTextContent('未授权');
+    expect(panel).toHaveTextContent('连不上');
+  });
+
+  /** Track C2：逐次外发确认是可选闸门，开关要落到策略里。 */
+  it('开启「每次外发前确认」会写入策略', async () => {
+    const setPolicy = vi
+      .spyOn(aiService, 'setPolicy')
+      .mockResolvedValue({ ...conservative, confirmEachOutbound: true });
+    render(<AiSettingsPanel />);
+
+    await userEvent.click(await screen.findByTestId('ai-confirm-each-outbound'));
+    await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ confirmEachOutbound: true }));
+  });
+
+  /** Track D3：构建向量索引是**一次性外发**——先看"发给谁、发多少"，确认后才提交。 */
+  it('向量检索：构建前先看预览，确认后才真正构建', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      vectorEnabled: true,
+      remoteEmbeddingModel: 'text-embedding-3-small',
+      vectorAuthorizedAt: '2026-10-12T10:00:00+08:00',
+    });
+    vi.spyOn(aiService, 'vectorIndexStatus').mockResolvedValue({
+      available: false,
+      builtChunks: 0,
+      totalChunks: 12,
+      model: null,
+      builtAt: null,
+      note: '尚未构建向量索引',
+    });
+    const preview = vi.spyOn(aiService, 'vectorIndexPreview').mockResolvedValue({
+      willSend: true,
+      host: 'api.example.com',
+      notes: 3,
+      chunksTotal: 12,
+      chunksToEmbed: 12,
+      reason: '本次会把 12 个片段的文本发给嵌入端点',
+    });
+    const build = vi
+      .spyOn(aiService, 'vectorIndexBuild')
+      .mockResolvedValue({ model: 'remote.embeddings:x', totalChunks: 12, embedded: 12, skipped: 0, tookMs: 5 });
+
+    render(<AiSettingsPanel />);
+    await userEvent.click(await screen.findByTestId('ai-vector-build'));
+
+    await waitFor(() => expect(preview).toHaveBeenCalled());
+    const dialog = await screen.findByTestId('ai-vector-confirm');
+    expect(dialog).toHaveTextContent('api.example.com');
+    expect(dialog).toHaveTextContent('3 篇笔记');
+    expect(build, '没确认之前不能开始构建').not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId('ai-vector-ok'));
+    await waitFor(() => expect(build).toHaveBeenCalledWith(true));
+  });
+
+  /** Track D4：决策模型可选配——切到 System One 后能用预设一键填端点与模型。 */
+  it('决策模型：切到 System One 后可用预设填入端点与模型', async () => {
+    const setPolicy = vi
+      .spyOn(aiService, 'setPolicy')
+      .mockResolvedValue({ ...conservative, enabled: true, decisionProvider: 'system_one' });
+    render(<AiSettingsPanel />);
+
+    await userEvent.selectOptions(await screen.findByTestId('ai-decision-provider'), 'system_one');
+    await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ decisionProvider: 'system_one' }));
+
+    await userEvent.click(await screen.findByTestId('ai-decision-preset-perplexity'));
+    await waitFor(() =>
+      expect(setPolicy).toHaveBeenCalledWith({
+        decisionBaseUrl: 'https://api.perplexity.ai',
+        decisionModel: 'pplx-decider-v1.1-27b',
+      }),
+    );
+  });
+
+  /** Track D4：探针报告要显示真实指标（准确率 / 自洽性 / 一致性），并如实标注"不是校准"。 */
+  it('决策模型：运行探针后展示实测指标', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      decisionProvider: 'system_one',
+      decisionBaseUrl: 'https://api.perplexity.ai',
+      decisionModel: 'pplx-decider-v1.1-27b',
+      decisionAuthorizedAt: '2026-10-13T10:00:00+08:00',
+    });
+    vi.spyOn(aiService, 'decisionProbe').mockResolvedValue({
+      provider: 'system_one:pplx-decider-v1.1-27b',
+      model: 'pplx-decider-v1.1-27b',
+      host: 'api.perplexity.ai',
+      items: [],
+      accuracy: 1,
+      scoredItems: 8,
+      calibration: {
+        samples: 8,
+        ece: 0.0018,
+        brier: 0.0001,
+        bins: [{ range: '0.9–1.0', count: 8, meanStated: 0.999, actualShare: 1 }],
+      },
+      calibrationDeterminable: {
+        samples: 6,
+        ece: 0.0012,
+        brier: 0.0001,
+        bins: [],
+      },
+      calibrationUnderdetermined: {
+        samples: 2,
+        ece: 0.21,
+        brier: 0.24,
+        bins: [],
+      },
+      meanStatedUnderdetermined: 0.51,
+      outOfSampleEce: 0.1071,
+      coherence: 1.006,
+      deterministic: true,
+      conflictPairYes: 0.9999,
+      nonConflictPairYes: 0.153,
+      calls: 2,
+      inputTokens: 2326,
+      latencyMs: 5200,
+      estimatedUsd: 0.0000465,
+      note: '这是小样本冒烟，不是校准测量',
+      ab: {
+        cases: 16,
+        rule: {
+          provider: 'rule',
+          accuracy: 0.4375,
+          meanRelevant: 0.36,
+          meanIrrelevant: 0.48,
+          separation: -0.12,
+          correct: 7,
+          total: 16,
+        },
+        decision: {
+          provider: 'system_one',
+          accuracy: 0.875,
+          meanRelevant: 0.886,
+          meanIrrelevant: 0.303,
+          separation: 0.583,
+          correct: 14,
+          total: 16,
+        },
+        decisionBetter: true,
+        note: '决策档更好',
+      },
+    });
+
+    render(<AiSettingsPanel />);
+    await userEvent.click(await screen.findByTestId('ai-decision-probe'));
+
+    const report = await screen.findByTestId('ai-decision-probe-report');
+    expect(report).toHaveTextContent('100%');
+    expect(report).toHaveTextContent('1.006');
+    expect(report).toHaveTextContent('不是校准');
   });
 });

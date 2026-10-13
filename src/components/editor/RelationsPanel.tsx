@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input, Label } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { ROUTES } from '@/lib/constants';
 import { errorMessage } from '@/lib/format';
 import { RELATION_TONE_CLASS, RELATION_TYPES, RELATION_TYPE_LABELS, relationBadge } from '@/lib/relations';
@@ -73,7 +74,7 @@ export function RelationsPanel({ noteId, refreshKey = 0, onChanged }: RelationsP
       toast.success('已删除关系');
       onChanged?.();
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('删除关系失败', errorMessage(error));
     }
   };
 
@@ -263,7 +264,7 @@ function AddRelationDialog({
       toast.success('已添加关系');
       onAdded();
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('添加关系失败', errorMessage(error));
     } finally {
       setBusy(false);
     }

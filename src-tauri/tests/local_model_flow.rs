@@ -189,8 +189,8 @@ fn local_model_scores_sources_and_writes_the_report_when_enabled() {
         );
     }
 
-    let verified = research.verify(&session.id).expect("验证");
-    let composed = research.compose(&session.id).expect("汇总");
+    let verified = research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
     let report = composed.report.as_ref().expect("报告");
     assert_eq!(report.decision_provider, "local.ollama", "报告要写明打分来源");
     assert_eq!(report.composer, "local.ollama:stub:latest", "报告要写明生成来源");
@@ -230,8 +230,8 @@ fn unreachable_local_model_falls_back_without_breaking_the_flow() {
         .iter()
         .all(|source| source.credibility > 0.0));
 
-    research.verify(&session.id).expect("验证");
-    let composed = research.compose(&session.id).expect("汇总不应失败");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总不应失败");
     let report = composed.report.as_ref().expect("报告");
     assert_eq!(report.composer, "template.draft", "生成失败要退回模板实现");
     assert!(
@@ -257,8 +257,8 @@ fn local_model_is_never_called_when_not_configured() {
     let session = research.start(request("Rust 异步调度")).expect("立项");
     let collected = research.collect(&session.id, false).expect("收集");
     assert_eq!(collected.decision_provider.as_deref(), Some("rule"));
-    research.verify(&session.id).expect("验证");
-    research.compose(&session.id).expect("汇总");
+    research.verify(&session.id, false).expect("验证");
+    research.compose(&session.id, false).expect("汇总");
     assert_eq!(calls.load(Ordering::SeqCst), 0, "开关关闭时一个请求都不能发");
 
     // 非本机地址会被规范化掉（本地模型只允许本机）
@@ -302,8 +302,8 @@ fn a_stored_remote_endpoint_is_never_used_even_if_it_bypassed_normalization() {
     let research = fixture.research();
     let session = research.start(request("Rust 异步调度")).expect("立项");
     research.collect(&session.id, false).expect("收集");
-    research.verify(&session.id).expect("验证");
-    let composed = research.compose(&session.id).expect("汇总");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
     let report = composed.report.as_ref().expect("报告");
     assert_eq!(report.composer, "template.draft", "远程地址不得被用来生成报告");
     assert!(

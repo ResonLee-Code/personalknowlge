@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { diffLines, diffStats } from '@/lib/diff';
 import { errorMessage, formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -142,7 +143,7 @@ export function HistoryDialog({
       onRestored?.();
       await reload();
     } catch (cause) {
-      toast.error(errorMessage(cause));
+      reportFailure('还原历史版本失败', errorMessage(cause));
     } finally {
       setBusy(false);
     }
@@ -162,7 +163,7 @@ export function HistoryDialog({
       setVersionName('');
       await reload();
     } catch (cause) {
-      toast.error(errorMessage(cause));
+      reportFailure('保存版本失败', errorMessage(cause));
     } finally {
       setBusy(false);
     }
@@ -177,7 +178,7 @@ export function HistoryDialog({
       setNamingValue('');
       toast.success(label.trim() ? '已命名该版本' : '已清除版本名');
     } catch (cause) {
-      toast.error(errorMessage(cause));
+      reportFailure('命名版本失败', errorMessage(cause));
     }
   };
 
@@ -187,7 +188,7 @@ export function HistoryDialog({
       toast.success(`已删除该快照，剩余 ${remaining} 份`);
       await reload();
     } catch (cause) {
-      toast.error(errorMessage(cause));
+      reportFailure('删除快照失败', errorMessage(cause));
     }
   };
 

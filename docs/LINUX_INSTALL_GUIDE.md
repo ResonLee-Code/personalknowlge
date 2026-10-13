@@ -7,7 +7,7 @@ Debian 12+、Fedora 38+、Arch 等，需 WebKitGTK 4.1）。
 
 | 项目 | 现状 |
 | --- | --- |
-| 应用代码 | **V1.2.1 的内容**（与 macOS / Windows 同一份代码；数据库 schema 10） |
+| 应用代码 | **V1.2.1 的内容**（与 macOS / Windows 同一份代码；数据库 schema 13） |
 | Linux 安装包 | ⏳ **尚未产出**：Tauri 不支持从 macOS 交叉编译到 Linux，必须在 Linux 上构建（本仓库已备好脚本与 CI） |
 | macOS 安装包 | ✅ V1.2.0（dmg sha256 79dbc9b0…） |
 | Windows 安装包 | ✅ V1.2.0（交叉编译未签名，待真机验收） |

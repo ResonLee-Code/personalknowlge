@@ -27,6 +27,11 @@ pub struct KbHit {
     pub title: String,
     /// 命中片段（正文摘录）
     pub snippet: String,
+    /// 命中在原文里的精确区间与标题路径（N5；没能定位时为 `None`）。
+    /// 带上它，AI 检索证据（`RetrievedChunk`）才有**真实区间**而不是 0..长度 的占位值。
+    pub char_start: Option<i64>,
+    pub char_end: Option<i64>,
+    pub heading: Option<String>,
 }
 
 pub struct AiTools {
@@ -59,6 +64,13 @@ impl AiTools {
             .hits
             .into_iter()
             .map(|hit| KbHit {
+                char_start: hit.location.as_ref().map(|location| location.char_start),
+                char_end: hit.location.as_ref().map(|location| location.char_end),
+                heading: hit
+                    .location
+                    .as_ref()
+                    .map(|location| location.heading.clone())
+                    .filter(|heading| !heading.is_empty()),
                 note_id: hit.note.id,
                 title: hit.note.title,
                 snippet: hit
@@ -90,7 +102,7 @@ impl AiTools {
         policy.ensure_network_allowed("web_fetch", url, confirmed)?;
         policy.ensure_fetch_body_allowed("web_fetch")?;
 
-        let result = clip_service::clip(url);
+        let result = clip_service::clip_with_proxy(url, policy.outbound_proxy().as_deref());
         match &result {
             Ok(_) => policy.audit(
                 "web_fetch",
@@ -136,7 +148,12 @@ impl AiTools {
                 "还没有配置联网检索源：请在「设置 → AI → 检索源地址」填入一个返回 JSON 的检索地址（含 {query} 占位符）。应用不预置任何第三方检索服务。",
             ));
         };
-        let result = super::web_search::search(&endpoint, keyword, limit);
+        let result = super::web_search::search_with_proxy(
+            &endpoint,
+            keyword,
+            limit,
+            service.outbound_proxy().as_deref(),
+        );
         match &result {
             Ok(_) => service.audit(
                 "web_search",

@@ -283,8 +283,8 @@ fn report_references_stay_clickable_for_web_sources() {
         .expect("立项");
     let research = fixture.research();
     research.collect(&session.id, true).expect("收集（含联网）");
-    research.verify(&session.id).expect("验证");
-    let composed = research.compose(&session.id).expect("汇总");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
     let report = composed.report.as_ref().expect("报告");
 
     assert!(!report.markdown.contains("note://"), "不得出现点不开的 note:// 定位");
@@ -357,8 +357,8 @@ fn unusable_grade_e_sources_never_reach_the_conclusion_sections() {
         })
         .expect("立项");
     research.collect(&session.id, true).expect("收集（含联网）");
-    let verified = research.verify(&session.id).expect("验证");
-    let composed = research.compose(&session.id).expect("汇总");
+    let verified = research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
     let report = composed.report.as_ref().expect("报告");
 
     let unusable: Vec<usize> = verified
@@ -497,8 +497,8 @@ fn blacklisted_search_results_are_dropped_and_recorded_in_the_report() {
     assert_eq!(collected.dropped_sources[0].reason, "denylist");
     assert_eq!(collected.dropped_sources[0].host, "twitter.com");
 
-    research.verify(&session.id).expect("验证");
-    let composed = research.compose(&session.id).expect("汇总");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
     let report = composed.report.as_ref().expect("报告");
     let warning = report
         .warnings

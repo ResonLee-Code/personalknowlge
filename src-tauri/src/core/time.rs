@@ -11,6 +11,14 @@ pub fn now_iso() -> String {
     Local::now().to_rfc3339_opts(SecondsFormat::Secs, false)
 }
 
+/// 当前时间往后 `secs` 秒的 ISO 8601 字符串（用于缓存过期时间）。
+///
+/// 与 `now_iso()` 同一格式（同一时区偏移、同精度），因此可以直接用**字符串比较**
+/// 判断有没有过期——省掉一次解析。
+pub fn iso_after_secs(secs: i64) -> String {
+    (Local::now() + chrono::Duration::seconds(secs)).to_rfc3339_opts(SecondsFormat::Secs, false)
+}
+
 /// 当前时间的 ISO 8601 字符串（UTC）。
 pub fn now_utc_iso() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)

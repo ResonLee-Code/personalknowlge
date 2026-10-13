@@ -10,13 +10,14 @@
 //!   ——按 §9.6，真正做决策的是 Jev（类型化 + 校准置信度），本文件里的 `decide` 只是
 //!   与规则档 A/B 用的同构实现，界面上必须如实标注「未校准」。
 
+use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
 use crate::core::error::{AppError, ErrorCode, Result};
 
 use super::traits::{
-    DecisionChoice, DecisionKind, DecisionModel, DecisionResult, DecisionState, GenerationRequest,
-    GenerationResponse, GenerativeModel,
+    ConflictVerdict, DecisionCandidate, DecisionChoice, DecisionKind, DecisionModel, DecisionResult,
+    DecisionState, GenerationRequest, GenerationResponse, GenerativeModel,
 };
 
 /// 单次调用超时（本地模型首 token 可能较慢，这里给足）。
@@ -40,14 +41,19 @@ impl OllamaModel {
     }
 
     pub fn id(&self) -> String {
-        format!("local.ollama:{}", self.model)
+        Self::provider_id(&self.model)
+    }
+
+    /// provider 标识（含模型名）。自检等场景可在不构造实例时直接用它，
+    /// 保证「自检说的」与「报告 composer 写的」是同一个字符串。
+    pub fn provider_id(model: &str) -> String {
+        format!("local.ollama:{}", model.trim())
     }
 
     /// 一次非流式生成（`POST /api/generate`，`stream: false`）。
     fn generate(&self, prompt: &str, expect_json: bool) -> Result<String> {
-        let agent = ureq::Agent::new_with_config(
-            ureq::Agent::config_builder().timeout_global(Some(TIMEOUT)).build(),
-        );
+        // 本机地址：`agent_for` 会识别出 loopback 并**不走任何代理**
+        let agent = crate::core::net::agent_for(&self.endpoint, TIMEOUT, None);
         let mut body = serde_json::json!({
             "model": self.model,
             "prompt": prompt,
@@ -100,13 +106,96 @@ impl GenerativeModel for OllamaModel {
     }
 
     fn supports_streaming(&self) -> bool {
-        false
+        // Track C1：`/api/generate` 的 `stream: true`（NDJSON）已实现
+        true
     }
 
     fn complete(&self, request: &GenerationRequest) -> Result<GenerationResponse> {
         let started = std::time::Instant::now();
         let prompt = build_generation_prompt(request);
         let text = self.generate(&prompt, false)?;
+        Ok(GenerationResponse {
+            text,
+            model: self.id(),
+            duration_ms: started.elapsed().as_millis() as u64,
+            usage: None,
+        })
+    }
+
+    /// 流式生成（Track C1）：`stream: true` 的 NDJSON，逐行取 `response` 增量。
+    ///
+    /// 中途出错**不返回半截内容**：返回 `Err`，由上层清掉预览并降级到下一档。
+    fn complete_streaming(
+        &self,
+        request: &GenerationRequest,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<GenerationResponse> {
+        let started = std::time::Instant::now();
+        let prompt = build_generation_prompt(request);
+        let agent = crate::core::net::agent_for(&self.endpoint, TIMEOUT, None);
+        let body = serde_json::json!({
+            "model": self.model,
+            "prompt": prompt,
+            "stream": true,
+        });
+        let response = agent
+            .post(format!("{}/api/generate", self.endpoint))
+            .header("Content-Type", "application/json")
+            .send(body.to_string())
+            .map_err(|error| {
+                AppError::new(
+                    ErrorCode::InvalidInput,
+                    format!(
+                        "本地模型调用失败：{error}（检查 Ollama 是否在运行、模型 `{}` 是否已 pull）",
+                        self.model
+                    ),
+                )
+            })?;
+        let status = response.status().as_u16();
+        if status >= 400 {
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                format!("本地模型返回 HTTP {status}（模型 `{}`）", self.model),
+            ));
+        }
+
+        let mut reader = BufReader::new(response.into_body().into_reader());
+        let mut accumulated = String::new();
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let read = reader.read_line(&mut line).map_err(|error| {
+                AppError::new(ErrorCode::InvalidInput, format!("读取模型流式输出失败：{error}"))
+            })?;
+            if read == 0 {
+                break;
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+                // 单行坏数据不毁整段：跳过（最终产物仍按严格口径校验）
+                continue;
+            };
+            if let Some(delta) = value.get("response").and_then(|entry| entry.as_str()) {
+                if !delta.is_empty() {
+                    accumulated.push_str(delta);
+                    on_delta(delta);
+                }
+            }
+            if value.get("done").and_then(|done| done.as_bool()).unwrap_or(false) {
+                break;
+            }
+            if accumulated.chars().count() >= MAX_OUTPUT_CHARS {
+                break;
+            }
+        }
+
+        let text = crate::core::text::truncate_chars(accumulated.trim(), MAX_OUTPUT_CHARS);
+        if text.is_empty() {
+            return Err(AppError::new(ErrorCode::InvalidInput, "本地模型返回了空内容。"));
+        }
         Ok(GenerationResponse {
             text,
             model: self.id(),
@@ -132,6 +221,21 @@ impl DecisionModel for OllamaModel {
         let prompt = build_decision_prompt(kind, state);
         let raw = self.generate(&prompt, true)?;
         parse_decision_output(&raw, kind, state)
+    }
+
+    /// 语义冲突判定（Track C5）：本地模型直接回答"是否互相矛盾"。
+    fn judge_conflict(
+        &self,
+        query: &str,
+        candidates: &[DecisionCandidate],
+    ) -> Result<Option<ConflictVerdict>> {
+        if candidates.len() < 2 {
+            // 一条材料谈不上"互相矛盾"：交给调用方的规则档（它同样要求 ≥2 条）
+            return Ok(None);
+        }
+        let prompt = build_conflict_prompt(query, candidates);
+        let raw = self.generate(&prompt, true)?;
+        Ok(Some(parse_conflict_output(&raw)?))
     }
 }
 
@@ -191,6 +295,52 @@ pub(crate) fn build_decision_prompt(kind: DecisionKind, state: &DecisionState) -
          score 表示「这条候选对回答该问题的价值」，越高越有用。",
     );
     prompt
+}
+
+/// 冲突判定提示词（Track C5）：让模型直接回答"这些材料是否互相矛盾"。
+///
+/// 与打分提示词分开是刻意的：打分问的是"这条材料对回答问题有多大价值"，
+/// 冲突问的是"这些材料之间是否**结论对立**"——用打分阈值去推断冲突是错的。
+pub(crate) fn build_conflict_prompt(query: &str, candidates: &[DecisionCandidate]) -> String {
+    let mut prompt = format!(
+        "你在判断一组材料之间是否**互相矛盾**（针对同一问题给出对立结论）。\n问题：{query}\n\n材料：\n"
+    );
+    for candidate in candidates {
+        prompt.push_str(&format!(
+            "- id={} title={} 片段={}\n",
+            candidate.note_id,
+            candidate.title,
+            crate::core::text::truncate_chars(&candidate.snippet, 200)
+        ));
+    }
+    prompt.push_str(
+        "\n只输出 JSON，不要解释：{\"conflict\":true|false,\"reason\":\"一句话\"}\n\
+         只有材料之间**结论对立**才算冲突；只是侧重不同、详略不同、时间不同，都不算。",
+    );
+    prompt
+}
+
+/// 解析冲突判定输出（严格校验：`conflict` 必须是布尔值，否则一律失败回退规则档）。
+pub fn parse_conflict_output(raw: &str) -> Result<ConflictVerdict> {
+    let value: serde_json::Value = serde_json::from_str(raw.trim()).map_err(|error| {
+        AppError::new(
+            ErrorCode::InvalidInput,
+            format!("模型冲突判定输出不是合法 JSON：{error}"),
+        )
+    })?;
+    let conflict = value
+        .get("conflict")
+        .and_then(|entry| entry.as_bool())
+        .ok_or_else(|| {
+            AppError::new(ErrorCode::InvalidInput, "模型冲突判定输出缺少 conflict 布尔字段。")
+        })?;
+    let reason = value
+        .get("reason")
+        .and_then(|entry| entry.as_str())
+        .unwrap_or("模型未给出理由")
+        .trim()
+        .to_string();
+    Ok(ConflictVerdict { conflict, reason })
 }
 
 /// 解析决策输出（严格校验：id 必须是候选之一，score 必须是 0–1 的数字）。
@@ -286,7 +436,8 @@ mod tests {
         assert_eq!(<OllamaModel as DecisionModel>::id(&model), "local.ollama");
         assert!(<OllamaModel as GenerativeModel>::is_local(&model));
         assert!(<OllamaModel as DecisionModel>::is_local(&model));
-        assert!(!<OllamaModel as GenerativeModel>::supports_streaming(&model));
+        // Track C1：本地模型现在支持流式
+        assert!(<OllamaModel as GenerativeModel>::supports_streaming(&model));
     }
 
     #[test]

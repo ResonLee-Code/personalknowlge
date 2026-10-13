@@ -22,7 +22,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
-import { reportAction } from '@/lib/actionFeedback';
+import { reportAction, reportFailure } from '@/lib/actionFeedback';
 import { CopyNoteDialog } from '@/components/notes/CopyNoteDialog';
 import { CreateChildNoteDialog } from '@/components/notes/CreateChildNoteDialog';
 import { DeleteNoteDialog } from '@/components/notes/DeleteNoteDialog';
@@ -277,7 +277,7 @@ export function NoteListItem({
     }
     void remove(note.id).then((ok) => {
       if (!ok) {
-        toast.error(notesError() ?? '移入回收站失败');
+        reportFailure('移入回收站失败', notesError());
         return;
       }
       // 对标语雀：删除后可随即撤销（回收站是软删除，恢复即撤销）

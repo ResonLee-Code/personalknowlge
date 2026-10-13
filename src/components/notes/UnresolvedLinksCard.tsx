@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 
 import { Skeleton } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { reportFailure } from '@/lib/actionFeedback';
 import { ROUTES } from '@/lib/constants';
 import { errorMessage } from '@/lib/format';
 import { linkService } from '@/services/linkService';
@@ -45,7 +46,7 @@ export function UnresolvedLinksCard({ limit = 5 }: { limit?: number }) {
       toast.success(`已创建「${created.note.title}」并建立链接`);
       await loadRef.current();
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('创建关联笔记失败', errorMessage(error));
     } finally {
       setCreating(null);
     }

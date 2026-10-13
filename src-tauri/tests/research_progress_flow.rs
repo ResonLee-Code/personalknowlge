@@ -98,8 +98,8 @@ fn every_research_step_emits_metadata_only_progress_events() {
         })
         .expect("立项");
     research.collect(&session.id, false).expect("收集");
-    research.verify(&session.id).expect("验证");
-    research.compose(&session.id).expect("汇总");
+    research.verify(&session.id, false).expect("验证");
+    research.compose(&session.id, false).expect("汇总");
     research.proposal(&session.id).expect("提案");
     research
         .abort(&session.id, Some("测试中止".to_string()))

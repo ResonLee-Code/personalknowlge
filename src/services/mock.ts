@@ -31,6 +31,8 @@ import type {
   OutgoingLink,
   ResearchClaim,
   ResearchDuplicateNote,
+  ResearchEvidenceAssessment,
+  ResearchEvidenceGap,
   ResearchKbRelation,
   ResearchProposal,
   ResearchReport,
@@ -47,6 +49,7 @@ import type {
   ResearchWriteResult,
   SaveNoteInput,
   ReorderNotesInput,
+  SearchMatch,
   SearchQuery,
   SetParentInput,
   SetSourceInput,
@@ -193,6 +196,16 @@ const defaultAiPolicy: AiPolicy = {
   remoteModelScore: false,
   remoteModelAuthorizedAt: null,
   remoteModelKeySet: false,
+  confirmEachOutbound: false,
+  vectorEnabled: false,
+  remoteEmbeddingModel: null,
+  vectorAuthorizedAt: null,
+  decisionProvider: 'rule',
+  decisionBaseUrl: null,
+  decisionModel: null,
+  decisionAuthorizedAt: null,
+  decisionKeySet: false,
+  outboundProxy: null,
   auditMaxEntries: 500,
 };
 
@@ -675,6 +688,47 @@ function researchSubQuestions(topic: string, max: number): ResearchSubQuestion[]
 }
 
 /** 关键词切分：ASCII 词 + 中文双字（近似后端的 FTS5 双字方案）。 */
+/**
+ * 查询扩展（D5/N9）：与后端 `application/ai/query_expansion.rs` 同一套规则——
+ * 课题原文 → 括号短语 → 连接词切分 → 拉丁词 → 子问题关键词，去重后取前 6 条。
+ */
+function researchExpandQueries(topic: string, subQuestions: ResearchSubQuestion[]): string[] {
+  const queries: string[] = [];
+  const seen = new Set<string>();
+  const key = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[\s「」“”"'‘’()（）]/g, '')
+      .trim();
+  const push = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const normalized = key(trimmed);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    queries.push(trimmed);
+  };
+
+  push(topic);
+  for (const [open, close] of [
+    ['「', '」'],
+    ['“', '”'],
+    ['"', '"'],
+    ['(', ')'],
+  ] as const) {
+    const pattern = new RegExp(`${open}([^${close}]{2,})${close}`, 'g');
+    for (const match of topic.matchAll(pattern)) if (match[1]) push(match[1]);
+  }
+  topic
+    .split(/[与和及或、，,；;：:/|+]/)
+    .map((piece) => piece.trim())
+    .filter((piece) => [...piece].filter((ch) => /[\u4e00-\u9fff]/.test(ch)).length >= 2)
+    .forEach(push);
+  (topic.match(/[A-Za-z][A-Za-z0-9._+-]+/g) ?? []).forEach((word) => push(word));
+  subQuestions.flatMap((question) => question.keywords).forEach(push);
+  return queries.slice(0, 6);
+}
+
 function researchTokens(keyword: string): string[] {
   const tokens: string[] = [];
   (keyword.match(/[A-Za-z0-9_+-]{2,}/g) ?? []).forEach((word) =>
@@ -870,6 +924,118 @@ function researchVerifyClaims(session: ResearchSession): ResearchClaim[] {
 }
 
 /** 汇总阶段：把验证结果拆成报告的六段 + 警告。 */
+/** 与后端 `application/ai/evidence.rs` 同一套门槛（改一处必须改两处）。 */
+const EVIDENCE_MIN_USABLE_SOURCES = 3;
+const EVIDENCE_MIN_INDEPENDENT_SOURCES = 2;
+
+/**
+ * 证据充分性（D5/N9）：材料够不够撑结论。
+ *
+ * 规则与后端逐条对齐：没材料 / 有子问题没覆盖 / 没有 ≥2 个独立来源 /
+ * 可用来源太薄 / 只有 E 级线索 / 全部可能过时。**一处不足就算不足**。
+ */
+function researchAssessEvidence(session: ResearchSession): ResearchEvidenceAssessment {
+  const subQuestions = session.plan?.subQuestions ?? [];
+  const total = subQuestions.length;
+  // E 级（论坛贴 / 社交平台 / AI 生成）只作线索，不参与"够不够"的判定
+  const usable = session.sources.filter((source) => source.level !== 'E');
+  const identity = (source: ResearchSource): string => {
+    if (source.noteId) return `note:${source.noteId}`;
+    if (source.url) {
+      try {
+        return `host:${new URL(source.url).host}`;
+      } catch {
+        // 非法 URL：落到编号兜底，至少不会互相顶替
+      }
+    }
+    return `ref:${source.reference}`;
+  };
+  const independent = new Set(usable.map(identity)).size;
+  const uncovered = subQuestions
+    .filter(
+      (question) =>
+        !session.sources.some(
+          (source) => source.subQuestionId === question.id && source.level !== 'E',
+        ),
+    )
+    .map((question) => question.id);
+
+  const gaps: ResearchEvidenceGap[] = [];
+  if (session.sources.length === 0) {
+    gaps.push({
+      kind: 'noMaterial',
+      message: '本地知识库里没有找到任何与课题相关的材料。',
+      subQuestionIds: subQuestions.map((question) => question.id),
+      references: [],
+    });
+  } else if (usable.length === 0) {
+    gaps.push({
+      kind: 'weakOnly',
+      message: `找到 ${session.sources.length} 条材料，但**全部是 E 级**（论坛贴 / 社交平台 / AI 生成内容）：只能当线索，撑不起结论。`,
+      subQuestionIds: [],
+      references: session.sources.map((source) => source.reference),
+    });
+  } else {
+    if (uncovered.length > 0) {
+      gaps.push({
+        kind: 'partialCoverage',
+        message: `${total} 个子问题里有 ${uncovered.length} 个**一条材料都没有**：这部分不是「查过没有」，而是「没查」。`,
+        subQuestionIds: uncovered,
+        references: [],
+      });
+    }
+    if (independent < EVIDENCE_MIN_INDEPENDENT_SOURCES) {
+      gaps.push({
+        kind: 'noCrossCheck',
+        message: `可用来源只有 ${independent} 个**独立**来源（同一站点/同一篇笔记算一个）：没有 ≥${EVIDENCE_MIN_INDEPENDENT_SOURCES} 个独立来源，任何结论都进不了结论段。`,
+        subQuestionIds: [],
+        references: usable.map((source) => source.reference),
+      });
+    }
+    if (usable.length < EVIDENCE_MIN_USABLE_SOURCES) {
+      gaps.push({
+        kind: 'thinEvidence',
+        message: `可用来源只有 ${usable.length} 条（少于 ${EVIDENCE_MIN_USABLE_SOURCES} 条）：材料太薄，报告里会出现大段空白。`,
+        subQuestionIds: [],
+        references: usable.map((source) => source.reference),
+      });
+    }
+    if (usable.every((source) => source.stale)) {
+      gaps.push({
+        kind: 'staleOnly',
+        message: '可用来源**全部**可能已过时（超出时间窗或 valid_until 已过）：结论不能只靠它们。',
+        subQuestionIds: [],
+        references: usable.map((source) => source.reference),
+      });
+    }
+  }
+
+  const covered = total - uncovered.length;
+  const sufficient = gaps.length === 0;
+  const coverage = total === 0 ? 1 : covered / total;
+  const crossCheck = Math.min(1, independent / EVIDENCE_MIN_INDEPENDENT_SOURCES);
+  const freshness =
+    usable.length === 0 ? 0 : usable.filter((source) => !source.stale).length / usable.length;
+  return {
+    sufficient,
+    score: session.sources.length === 0 ? 0 : 0.5 * coverage + 0.3 * crossCheck + 0.2 * freshness,
+    coveredSubQuestions: covered,
+    totalSubQuestions: total,
+    independentSources: independent,
+    usableSources: usable.length,
+    gaps,
+    verdict: sufficient
+      ? `证据充分：${covered}/${total} 个子问题有材料，${independent} 个独立来源，足以支撑结论段。`
+      : `**证据不足**：${covered}/${total} 个子问题有材料，${independent} 个独立来源 —— 本次**不给结论**，缺口见下。`,
+    recommendation:
+      session.sources.length === 0
+        ? `课题「${session.plan?.topic ?? ''}」在本库里没有材料。可以：① 先在库中记录几篇相关材料再来调研；② 在「设置 → AI」打开联网档位（默认仅本地），让本次调研去外部找。`
+        : sufficient
+          ? ''
+          : '缺口就是上面每条 `gaps`：按子问题补材料、补一条独立来源、或核对时效后重跑收集（`research_collect`）。',
+  };
+}
+
 function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]): ResearchReport {
   const seen: string[] = [];
   const conclusions: ResearchClaim[] = [];
@@ -976,6 +1142,19 @@ function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]):
       references: [],
     });
   }
+
+  // D5/N9 证据充分性：**与后端 application/ai/evidence.rs 同一套规则与阈值**，
+  // 预览端不能比真机宽松——否则"预览里能出结论、真机上不出"，用户会以为应用坏了。
+  const evidence = researchAssessEvidence(session);
+  if (!evidence.sufficient) {
+    warnings.push({
+      kind: 'insufficientEvidence',
+      message: `${evidence.verdict} ${evidence.gaps.map((gap) => gap.message).join(' ')} 本报告不给结论段。${
+        evidence.recommendation ? ` ${evidence.recommendation}` : ''
+      }`.trim(),
+      references: evidence.gaps.flatMap((gap) => gap.references ?? []),
+    });
+  }
   warnings.push({
     kind: 'templateGenerated',
     message:
@@ -986,8 +1165,22 @@ function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]):
   return {
     generatedAt: now(),
     dataCutoff: researchIsoDate(),
+    evidence,
     composer: 'template.draft',
     decisionProvider: 'rule',
+    // Track C5：预览模式没有模型判冲突的通道，如实写规则档
+    conflictProvider: 'rule',
+    // Track D2/N6：预览模式没有真模型，Trace 如实写明"只有规则档、现算"
+    decisionTrace: {
+      kind: 'RELEVANCE',
+      cache: 'miss',
+      provider: 'rule',
+      candidates: session.sources.length,
+      attempts: [
+        { provider: 'rule', ok: true, detail: `返回 ${session.sources.length} 条` },
+      ],
+      tookMs: 0,
+    },
     conclusions,
     keyFacts,
     conflicts,
@@ -1023,6 +1216,18 @@ function researchRenderMarkdown(session: ResearchSession, report: ResearchReport
     `> 会话 \`${session.id}\` · 子问题 ${plan?.subQuestions.length ?? 0} 个 · 来源 ${report.references.length} 条`,
     '',
   );
+  // D5/N9：证据充分性写在最前面（与后端 render_markdown 同一位置、同一口径）
+  if (report.evidence) {
+    const evidence = report.evidence;
+    out.push(
+      `> **证据充分性：${evidence.sufficient ? '充分' : '不足'}** · 覆盖 ${evidence.coveredSubQuestions}/${evidence.totalSubQuestions} 个子问题 · 独立来源 ${evidence.independentSources} 个 · 可用来源 ${evidence.usableSources} 条`,
+    );
+    if (!evidence.sufficient) {
+      evidence.gaps.forEach((gap) => out.push(`> - ⛔ ${gap.message}`));
+      if (evidence.recommendation) out.push(`> - 建议：${evidence.recommendation}`);
+    }
+    out.push('');
+  }
   if (report.warnings.length > 0) {
     out.push('> **⚠️ 警告**');
     report.warnings.forEach((warning) => {
@@ -1034,7 +1239,13 @@ function researchRenderMarkdown(session: ResearchSession, report: ResearchReport
 
   out.push('## 1. 结论先行', '');
   if (report.conclusions.length === 0) {
-    out.push('_本次没有达到「≥2 个独立来源」的结论。_', '');
+    // 与后端同一口径：材料不够时不是"碰巧没有结论"，而是**故意不给**
+    out.push(
+      report.evidence && !report.evidence.sufficient
+        ? '_证据不足，本次**不给结论**（不是「查过没有」）——缺口与建议见报告顶部。_'
+        : '_本次没有达到「≥2 个独立来源」的结论。_',
+      '',
+    );
   } else {
     report.conclusions.forEach((claim, index) => {
       out.push(
@@ -1756,12 +1967,35 @@ function searchNotes(query: SearchQuery) {
       const titleMatched = note.title.toLowerCase().includes(lower);
       const contentHit = content.toLowerCase().includes(lower);
       if (!titleMatched && !contentHit) return null;
+      // N5：预览模式也要能「跳回原文区间」——在正文里按**码点**找关键词
+      // （与后端 `chunk_markdown` 同一口径；这里不细分块，heading 留空）
+      let location: SearchMatch | undefined;
+      if (contentHit) {
+        const chars = Array.from(content);
+        const needle = Array.from(keyword);
+        for (let index = 0; index + needle.length <= chars.length; index += 1) {
+          const same = needle.every(
+            (char, offset) =>
+              (chars[index + offset] ?? '').toLowerCase() === char.toLowerCase(),
+          );
+          if (same) {
+            location = {
+              heading: '',
+              chunkIndex: 0,
+              charStart: index,
+              charEnd: index + needle.length,
+            };
+            break;
+          }
+        }
+      }
       return {
         note: toSummary(note),
         score: titleMatched ? -1 : -0.5,
         titleMatched,
         snippet: contentHit ? buildSnippet(plainText(content), keyword) : [],
         matchedTerms: [keyword],
+        location,
       };
     })
     .filter((hit): hit is NonNullable<typeof hit> => hit !== null)
@@ -2056,6 +2290,11 @@ export async function handleMockInvoke(
     case 'app_ready':
       return true;
     case 'app_log_path':
+      return null;
+    case 'app_log':
+      // 与桌面端同口径：把界面上的失败记进应用日志。预览模式没有日志文件，
+      // 这里只落到控制台（debug 级），**不伪造**「已写入日志文件」。
+      console.debug('[mock app_log]', payload.level ?? 'error', payload.scope, payload.message);
       return null;
     case 'workspace_active_id':
       return state.workspace?.id ?? null;
@@ -2586,6 +2825,47 @@ export async function handleMockInvoke(
       }
       if (typeof input.remoteModelCompose === 'boolean') next.remoteModelCompose = input.remoteModelCompose;
       if (typeof input.remoteModelScore === 'boolean') next.remoteModelScore = input.remoteModelScore;
+      if (typeof input.confirmEachOutbound === 'boolean') {
+        next.confirmEachOutbound = input.confirmEachOutbound;
+      }
+      if (typeof input.vectorEnabled === 'boolean') next.vectorEnabled = input.vectorEnabled;
+      if (input.remoteEmbeddingModel !== undefined) {
+        const model = (input.remoteEmbeddingModel ?? '').trim();
+        const resolved = model.length > 0 ? model : null;
+        // 换嵌入模型 = 换了「谁来算向量」：旧授权作废（与后端 apply_policy 同规则）
+        if (resolved !== next.remoteEmbeddingModel) next.vectorAuthorizedAt = null;
+        next.remoteEmbeddingModel = resolved;
+      }
+      if (input.confirmVector === true && next.remoteModelBaseUrl && next.remoteEmbeddingModel) {
+        next.vectorAuthorizedAt = now();
+      }
+      if (input.decisionProvider !== undefined) {
+        const provider = input.decisionProvider === 'system_one' ? 'system_one' : 'rule';
+        if (provider !== next.decisionProvider) next.decisionAuthorizedAt = null;
+        next.decisionProvider = provider;
+      }
+      if (input.decisionBaseUrl !== undefined) {
+        const value = normalizeRemoteBaseUrl(input.decisionBaseUrl ?? '');
+        if (value !== next.decisionBaseUrl) next.decisionAuthorizedAt = null;
+        next.decisionBaseUrl = value;
+      }
+      if (input.decisionModel !== undefined) {
+        const value = (input.decisionModel ?? '').trim();
+        const resolved = value.length > 0 ? value : null;
+        if (resolved !== next.decisionModel) next.decisionAuthorizedAt = null;
+        next.decisionModel = resolved;
+      }
+      if (input.confirmDecision === true && next.decisionProvider === 'system_one') {
+        next.decisionAuthorizedAt = now();
+      }
+      if (input.decisionApiKey !== undefined) {
+        // 只回显「配没配」；预览模式不落盘 Key
+        next.decisionKeySet = (input.decisionApiKey ?? '').trim().length > 0;
+      }
+      if (input.outboundProxy !== undefined) {
+        const value = (input.outboundProxy ?? '').trim();
+        next.outboundProxy = value.length > 0 ? value : null;
+      }
       if (input.confirmRemoteModel === true && next.remoteModelBaseUrl && next.remoteModelName) {
         next.remoteModelAuthorizedAt = now();
       }
@@ -2607,6 +2887,102 @@ export async function handleMockInvoke(
     case 'ai_audit_tail':
       requireWorkspace();
       return [...state.aiAudit].reverse().slice(0, Math.max(1, Number(payload.limit ?? 20)));
+    case 'ai_model_presets':
+      // 镜像后端常量（`application/ai/presets.rs` 的 `LOCAL_MODEL_PRESETS`）。
+      // 浏览器预览没有真实后端，只能镜像一份；**桌面端这份数据来自后端命令**，
+      // 不是前端硬编码的。改预设时两处必须一起改（见该常量文件顶部说明）。
+      return [
+        {
+          name: 'qwen2.5:3b',
+          label: 'Qwen2.5 3B（轻量）',
+          approxBytes: 1_900_000_000,
+          approxSize: '≈1.9 GB',
+          memoryHint: '内存吃紧时选它',
+          note: '低配机首选；中文写作与摘要够用，长文理解弱于 7B',
+        },
+        {
+          name: 'qwen2.5:7b',
+          label: 'Qwen2.5 7B（均衡）',
+          approxBytes: 4_700_000_000,
+          approxSize: '≈4.7 GB',
+          memoryHint: '内存充裕时更稳',
+          note: '质量更稳；首次加载更慢，磁盘占用更大',
+        },
+      ];
+    case 'ai_diagnose': {
+      // 与后端 `application/ai/diagnose.rs` 同口径地判定"写报告用哪一档"。
+      // 唯一差异：**浏览器预览没有本机 Ollama 可探**，所以本地档一律如实标为不可用，
+      // 不假装"已就绪"（桌面端会真的发一次 `GET /api/tags`）。
+      requireWorkspace();
+      const ai = state.ai;
+      const enabled = ai.enabled;
+      const remoteBaseName =
+        ai.remoteModelBaseUrl && ai.remoteModelName
+          ? [ai.remoteModelBaseUrl, ai.remoteModelName]
+          : null;
+      const remoteOk = Boolean(
+        enabled &&
+          ai.remoteModelCompose &&
+          remoteBaseName &&
+          ai.remoteModelKeySet &&
+          ai.remoteModelAuthorizedAt,
+      );
+      const remoteDetail = !enabled
+        ? 'AI 总开关关闭，不会调用'
+        : !ai.remoteModelCompose
+          ? '未开启「用在线模型写报告」'
+          : !remoteBaseName
+            ? '未配置基地址或模型名'
+            : !ai.remoteModelKeySet
+              ? '缺 API Key（只写不读，请到「在线模型」重新填写）'
+              : !ai.remoteModelAuthorizedAt
+                ? '已配置但未授权：内容会离开本机，需在「在线模型」里确认一次'
+                : '已配置、已授权，可用于写报告（内容会离开本机）';
+      const localConfigured = Boolean(ai.localModelEndpoint && ai.localModelName);
+      const localDetail = !enabled
+        ? 'AI 总开关关闭，不会调用'
+        : !ai.localModelCompose
+          ? '未开启「用本地模型写报告」'
+          : !localConfigured
+            ? '未配置地址或模型名（地址只接受本机）'
+            : '浏览器预览模式无法探测本机模型（桌面端会真的连一次本机地址）';
+      const localOk: boolean = false;
+      const tier = !enabled ? 'template' : remoteOk ? 'online' : 'template';
+      const providerId =
+        remoteOk && remoteBaseName
+          ? `remote.openai-compatible:${remoteBaseName[1]}`
+          : 'template.draft';
+      const reason = !enabled
+        ? 'AI 总开关关闭：所有 AI 功能停用，不调用任何模型，报告走模板实现。'
+        : remoteOk && remoteBaseName
+          ? `在线模型已配置并授权（写报告开关已开），报告由在线模型撰写；目标主机由 ${remoteBaseName[0]} 决定。`
+          : '没有可用的模型（在线未配置或未授权、本地不可用），报告走模板实现，不会外发任何内容。';
+      return {
+        enabled,
+        tier,
+        providerId,
+        reason,
+        checks: [
+          {
+            tier: 'online',
+            label: '在线模型（内容会离开本机）',
+            available: remoteOk,
+            detail: remoteDetail,
+          },
+          { tier: 'local', label: '本地模型（只连本机）', available: localOk, detail: localDetail },
+          {
+            tier: 'template',
+            label: '模板实现（始终可用）',
+            available: true,
+            detail: '不联网、不调用模型；结论段会标注「未接模型」',
+          },
+        ],
+        note:
+          ai.localModelScore || ai.remoteModelScore
+            ? '以上是「写报告」的档位；「打分」另有开关，自检只回答写报告用哪一档。'
+            : null,
+      };
+    }
     case 'ai_kb_search': {
       requireWorkspace();
       const keyword = String(payload.keyword ?? '').trim();
@@ -2619,6 +2995,72 @@ export async function handleMockInvoke(
         snippet: (item.snippet ?? []).map((segment) => segment.text).join(''),
       }));
     }
+    case 'ai_retrieval_search': {
+      // D3/N7：多通道检索 + 融合。预览模式只有 bm25 一个通道（与桌面端一致，
+      // 向量档要装/授权之后才有）——**通道状态如实写出来**，别假装有两个通道。
+      requireWorkspace();
+      const keyword = String(payload.keyword ?? '').trim();
+      if (!keyword) fail('INVALID_INPUT', '检索关键词不能为空。');
+      const limit = Math.max(1, Math.min(50, Number(payload.limit ?? 8)));
+      const result = listNotes({ keyword, pageSize: limit });
+      const hits = result.items.map((item) => ({
+        noteId: item.id,
+        chunkIndex: 0,
+        heading: '',
+        snippet: (item.snippet ?? []).map((segment) => segment.text).join(''),
+        charStart: 0,
+        charEnd: 0,
+        // 单通道时的 RRF 就是 1/(k+rank)
+        score: 0,
+        providers: ['bm25'],
+      }));
+      hits.forEach((hit, index) => {
+        hit.score = 1 / (60 + index + 1);
+      });
+      return {
+        channels: [
+          { id: 'bm25', available: true, note: `召回 ${hits.length} 条` },
+          {
+            id: 'vector',
+            available: false,
+            note: '未构建向量索引（构建后这一档才会参与；不影响关键词检索）',
+          },
+        ],
+        hits,
+      };
+    }
+    case 'ai_decision_probe':
+      // D4：预览模式不联网，如实说明——**不伪造**指标
+      requireWorkspace();
+      return fail('AI_DISABLED', '浏览器预览模式不会真的调用决策模型（桌面端才会发探针请求）。');
+    case 'ai_vector_index_status': {
+      // D3：预览模式没有本地向量库——如实说明，别假装"已构建"
+      requireWorkspace();
+      return {
+        available: false,
+        builtChunks: 0,
+        totalChunks: 0,
+        model: null,
+        builtAt: null,
+        note: '浏览器预览模式不支持向量索引（桌面端才会真的构建）',
+      };
+    }
+    case 'ai_vector_index_preview':
+      requireWorkspace();
+      return {
+        willSend: false,
+        host: null,
+        notes: 0,
+        chunksTotal: 0,
+        chunksToEmbed: 0,
+        reason: '浏览器预览模式不会真的外发（桌面端会先显示「将要发送的片段 + 目标主机」）。',
+      };
+    case 'ai_vector_index_build':
+      requireWorkspace();
+      return fail('INVALID_INPUT', '浏览器预览模式不支持构建向量索引（桌面端才可用）。');
+    case 'ai_vector_index_clear':
+      requireWorkspace();
+      return 0;
     case 'ai_web_fetch': {
       requireWorkspace();
       const gate = checkAiNetworkGate(String(payload.url ?? ''), Boolean(payload.confirmed));
@@ -2658,6 +3100,7 @@ export async function handleMockInvoke(
       );
       const maxSub = Math.min(10, Math.max(1, Math.round(state.ai.budget.maxSubquestions)));
       const subQuestions = researchSubQuestions(topic, maxSub);
+      const queries = researchExpandQueries(topic, subQuestions);
       const localBaseline = researchLocalHits(topic, 3).map((note) => ({
         noteId: note.id,
         title: note.title,
@@ -2666,7 +3109,10 @@ export async function handleMockInvoke(
       const planNotes = [
         '本次只用本地知识库材料（外部检索属于阶段 D3，接入前不会发起任何请求）。',
         `子问题 ${subQuestions.length} 个 · 时间窗 ${timeWindowDays} 天 · 抓取页上限 ${state.ai.budget.maxPages}（外部检索启用后生效）。`,
-        '子问题与关键词由模板生成；语义化的查询改写要等模型接入（N5/D4）。',
+        `检索查询 ${queries.length} 条（课题原文 + 规则扩展）：${queries
+          .map((query) => `\`${query}\``)
+          .join('、')}。扩展只做「括号短语 / 连接词切分 / 拉丁词」，不发明新词。`,
+        '子问题由模板生成；语义化的查询改写要等模型接入（N5/D4）。',
         '来源按 §9.3 规则分级：域名内置表 → 内容自证（标题/作者/日期）→ 兜底「弱」。',
       ];
       if (localBaseline.length === 0) {
@@ -2689,6 +3135,7 @@ export async function handleMockInvoke(
           topic,
           scope: input.scope ?? null,
           subQuestions,
+          queries,
           localBaseline,
           timeWindowDays,
           budget: { ...state.ai.budget },
@@ -2731,7 +3178,15 @@ export async function handleMockInvoke(
       researchRequireStatus(session, ['planned'], '收集材料');
       const plan = session.plan;
       if (!plan) fail('INVALID_INPUT', '会话缺少研究计划。');
-      const candidates = researchLocalHits(plan.topic, RESEARCH_MAX_SOURCES * 2);
+      // D5/N9：按扩展出来的一组查询逐条检索再合并（第一条是课题原文），与后端同一顺序
+      const queries = plan.queries && plan.queries.length > 0 ? plan.queries : [plan.topic];
+      const candidates: Note[] = [];
+      for (const query of queries) {
+        for (const note of researchLocalHits(query, RESEARCH_MAX_SOURCES * 2)) {
+          if (!candidates.some((existing) => existing.id === note.id)) candidates.push(note);
+        }
+        if (candidates.length >= RESEARCH_MAX_SOURCES * 2) break;
+      }
       const sources: ResearchSource[] = [];
       const perQuestion = plan.subQuestions.map(() => 0);
       const seen: string[] = [];
@@ -2872,9 +3327,49 @@ export async function handleMockInvoke(
       report.generatedAt = now();
       report.markdown = researchRenderMarkdown(session, report);
       session.status = 'composed';
+      // Track C1：与后端同口径推「推测段」增量（预览用）。浏览器预览是同步执行，
+      // 界面最终会直接看到完整文本；桌面端才是真正的逐块到达（SSE / NDJSON）。
+      const previewProvider = 'template.draft';
+      const previewText = report.speculation.join('\n');
+      emit('ai://research-compose-delta', {
+        sessionId: session.id,
+        providerId: previewProvider,
+        text: '',
+        state: 'streaming',
+      });
+      let previewAcc = '';
+      for (const chunk of previewText.match(/[\s\S]{1,40}/g) ?? []) {
+        previewAcc += chunk;
+        emit('ai://research-compose-delta', {
+          sessionId: session.id,
+          providerId: previewProvider,
+          text: previewAcc,
+          state: 'streaming',
+        });
+      }
+      emit('ai://research-compose-delta', {
+        sessionId: session.id,
+        providerId: previewProvider,
+        text: previewText,
+        state: 'done',
+      });
       researchStep(session, 'compose', '已生成报告（模板实现，未接模型）：template.draft');
       auditResearch('research_compose', 'ok', 'template.draft');
       return researchSave(session);
+    }
+    case 'research_outbound_preview': {
+      // Track C2 的「将要发送什么、发给谁」预览。预览模式**没有真的外发通道**，
+      // 所以一律如实回答"不会发"，绝不假装会把内容交给在线模型。
+      requireWorkspace();
+      const ai = state.ai;
+      const blocked = (reason: string) => ({ willSend: false, host: null, snippets: [], reason });
+      if (!ai.enabled) return blocked('AI 总开关关闭：不会外发任何内容。');
+      if (!ai.remoteModelCompose && !ai.remoteModelScore) {
+        return blocked('未开启在线模型：内容不会离开本机。');
+      }
+      return blocked(
+        '浏览器预览模式不会真的外发（桌面端会先显示「将要发送的片段 + 目标主机」再让你确认）。',
+      );
     }
     case 'research_proposal': {
       requireWorkspace();

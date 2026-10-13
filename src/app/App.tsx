@@ -18,6 +18,7 @@ import { SettingsPage } from '@/features/settings/SettingsPage';
 import { TagsPage } from '@/features/tags/TagsPage';
 import { WelcomePage } from '@/features/workspace/WelcomePage';
 import { useWorkspaceEvents } from '@/hooks/useWorkspaceEvents';
+import { useWindowBounds } from '@/hooks/useWindowBounds';
 import { useUiStore } from '@/stores/uiStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
@@ -77,6 +78,9 @@ function BootstrappedApp() {
 }
 
 export function App() {
+  // 窗口尺寸/位置记忆（Track B4）必须挂在**根组件**：挂在 AppShell 只会在
+  // 「打开工作区之后」才跑，而用户可能停在欢迎页——真机验证时就是这么漏掉的。
+  useWindowBounds();
   return (
     <TooltipProvider delayDuration={200}>
       <HashRouter>

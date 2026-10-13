@@ -1,4 +1,4 @@
-//! 中文分词基准（默认 1 万笔记）：索引体积、查询延迟与召回代理指标。
+//! 中文检索基准（默认 1 万笔记）：索引体积、查询延迟与召回代理指标。
 //!
 //! 手动执行（约 2–4 分钟）：
 //! ```bash
@@ -6,6 +6,12 @@
 //! ```
 //! 目的：在决定是否引入外部分词/预分词字段之前，先用数据回答三个问题——
 //! 索引体积是否可接受、检索延迟是否可接受、现有「单字 + 双字」策略的召回到不到位。
+//!
+//! **发布前必跑（Track E2）**：一条命令入口是 `pnpm bench`（脚本 `scripts/bench/run.sh`），
+//! 它按 1 万篇规格跑本基准并在**超阈值时以非零码退出**。阈值可用环境变量覆盖：
+//! `BENCH_MAX_P95_MS`（默认 200）、`BENCH_MIN_RECALL_PCT`（默认 100）、
+//! `BENCH_SCAN_TIMEOUT_S`（默认 600）。基准最后会打印一行机器可读的
+//! `PKOS_BENCH search …`，脚本靠它确认「基准真的跑了」，避免空跑变绿灯。
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -33,6 +39,14 @@ fn note_count() -> usize {
         .unwrap_or(10_000)
 }
 
+/// 读一个浮点阈值，读不到就用默认值（发布前守护的口径见文件头）。
+fn env_f64(name: &str, default: f64) -> f64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(default)
+}
+
 fn dir_size(path: &std::path::Path) -> u64 {
     let mut total = 0u64;
     if let Ok(entries) = std::fs::read_dir(path) {
@@ -57,6 +71,9 @@ fn code_of(index: usize) -> String {
 #[ignore = "性能基准，手动执行：BENCH_NOTES=10000 cargo test --offline --test search_bench -- --ignored --nocapture"]
 fn bench_search_with_10k_notes() {
     let total_notes = note_count();
+    let max_p95_ms = env_f64("BENCH_MAX_P95_MS", 200.0);
+    let min_recall_pct = env_f64("BENCH_MIN_RECALL_PCT", 100.0);
+    let scan_timeout_s = env_f64("BENCH_SCAN_TIMEOUT_S", 600.0);
     let data = tempfile::tempdir().expect("应用数据目录");
     let workspace: TempDir = tempfile::tempdir().expect("工作区目录");
     let root = workspace.path().to_path_buf();
@@ -128,7 +145,10 @@ fn bench_search_with_10k_notes() {
         if counted as usize >= total_notes + 1 {
             break;
         }
-        assert!(scan_started.elapsed() < Duration::from_secs(600), "扫描超时：{counted} 篇");
+        assert!(
+            scan_started.elapsed().as_secs_f64() < scan_timeout_s,
+            "扫描超时（{scan_timeout_s} s）：{counted} 篇"
+        );
         std::thread::sleep(Duration::from_millis(200));
     }
     let scan_elapsed = scan_started.elapsed();
@@ -193,8 +213,13 @@ fn bench_search_with_10k_notes() {
 
     let probe_total = probes * 2;
     latencies.sort();
-    let avg = latencies.iter().map(|d| d.as_micros()).sum::<u128>() / latencies.len().max(1) as u128;
+    let avg_ms = latencies.iter().map(|d| d.as_micros()).sum::<u128>() as f64
+        / 1000.0
+        / latencies.len().max(1) as f64;
     let p95 = latencies[((latencies.len() as f64 * 0.95) as usize).min(latencies.len() - 1)];
+    let p95_ms = p95.as_micros() as f64 / 1000.0;
+    let recall_at1_pct = recall_at_1 as f64 * 100.0 / probe_total as f64;
+    let recall_at5_pct = recall_at_5 as f64 * 100.0 / probe_total as f64;
 
     let db_bytes = std::fs::metadata(root.join(".knowledge/database.sqlite"))
         .map(|meta| meta.len())
@@ -216,14 +241,14 @@ fn bench_search_with_10k_notes() {
     println!(".knowledge 目录合计     : {:.1} MB", knowledge_bytes as f64 / 1024.0 / 1024.0);
     println!(
         "检索延迟（含摘要高亮）  : 平均 {:.1} ms / p95 {:.1} ms（{} 次）",
-        avg as f64 / 1000.0,
-        p95.as_micros() as f64 / 1000.0,
+        avg_ms,
+        p95_ms,
         latencies.len()
     );
     println!(
         "独特术语 recall@1 / @5  : {:.1}% / {:.1}%（中文+英文各 {} 次）",
-        recall_at_1 as f64 * 100.0 / probe_total as f64,
-        recall_at_5 as f64 * 100.0 / probe_total as f64,
+        recall_at1_pct,
+        recall_at5_pct,
         probes
     );
     println!(
@@ -241,15 +266,37 @@ fn bench_search_with_10k_notes() {
         cjk_phrase_hits as f64 * 100.0 / probes as f64,
         probes
     );
+    println!("护栏（发布前必跑）      : p95 < {max_p95_ms:.0} ms、recall@5 ≥ {min_recall_pct:.1}%");
     println!("=================================================\n");
 
-    // 护栏：1 万笔记的检索延迟必须仍在交互区间内
-    assert!(
-        p95.as_millis() < 200,
-        "p95 检索延迟过高：{} ms",
-        p95.as_millis()
+    // 机器可读摘要：`scripts/bench/run.sh` 靠这一行确认基准真的跑完（防「空跑变绿灯」）
+    println!(
+        "PKOS_BENCH search notes={total_notes} avg_ms={avg_ms:.2} p95_ms={p95_ms:.2} \
+         recall_at1_pct={recall_at1_pct:.1} recall_at5_pct={recall_at5_pct:.1} \
+         db_mb={:.2} db_kb_per_note={:.1} scan_s={:.2} fts_s={:.2} writes_s={:.2}",
+        db_bytes as f64 / 1024.0 / 1024.0,
+        db_bytes as f64 / 1024.0 / total_notes as f64,
+        scan_elapsed.as_secs_f64(),
+        rebuild_elapsed.as_secs_f64(),
+        write_elapsed.as_secs_f64()
     );
-    // 召回是「测量项」而不是「硬门槛」：这里只提示，避免基准因数据特征中断
+
+    // 护栏：1 万笔记的检索延迟必须仍在交互区间内（红线默认 200 ms，可用 BENCH_MAX_P95_MS 覆盖）
+    assert!(
+        p95_ms < max_p95_ms,
+        "p95 检索延迟过高：{p95_ms:.1} ms（红线 {max_p95_ms:.0} ms）"
+    );
+    // 召回：1 万篇规格下是**硬门槛**（历史上一直是 100%，掉下来就是真回归）。
+    // 小规模（< 1000 篇）时探针索引会互相撞号、可能不是真缺口，故只观察不判失败。
+    if total_notes >= 1_000 && recall_at5_pct + 1e-6 < min_recall_pct {
+        panic!(
+            "recall@5 = {recall_at5_pct:.1}%（{recall_at_5}/{probe_total}），低于门槛 {min_recall_pct:.1}%；\
+             混合中英文写法（术语XXXX）出现召回缺口，详见 CHANGELOG 结论"
+        );
+    }
+    if total_notes < 1_000 {
+        println!("（{total_notes} 篇 < 1000：recall 只作观察，不设门槛）");
+    }
     if recall_at_5 < probe_total {
         println!(
             "⚠️ recall@5 = {}/{}：混合中英文写法（术语XXXX）存在召回缺口，详见 CHANGELOG 结论",

@@ -211,7 +211,8 @@ impl WorkspaceService {
         };
 
         let index_status = match index_service.status() {
-            Ok(status) if status.indexed_notes < status.total_notes => {
+            // 缺笔记索引、或**缺分块索引**（N5：老库升级上来的典型情况）都要重建
+            Ok(status) if status.indexed_notes < status.total_notes || index_service.chunks_missing() => {
                 index_service.rebuild().unwrap_or(status)
             }
             Ok(status) => status,

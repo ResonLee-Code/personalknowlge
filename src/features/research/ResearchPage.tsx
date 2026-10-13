@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
 import { EVENTS, ROUTES } from '@/lib/constants';
+import { logAppFailure } from '@/lib/appLog';
 import { errorMessage, formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { aiService } from '@/services/aiService';
@@ -26,6 +27,8 @@ import type {
   AiPolicy,
   ResearchSession,
   ResearchProgress,
+  ResearchComposeDelta,
+  ResearchOutboundPreview,
   ResearchSessionSummary,
   ResearchReport,
   ResearchSourceLevel,
@@ -107,6 +110,13 @@ export function ResearchPage() {
   const [networkAskOpen, setNetworkAskOpen] = useState(false);
   /** 后端推来的实时进度（§9.2：当前步骤 / 已抓页数 / 已采纳来源数；只含元数据） */
   const [progress, setProgress] = useState<ResearchProgress | null>(null);
+  /** 「推测段」的流式预览（Track C1）：只是预览，报告落定后以报告为准 */
+  const [composePreview, setComposePreview] = useState<ResearchComposeDelta | null>(null);
+  /** 逐次外发确认（Track C2）：将要发送的片段 + 目标主机 */
+  const [outboundPreview, setOutboundPreview] = useState<ResearchOutboundPreview | null>(null);
+  const [outboundAskOpen, setOutboundAskOpen] = useState(false);
+  /** 这次确认对应哪一步（验证 / 汇总） */
+  const [pendingOutboundStep, setPendingOutboundStep] = useState<'verify' | 'compose' | null>(null);
 
   const refreshHistory = useCallback(async () => {
     try {
@@ -147,6 +157,26 @@ export function ResearchPage() {
     void subscribe<ResearchProgress>(EVENTS.researchProgress, (payload) => {
       if (disposed) return;
       setProgress(payload);
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // 订阅「推测段」的流式增量（Track C1）：模型逐块返回时先让用户看到进展。
+  // 事件通道不可用（浏览器预览 / 测试环境）时静默降级，不影响主流程。
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void subscribe<ResearchComposeDelta>(EVENTS.researchComposeDelta, (payload) => {
+      if (disposed) return;
+      setComposePreview(payload);
     })
       .then((fn) => {
         if (disposed) fn();
@@ -247,6 +277,52 @@ export function ResearchPage() {
     setNetworkConfirmed(true);
     if (!session) return;
     void run('research-collect', () => researchService.collect(session.id, true));
+  };
+
+  /**
+   * 可能外发的步骤（验证：冲突判定；汇总：推测段）。
+   *
+   * 开了「逐次外发确认」（Track C2/C5）时，先把**将要发送的片段 + 目标主机**摆出来；
+   * 不确认就不发——后端保证"未确认 = 零请求"。
+   */
+  const startOutboundStep = async (step: 'verify' | 'compose') => {
+    if (!session) return;
+    if (policy?.confirmEachOutbound) {
+      setBusy('research-outbound-preview');
+      try {
+        const preview = await researchService.outboundPreview(session.id);
+        if (preview.willSend) {
+          setOutboundPreview(preview);
+          setPendingOutboundStep(step);
+          setOutboundAskOpen(true);
+          return;
+        }
+      } catch (caught) {
+        // 预览拿不到不阻塞：后端仍会按「未确认」处理（零请求），这里只留痕
+        void logAppFailure('research_outbound_preview', caught, 'warn');
+      } finally {
+        setBusy(null);
+      }
+    }
+    runOutboundStep(step, false);
+  };
+
+  /** 真正提交这一步；`confirmed` 表示"本次已确认可以外发"。 */
+  const runOutboundStep = (step: 'verify' | 'compose', confirmed: boolean) => {
+    if (!session) return;
+    if (step === 'verify') {
+      void run('research-verify', () => researchService.verify(session.id, confirmed));
+      return;
+    }
+    void run('research-compose', () => researchService.compose(session.id, confirmed));
+  };
+
+  const confirmOutboundStep = () => {
+    const step = pendingOutboundStep;
+    setOutboundAskOpen(false);
+    setPendingOutboundStep(null);
+    // 这次显式确认后，后端才允许把片段交给在线模型
+    if (step) runOutboundStep(step, true);
   };
 
   const confirmWrite = async () => {
@@ -448,9 +524,9 @@ export function ResearchPage() {
                       if (nextAction.key === 'research-collect') {
                         startCollect();
                       } else if (nextAction.key === 'research-verify') {
-                        void run('research-verify', () => researchService.verify(session.id));
+                        void startOutboundStep('verify');
                       } else if (nextAction.key === 'research-compose') {
-                        void run('research-compose', () => researchService.compose(session.id));
+                        void startOutboundStep('compose');
                       } else if (nextAction.key === 'research-proposal') {
                         void run('research-proposal', () => researchService.proposal(session.id));
                       } else {
@@ -491,6 +567,30 @@ export function ResearchPage() {
                   {progress.pagesFetched > 0 ? <span>已抓 {progress.pagesFetched} 页</span> : null}
                   {progress.sources > 0 ? <span>来源 {progress.sources} 条</span> : null}
                 </p>
+              ) : null}
+
+              {/*
+                「推测段」流式预览（Track C1）：模型逐块返回时先给用户看到进展；
+                这一档失败时后端会发空串 + failed（**不留下半截内容**），
+                最终仍以命令返回的报告为准。
+              */}
+              {busy === 'research-compose' && composePreview ? (
+                <section
+                  data-testid="research-compose-preview"
+                  className="mt-2 rounded-xl border border-dashed border-[var(--border-subtle)] p-3"
+                >
+                  <p className="flex flex-wrap items-center gap-2 text-xs text-[var(--ink-subtle)]">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>
+                      推测段生成中（{composePreview.providerId}）
+                      {composePreview.state === 'failed' ? '：这一档失败，正在降级…' : ''}
+                      {composePreview.state === 'done' ? '：已完成，正在渲染报告…' : ''}
+                    </span>
+                  </p>
+                  <pre className="mt-2 whitespace-pre-wrap font-sans text-xs text-[var(--ink)]">
+                    {composePreview.text}
+                  </pre>
+                </section>
               ) : null}
 
               {session.plan ? (
@@ -603,7 +703,63 @@ export function ResearchPage() {
                     <span className="text-xs text-[var(--ink-subtle)]">
                       打分 {report.decisionProvider ?? 'rule'}（规则档；Jev 接入后同口径替换）
                     </span>
+                    <span
+                      data-testid="research-conflict-provider"
+                      className="text-xs text-[var(--ink-subtle)]"
+                    >
+                      冲突判定 {report.conflictProvider ?? 'rule'}
+                      {report.conflictProvider && report.conflictProvider !== 'rule'
+                        ? '（模型档）'
+                        : '（规则档）'}
+                    </span>
+                    {report.decisionTrace ? (
+                      <span
+                        data-testid="research-decision-trace"
+                        className="text-xs text-[var(--ink-subtle)]"
+                      >
+                        决策 {report.decisionTrace.provider || '—'} ·{' '}
+                        {report.decisionTrace.cache === 'hit' ? '缓存命中' : '现算'}
+                        {report.decisionTrace.attempts.length > 0
+                          ? ` · 试过 ${report.decisionTrace.attempts
+                              .map((attempt) => `${attempt.provider}${attempt.ok ? '✓' : '✗'}`)
+                              .join(' → ')}`
+                          : ''}
+                      </span>
+                    ) : null}
                   </div>
+
+                  {/*
+                    D5/N9 证据充分性：默认的失败方式不是"答错"，而是**材料不够还硬答**。
+                    所以这里在警告块之前直接把「够不够、差在哪」摆出来。
+                  */}
+                  {report.evidence ? (
+                    <div
+                      data-testid="research-evidence"
+                      className={
+                        report.evidence.sufficient
+                          ? 'mt-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-900 dark:text-emerald-200'
+                          : 'mt-3 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-900 dark:text-red-200'
+                      }
+                    >
+                      <div className="font-medium">
+                        {report.evidence.sufficient ? '证据充分' : '证据不足'} · 覆盖{' '}
+                        {report.evidence.coveredSubQuestions}/{report.evidence.totalSubQuestions}{' '}
+                        个子问题 · 独立来源 {report.evidence.independentSources} 个 · 可用来源{' '}
+                        {report.evidence.usableSources} 条
+                      </div>
+                      <p className="mt-1">{report.evidence.verdict}</p>
+                      {report.evidence.gaps.length > 0 ? (
+                        <ul className="mt-1.5 flex flex-col gap-1">
+                          {report.evidence.gaps.map((gap) => (
+                            <li key={`${gap.kind}-${gap.message}`}>⛔ {gap.message}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {report.evidence.recommendation ? (
+                        <p className="mt-1.5">建议：{report.evidence.recommendation}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   {report.warnings.length > 0 ? (
                     <ul
@@ -768,6 +924,50 @@ export function ResearchPage() {
                 暂不联网（只用本地）
               </Button>
               <Button data-testid="research-network-ok" onClick={confirmNetworkCollect}>
+                仅此一次，继续
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {outboundAskOpen && outboundPreview ? (
+        <div
+          data-testid="research-outbound-confirm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        >
+          <div className="max-h-full w-full max-w-2xl overflow-y-auto rounded-xl bg-[var(--surface-raised)] p-5 shadow-xl">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--ink)]">
+              <TriangleAlert className="h-4 w-4 text-amber-500" />
+              本次将把材料发给在线模型
+            </h2>
+            <p className="mt-2 text-sm text-[var(--ink-muted)]">
+              目标主机：
+              <code data-testid="research-outbound-host" className="ml-1 text-xs">
+                {outboundPreview.host ?? '（未知）'}
+              </code>
+            </p>
+            <p className="mt-1 text-xs text-[var(--ink-subtle)]">{outboundPreview.reason}</p>
+            <ul data-testid="research-outbound-snippets" className="mt-3 space-y-2">
+              {outboundPreview.snippets.map((item, index) => (
+                <li
+                  key={`${item.title}-${index}`}
+                  className="rounded-lg border border-[var(--border-subtle)] p-2 text-xs"
+                >
+                  <p className="font-medium text-[var(--ink)]">{item.title}</p>
+                  <p className="mt-0.5 text-[var(--ink-muted)]">{item.snippet}</p>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                data-testid="research-outbound-cancel"
+                onClick={() => setOutboundAskOpen(false)}
+              >
+                取消（不外发）
+              </Button>
+              <Button data-testid="research-outbound-ok" onClick={confirmOutboundStep}>
                 仅此一次，继续
               </Button>
             </div>

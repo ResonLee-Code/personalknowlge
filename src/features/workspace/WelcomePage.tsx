@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { formatRelative } from '@/lib/format';
 import { pickDirectory } from '@/services/appService';
 import { isTauriRuntime } from '@/services/api';
@@ -42,7 +43,7 @@ export function WelcomePage() {
     }
     const ok = await createWorkspace(name.trim() || '我的知识库', target);
     if (ok) toast.success('知识库已创建');
-    else toast.error(useWorkspaceStore.getState().error ?? '创建失败');
+    else reportFailure('创建知识库失败', useWorkspaceStore.getState().error);
   };
 
   const handleOpen = async () => {
@@ -54,7 +55,7 @@ export function WelcomePage() {
     }
     const ok = await openWorkspace(target);
     if (ok) toast.success('知识库已打开');
-    else toast.error(useWorkspaceStore.getState().error ?? '打开失败');
+    else reportFailure('打开知识库失败', useWorkspaceStore.getState().error);
   };
 
   return (

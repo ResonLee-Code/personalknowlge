@@ -13,21 +13,45 @@
 //!   忘了过闸门就把笔记片段发出去；
 //! - **失败即降级**：任何错误都只让上层回退到下一档（本地模型 / 规则档 / 模板），研究流程不中断。
 
+use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
 use crate::core::error::{AppError, ErrorCode, Result};
 
 use super::host::host_of;
-use super::local_model::{build_decision_prompt, build_generation_prompt, parse_decision_output};
+use super::local_model::{
+    build_conflict_prompt, build_decision_prompt, build_generation_prompt, parse_conflict_output,
+    parse_decision_output,
+};
 use super::traits::{
-    DecisionKind, DecisionModel, DecisionResult, DecisionState, GenerationRequest,
-    GenerationResponse, GenerativeModel,
+    ConflictVerdict, DecisionCandidate, DecisionKind, DecisionModel, DecisionResult, DecisionState,
+    GenerationRequest, GenerationResponse, GenerativeModel,
 };
 
 /// 单次调用超时（云端首 token 通常很快，给 60 秒足够）。
 const TIMEOUT: Duration = Duration::from_secs(60);
 /// 生成结果的字符上限（与本地模型同口径，防止超长输出整篇写进报告）。
 const MAX_OUTPUT_CHARS: usize = 6000;
+/// 流式解析时另存的原始响应上限（用于「对方忽略了 `stream:true`」时的兜底解析）。
+const MAX_RAW_CHARS: usize = 1_000_000;
+
+/// 从**非流式**响应里取 `choices[0].message.content`。
+///
+/// 存在的原因：有些"OpenAI 兼容"端点会忽略 `stream: true`，直接回一个普通 JSON。
+/// 这种时候只是少了个逐字效果，**不该把一个本来能用的在线模型判成失败**。
+fn content_from_non_streaming(raw: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(raw.trim()).ok()?;
+    let content = value
+        .get("choices")?
+        .as_array()?
+        .first()?
+        .get("message")?
+        .get("content")?
+        .as_str()?
+        .trim()
+        .to_string();
+    (!content.is_empty()).then_some(content)
+}
 
 /// OpenAI 兼容端点客户端（生成 + 打分共用同一份连接配置）。
 #[derive(Debug, Clone)]
@@ -35,6 +59,8 @@ pub struct RemoteModel {
     base_url: String,
     model: String,
     api_key: String,
+    /// 出站代理（为空 = 跟随环境变量 / 系统代理；见 `core::net`）
+    proxy: Option<String>,
 }
 
 impl RemoteModel {
@@ -43,12 +69,25 @@ impl RemoteModel {
             base_url: base_url.trim().trim_end_matches('/').to_string(),
             model: model.trim().to_string(),
             api_key: api_key.trim().to_string(),
+            proxy: None,
         }
+    }
+
+    /// 指定出站代理（设置里显式配置的那一个）。
+    pub fn with_proxy(mut self, proxy: Option<String>) -> Self {
+        self.proxy = proxy.filter(|value| !value.trim().is_empty());
+        self
     }
 
     /// 完整标识（报告与审计里用；含模型名，便于事后核对到底是哪个模型写的）。
     pub fn id(&self) -> String {
-        format!("remote.openai-compatible:{}", self.model)
+        Self::provider_id(&self.model)
+    }
+
+    /// provider 标识（含模型名）。自检等场景**不持有 Key** 也能用它，
+    /// 保证「自检说的」与「报告 composer 写的」是同一个字符串。
+    pub fn provider_id(model: &str) -> String {
+        format!("remote.openai-compatible:{}", model.trim())
     }
 
     /// 只用于错误信息的主机名：**永远不要把 Key 或完整 URL 写进错误**。
@@ -58,9 +97,7 @@ impl RemoteModel {
 
     /// 一次非流式调用（`POST {base}/chat/completions`）。
     fn chat(&self, prompt: &str, expect_json: bool) -> Result<String> {
-        let agent = ureq::Agent::new_with_config(
-            ureq::Agent::config_builder().timeout_global(Some(TIMEOUT)).build(),
-        );
+        let agent = crate::core::net::agent_for(&self.base_url, TIMEOUT, self.proxy.as_deref());
         let mut body = serde_json::json!({
             "model": self.model,
             "messages": [{ "role": "user", "content": prompt }],
@@ -142,7 +179,8 @@ impl GenerativeModel for RemoteModel {
     }
 
     fn supports_streaming(&self) -> bool {
-        false
+        // Track C1：`chat/completions` 的 `stream: true`（SSE）已实现
+        true
     }
 
     fn complete(&self, request: &GenerationRequest) -> Result<GenerationResponse> {
@@ -156,6 +194,128 @@ impl GenerativeModel for RemoteModel {
         let started = std::time::Instant::now();
         let prompt = build_generation_prompt(request);
         let text = self.chat(&prompt, false)?;
+        Ok(GenerationResponse {
+            text,
+            model: self.id(),
+            duration_ms: started.elapsed().as_millis() as u64,
+            usage: None,
+        })
+    }
+
+    /// 流式生成（Track C1）：`stream: true` 的 SSE，逐块回调 `choices[0].delta.content`。
+    ///
+    /// 中途出错**不返回半截内容**：返回 `Err`，由上层清掉预览并降级到下一档。
+    fn complete_streaming(
+        &self,
+        request: &GenerationRequest,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<GenerationResponse> {
+        if !request.allow_remote {
+            return Err(AppError::new(
+                ErrorCode::NetworkDisabled,
+                "本次生成没有标记为「允许外发」，已拒绝调用在线模型。",
+            ));
+        }
+        let started = std::time::Instant::now();
+        let prompt = build_generation_prompt(request);
+        let agent = crate::core::net::agent_for(&self.base_url, TIMEOUT, self.proxy.as_deref());
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": [{ "role": "user", "content": prompt }],
+            "stream": true,
+        });
+        let response = agent
+            .post(format!("{}/chat/completions", self.base_url))
+            .header("Content-Type", "application/json")
+            .header("Authorization", &format!("Bearer {}", self.api_key))
+            .send(body.to_string())
+            .map_err(|error| {
+                AppError::new(
+                    ErrorCode::InvalidInput,
+                    format!(
+                        "在线模型调用失败：{error}（主机 {}，模型 `{}`）",
+                        self.host_label(),
+                        self.model
+                    ),
+                )
+            })?;
+        let status = response.status().as_u16();
+        if status >= 400 {
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                format!(
+                    "在线模型返回 HTTP {status}（主机 {}，模型 `{}`）：检查 API Key、模型名与账户额度",
+                    self.host_label(),
+                    self.model
+                ),
+            ));
+        }
+
+        let mut reader = BufReader::new(response.into_body().into_reader());
+        let mut accumulated = String::new();
+        let mut raw = String::new();
+        let mut saw_sse = false;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let read = reader.read_line(&mut line).map_err(|error| {
+                AppError::new(
+                    ErrorCode::InvalidInput,
+                    format!("读取在线模型流式响应失败（主机 {}）：{error}", self.host_label()),
+                )
+            })?;
+            if read == 0 {
+                break;
+            }
+            if raw.len() < MAX_RAW_CHARS {
+                raw.push_str(&line);
+            }
+            // SSE：只认 `data:` 行；`[DONE]` 与空行跳过
+            let Some(data) = line.trim().strip_prefix("data:") else {
+                continue;
+            };
+            let data = data.trim();
+            if data.is_empty() || data == "[DONE]" {
+                continue;
+            }
+            saw_sse = true;
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
+                // 单行坏数据不该毁掉整段：跳过（与"严格校验最终产物"同一口径）
+                continue;
+            };
+            let delta = value
+                .get("choices")
+                .and_then(|choices| choices.as_array())
+                .and_then(|choices| choices.first())
+                .and_then(|choice| choice.get("delta"))
+                .and_then(|delta| delta.get("content"))
+                .and_then(|content| content.as_str())
+                .unwrap_or_default();
+            if delta.is_empty() {
+                continue;
+            }
+            accumulated.push_str(delta);
+            on_delta(delta);
+            if accumulated.chars().count() >= MAX_OUTPUT_CHARS {
+                break;
+            }
+        }
+
+        // 对方忽略了 `stream: true`（回的是普通 JSON）→ 按非流式再解析一次
+        if accumulated.is_empty() && !saw_sse {
+            if let Some(content) = content_from_non_streaming(&raw) {
+                on_delta(&content);
+                accumulated = content;
+            }
+        }
+
+        let text = crate::core::text::truncate_chars(accumulated.trim(), MAX_OUTPUT_CHARS);
+        if text.is_empty() {
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                format!("在线模型返回了空内容（主机 {}）。", self.host_label()),
+            ));
+        }
         Ok(GenerationResponse {
             text,
             model: self.id(),
@@ -181,6 +341,23 @@ impl DecisionModel for RemoteModel {
         let prompt = build_decision_prompt(kind, state);
         let raw = self.chat(&prompt, true)?;
         parse_decision_output(&raw, kind, state)
+    }
+
+    /// 语义冲突判定（Track C5）：在线模型直接回答"是否互相矛盾"。
+    ///
+    /// 这一档只有在「已授权」且「逐次确认通过」时才会被构造出来，
+    /// 所以本身不需要再判一次外发闸门（与 `decide` 同口径）。
+    fn judge_conflict(
+        &self,
+        query: &str,
+        candidates: &[DecisionCandidate],
+    ) -> Result<Option<ConflictVerdict>> {
+        if candidates.len() < 2 {
+            return Ok(None);
+        }
+        let prompt = build_conflict_prompt(query, candidates);
+        let raw = self.chat(&prompt, true)?;
+        Ok(Some(parse_conflict_output(&raw)?))
     }
 }
 

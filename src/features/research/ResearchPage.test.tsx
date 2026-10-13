@@ -35,6 +35,9 @@ const enabledPolicy: AiPolicy = {
   remoteModelScore: false,
   remoteModelAuthorizedAt: null,
   remoteModelKeySet: false,
+  confirmEachOutbound: false,
+  vectorEnabled: false,
+  decisionKeySet: false,
   budget: { maxSubquestions: 5, maxPages: 12, maxDurationSecs: 480 },
   auditMaxEntries: 500,
 };
@@ -104,6 +107,25 @@ function composed(): ResearchSession {
     report: {
       generatedAt: '2026-10-11T10:05:00+08:00',
       dataCutoff: '2026-10-11',
+      // D5/N9：证据不足时界面要**直接**说清楚差在哪（不能只写在 markdown 里让人自己找）
+      evidence: {
+        sufficient: false,
+        score: 0.25,
+        coveredSubQuestions: 1,
+        totalSubQuestions: 5,
+        independentSources: 1,
+        usableSources: 2,
+        gaps: [
+          {
+            kind: 'partialCoverage',
+            message: '5 个子问题里有 4 个**一条材料都没有**：这部分不是「查过没有」，而是「没查」。',
+            subQuestionIds: ['q2', 'q3', 'q4', 'q5'],
+            references: [],
+          },
+        ],
+        verdict: '**证据不足**：1/5 个子问题有材料，1 个独立来源 —— 本次**不给结论**，缺口见下。',
+        recommendation: '缺口就是上面每条 `gaps`：按子问题补材料后重跑收集。',
+      },
       composer: 'template.draft',
       decisionProvider: 'rule',
       conclusions: [],
@@ -215,12 +237,18 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     await waitFor(() => expect(collect).toHaveBeenCalledWith('research_1', false));
 
     await userEvent.click(await screen.findByTestId('research-verify'));
-    await waitFor(() => expect(verify).toHaveBeenCalledWith('research_1'));
+    await waitFor(() => expect(verify).toHaveBeenCalledWith('research_1', false));
 
     await userEvent.click(await screen.findByTestId('research-compose'));
-    await waitFor(() => expect(compose).toHaveBeenCalledWith('research_1'));
+    await waitFor(() => expect(compose).toHaveBeenCalledWith('research_1', false));
     expect(await screen.findByTestId('research-report')).toHaveTextContent('资料截至 2026-10-11');
     expect(screen.getByTestId('research-warnings')).toHaveTextContent('单一来源');
+    // D5/N9：证据充分性要**直接显示**（够不够、差在哪），不用去 markdown 里翻
+    const evidence = screen.getByTestId('research-evidence');
+    expect(evidence).toHaveTextContent('证据不足');
+    expect(evidence).toHaveTextContent('1/5 个子问题');
+    expect(evidence).toHaveTextContent('一条材料都没有');
+    expect(evidence).toHaveTextContent('建议：');
 
     await userEvent.click(await screen.findByTestId('research-proposal'));
     await waitFor(() => expect(proposal).toHaveBeenCalledWith('research_1'));
@@ -487,6 +515,157 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     expect(line).toHaveTextContent('已抓取正文 3 页（预算 ≤12 页）');
     expect(line).toHaveTextContent('已抓 3 页');
     expect(line).toHaveTextContent('来源 5 条');
+  });
+
+  // Track C1：推测段流式——逐块预览；这一档失败时清空，**不留下半截内容**。
+  it('推测段生成中逐块预览，且失败时不留半截内容', async () => {
+    const verified = {
+      ...composed(),
+      status: 'verified' as const,
+      report: { ...composed().report!, markdown: '' },
+    };
+    vi.spyOn(researchService, 'start').mockResolvedValue(verified);
+    // 生成一直不返回：界面停在「生成中」，正是需要看到流式预览的时刻
+    vi.spyOn(researchService, 'compose').mockImplementation(() => new Promise(() => {}));
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+    await userEvent.click(await screen.findByTestId('research-compose'));
+
+    const handler = vi
+      .mocked(subscribe)
+      .mock.calls.find(([event]) => event === 'ai://research-compose-delta')?.[1];
+    expect(handler, '页面必须订阅 ai://research-compose-delta').toBeTruthy();
+
+    act(() => {
+      handler?.({
+        sessionId: 'research_1',
+        providerId: 'local.ollama:qwen2.5:3b',
+        text: '第一块',
+        state: 'streaming',
+      });
+    });
+    const preview = await screen.findByTestId('research-compose-preview');
+    expect(preview).toHaveTextContent('local.ollama:qwen2.5:3b');
+    expect(preview).toHaveTextContent('第一块');
+
+    // 第二块到达：显示的是**累计文本**（界面直接替换，不做拼接）
+    act(() => {
+      handler?.({
+        sessionId: 'research_1',
+        providerId: 'local.ollama:qwen2.5:3b',
+        text: '第一块第二块',
+        state: 'streaming',
+      });
+    });
+    expect(screen.getByTestId('research-compose-preview')).toHaveTextContent('第一块第二块');
+
+    // 这一档失败：后端发空串 + failed —— 预览必须清空，不留半截内容
+    act(() => {
+      handler?.({
+        sessionId: 'research_1',
+        providerId: 'local.ollama:qwen2.5:3b',
+        text: '',
+        state: 'failed',
+      });
+    });
+    const afterFailure = screen.getByTestId('research-compose-preview');
+    expect(afterFailure).toHaveTextContent('这一档失败，正在降级');
+    expect(afterFailure).not.toHaveTextContent('第一块第二块');
+  });
+
+  // Track C2：开启「逐次外发确认」后，先把**将要发送的片段 + 目标主机**摆出来；
+  // 未确认就不提交（后端另有零请求保证），取消也不提交。
+  it('逐次外发确认：先展示片段与主机，确认后才提交', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...enabledPolicy,
+      remoteModelCompose: true,
+      remoteModelAuthorizedAt: '2026-10-11T09:00:00+08:00',
+      confirmEachOutbound: true,
+    });
+    vi.spyOn(researchService, 'start').mockResolvedValue({
+      ...composed(),
+      status: 'verified',
+      report: { ...composed().report!, markdown: '' },
+    });
+    const outboundPreview = vi.spyOn(researchService, 'outboundPreview').mockResolvedValue({
+      willSend: true,
+      host: 'api.example.com',
+      snippets: [
+        { title: 'Rust 异步调度实现要点', snippet: '实现要点在于任务唤醒与批量窃取。' },
+      ],
+      reason: '本次会把下列片段交给在线模型（已开启逐次确认：要点确认才会发送）。',
+    });
+    const compose = vi.spyOn(researchService, 'compose').mockResolvedValue(composed());
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+    await userEvent.click(await screen.findByTestId('research-compose'));
+
+    await waitFor(() => expect(outboundPreview).toHaveBeenCalledWith('research_1'));
+    const dialog = await screen.findByTestId('research-outbound-confirm');
+    expect(screen.getByTestId('research-outbound-host')).toHaveTextContent('api.example.com');
+    expect(dialog).toHaveTextContent('实现要点在于任务唤醒与批量窃取。');
+    expect(compose, '没确认之前不能提交').not.toHaveBeenCalled();
+
+    // 取消：不提交、不留下对话框
+    await userEvent.click(screen.getByTestId('research-outbound-cancel'));
+    expect(compose).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('research-outbound-confirm')).not.toBeInTheDocument();
+
+    // 再来一次并确认：这次才带着「本次已确认」提交
+    await userEvent.click(screen.getByTestId('research-compose'));
+    await userEvent.click(await screen.findByTestId('research-outbound-ok'));
+    await waitFor(() => expect(compose).toHaveBeenCalledWith('research_1', true));
+  });
+
+  // Track C5：报告要注明冲突判定到底用的哪一档（规则档 / 模型档）。
+  it('报告注明冲突判定用的档位', async () => {
+    vi.spyOn(researchService, 'start').mockResolvedValue({
+      ...composed(),
+      report: { ...composed().report!, conflictProvider: 'local.ollama' },
+    });
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+
+    const line = await screen.findByTestId('research-conflict-provider');
+    expect(line).toHaveTextContent('local.ollama');
+    expect(line).toHaveTextContent('模型档');
+  });
+
+  // Track D2/N6：报告要显示打分的**决策 Trace**（缓存是否命中、试过哪些档、谁失败了）。
+  it('报告显示打分的决策 Trace', async () => {
+    vi.spyOn(researchService, 'start').mockResolvedValue({
+      ...composed(),
+      report: {
+        ...composed().report!,
+        decisionTrace: {
+          kind: 'RELEVANCE',
+          cache: 'miss',
+          provider: 'rule',
+          candidates: 3,
+          attempts: [
+            { provider: 'local.ollama', ok: false, detail: '连不上' },
+            { provider: 'rule', ok: true, detail: '返回 3 条' },
+          ],
+          tookMs: 2,
+        },
+      },
+    });
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+
+    const line = await screen.findByTestId('research-decision-trace');
+    expect(line).toHaveTextContent('rule');
+    expect(line).toHaveTextContent('现算');
+    expect(line).toHaveTextContent('local.ollama✗');
+    expect(line).toHaveTextContent('rule✓');
   });
 
   // §9.7「运行中可随时中止」：忙碌时中止按钮必须仍可点（否则只能等这一步跑完）。

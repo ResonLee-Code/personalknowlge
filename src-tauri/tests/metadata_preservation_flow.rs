@@ -250,8 +250,8 @@ fn research_append_adds_the_report_and_keeps_every_existing_field() {
         })
         .expect("立项");
     let session = research.collect(&session.id, false).expect("收集");
-    let session = research.verify(&session.id).expect("验证");
-    let session = research.compose(&session.id).expect("汇总");
+    let session = research.verify(&session.id, false).expect("验证");
+    let session = research.compose(&session.id, false).expect("汇总");
     let session = research.proposal(&session.id).expect("提案");
 
     research

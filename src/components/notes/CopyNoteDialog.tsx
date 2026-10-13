@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { errorMessage } from '@/lib/format';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
@@ -42,10 +43,10 @@ export function CopyNoteDialog({ note, onClose }: { note: NoteSummary; onClose: 
         );
         onClose();
       } else {
-        toast.error(useNotesStore.getState().error ?? '复制失败');
+        reportFailure('复制笔记失败', useNotesStore.getState().error);
       }
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('复制笔记失败', errorMessage(error));
     } finally {
       setBusy(false);
     }

@@ -471,3 +471,180 @@ fn a_note_whose_file_disappeared_must_error_instead_of_returning_empty_content()
     );
     assert!(missing.content.is_empty(), "缺失笔记没有正文可读");
 }
+
+/// **B1 受控复现**：用 `cp` 把「版本历史快照」写回笔记文件后，编辑器下一次落盘为什么会显示「保存失败」。
+///
+/// 背景（[PLAN_V1.3.0.md](../../docs/PLAN_V1.3.0.md) §4 第 2 条）：V1.2.1 真机验收那晚出现过
+/// 头部红字「保存失败」，当时的解释是"我正在用 `cp` 把历史快照写回文件"。那只是**推测**——
+/// 这一条把它做成**可复跑的实验**，并顺带钉住三件事：
+///
+/// 1. 冲突是**按内容**判的（不是按 mtime）：`cp` 写回**同一份内容**（内容相同、时间变了）不该误报；
+/// 2. 冲突错误必须把界面需要的东西带上（`currentHash` / `expectedHash` / 当前正文），
+///    否则用户只看到「保存失败」却不知道该怎么办；
+/// 3. 「重新加载后再存」这条恢复路径真的走得通——不然用户只能选覆盖，等于丢掉中间那次改动。
+#[test]
+fn cp_restoring_an_old_snapshot_makes_the_next_editor_save_conflict() {
+    use personal_knowledge_os_lib::core::error::ErrorCode;
+
+    let fixture = Fixture::new();
+    // 关掉文件监听：这一条要的是"编辑器手里的 base 与磁盘内容不一致"这个**确定性**前提，
+    // 不让后台采纳来插一脚（真实场景里监听在跑，但冲突判定读的是磁盘，与监听无关）。
+    if let Ok(mut guard) = fixture.context().watcher.lock() {
+        *guard = None;
+    }
+
+    let note = fixture
+        .notes()
+        .create(CreateNoteInput {
+            title: "会被 cp 回写的笔记".to_string(),
+            category_id: None,
+            initial_content: Some("第一版正文：玄武岩索引".to_string()),
+            tags: None,
+            parent_id: None,
+        })
+        .expect("新建笔记")
+        .note;
+    let absolute = fixture.workspace.path().join(note.file_path.replace('\\', "/"));
+    let disk_hash = |fixture: &Fixture| -> String {
+        fixture
+            .context()
+            .storage
+            .read_note(&note.file_path)
+            .expect("读磁盘上的笔记")
+            .content_hash
+    };
+
+    // 第一版落盘后的原始字节 = 用户后来会 `cp` 回去的那份「历史快照」
+    let snapshot_raw = fixture
+        .context()
+        .storage
+        .read_raw(&note.file_path)
+        .expect("读第一版原文");
+    let v1_hash = disk_hash(&fixture);
+
+    // 编辑器手里就是第一版；继续编辑并保存第二版（正常路径）
+    fixture
+        .notes()
+        .save(SaveNoteInput {
+            id: note.id.clone(),
+            content: "第二版正文：花岗岩索引".to_string(),
+            base_content_hash: Some(v1_hash.clone()),
+            title: None,
+            category_id: None,
+            tags: None,
+        })
+        .expect("第二版保存应当成功");
+    let v2_hash = disk_hash(&fixture);
+    assert_ne!(v1_hash, v2_hash, "两版内容不同，指纹必须不同");
+
+    // —— 受控复现的关键一步：模拟 `cp 历史快照.md 笔记.md`（绕过服务、直接动文件）——
+    std::fs::write(&absolute, &snapshot_raw).expect("用 cp 的方式写回旧快照");
+    assert_eq!(
+        disk_hash(&fixture),
+        v1_hash,
+        "把快照**原样**写回，指纹必须回到当时那一版——说明指纹是**文件内容**级的，与 mtime 无关"
+    );
+
+    // 编辑器此时手里还是第二版的 base：落盘必须被冲突保护拦下
+    let conflict = fixture
+        .notes()
+        .save(SaveNoteInput {
+            id: note.id.clone(),
+            content: "第三版正文：页岩索引".to_string(),
+            base_content_hash: Some(v2_hash.clone()),
+            title: None,
+            category_id: None,
+            tags: None,
+        })
+        .expect_err("磁盘内容已被换掉，保存必须报冲突而不是静默覆盖");
+    assert_eq!(
+        conflict.code,
+        ErrorCode::NoteConflict,
+        "必须是 NOTE_CONFLICT（前端按这个码分支提示）：{conflict:?}"
+    );
+    let details = conflict.details.clone().expect("冲突要带 details，界面才提示得清楚");
+    assert_eq!(details["noteId"], serde_json::json!(note.id));
+    assert_eq!(details["filePath"], serde_json::json!(note.file_path));
+    assert_eq!(
+        details["expectedHash"],
+        serde_json::json!(v2_hash),
+        "expectedHash 要回显编辑器手里的 base，便于对账"
+    );
+    assert_eq!(
+        details["currentHash"],
+        serde_json::json!(v1_hash),
+        "currentHash 必须是磁盘上现在那一份（= 被 cp 回去的快照）"
+    );
+    assert!(
+        details["currentContent"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("玄武岩索引"),
+        "details 里要带上磁盘上现在到底是什么，用户才能判断：{details:?}"
+    );
+    // 磁盘必须还是那份快照——冲突时**绝不能**已经写进去
+    let on_disk = std::fs::read_to_string(&absolute).expect("读磁盘");
+    assert!(
+        on_disk.contains("玄武岩索引") && !on_disk.contains("页岩索引"),
+        "冲突被拦下时磁盘不应被改动"
+    );
+
+    // —— 恢复路径 1：界面上的「重新加载」之后再存，必须能存进去 ——
+    fixture.notes().get(&note.id).expect("重新加载");
+    let fresh_base = disk_hash(&fixture);
+    assert_eq!(fresh_base, v1_hash, "重新加载读到的就是磁盘上那份快照");
+    let saved = fixture
+        .notes()
+        .save(SaveNoteInput {
+            id: note.id.clone(),
+            content: "第三版正文：页岩索引".to_string(),
+            base_content_hash: Some(fresh_base),
+            title: None,
+            category_id: None,
+            tags: None,
+        })
+        .expect("重新加载后的保存必须成功，否则用户没法继续干活");
+    assert!(
+        std::fs::read_to_string(&absolute)
+            .expect("读磁盘")
+            .contains("页岩索引"),
+        "恢复路径的落盘结果：{}",
+        saved.content_hash
+    );
+
+    // —— 恢复路径 2：界面上的「覆盖保存」（不带 base）仍然可用 ——
+    fixture
+        .notes()
+        .save(SaveNoteInput {
+            id: note.id.clone(),
+            content: "第四版正文：大理岩索引".to_string(),
+            base_content_hash: None,
+            title: None,
+            category_id: None,
+            tags: None,
+        })
+        .expect("不带 base 的覆盖保存必须仍然可用");
+    assert!(std::fs::read_to_string(&absolute)
+        .expect("读磁盘")
+        .contains("大理岩索引"));
+
+    // —— 反向验证：`cp` 写回**同一份内容**（内容没变、时间变了）不该误报冲突 ——
+    let current_raw = fixture
+        .context()
+        .storage
+        .read_raw(&note.file_path)
+        .expect("读当前原文");
+    std::fs::write(&absolute, &current_raw).expect("原样再写一遍（模拟 cp 同一份内容）");
+    let same_base = disk_hash(&fixture);
+    fixture
+        .notes()
+        .save(SaveNoteInput {
+            id: note.id.clone(),
+            content: "第五版正文：砂岩索引".to_string(),
+            base_content_hash: Some(same_base),
+            title: None,
+            category_id: None,
+            tags: None,
+        })
+        .expect("内容没变就不该判冲突——冲突是按内容判的，不是按 mtime");
+}

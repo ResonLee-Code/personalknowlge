@@ -24,6 +24,10 @@ export const EVENTS = {
   indexStatus: 'search://index-status',
   /** 研究助手进度（只含元数据：步骤 / 已抓页数 / 来源数） */
   researchProgress: 'ai://research-progress',
+  /** 报告「推测段」的生成增量（Track C1 流式；只是预览，最终以报告为准） */
+  researchComposeDelta: 'ai://research-compose-delta',
+  /** 向量索引构建进度（D3）：`{ done, total, skipped }`，只含计数、不含正文 */
+  vectorIndexProgress: 'ai://vector-index-progress',
 } as const;
 
 /** 默认工作区目录约定（与 Rust 端保持一致）。 */

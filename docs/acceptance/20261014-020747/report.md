@@ -1,0 +1,151 @@
+# E 节真机验收（自动跑）
+
+- 开始时间：2026-10-13T18:09:44.154Z
+- 结论：0 条通过、0 条失败、9 条待人工（自动步骤 71 步通过 / 0 步失败）
+- 自动步骤：**71 步通过 / 0 步失败**（用例含人工确认时整体标「待人工」，机器证据看这里与每条的明细）
+- 工作区：`/private/tmp/pkos-acceptance`
+- 应用：Personal Knowledge OS
+- 模式：real（真机执行）
+- 截图：同名 PNG 就在本目录（**默认不进仓库**，见 `scripts/acceptance/README.md`；要留证请 `git add -f`）
+
+## 现场准备（自动）
+
+> 每轮真跑都会先做这一步：把应用切到前台，并确认**目标工作区**已打开。
+> 现场不对就不出结论表——不能把「现场没准备好」写成「功能有问题」。
+
+- [✅ 通过] `activate` 已把应用切到前台
+- [✅ 通过] `cleanup` 按 Esc 清掉可能残留的弹层
+- [✅ 通过] `scene` 应用已在主界面：直接开始用例（若当前打开的不是目标工作区，文件断言会如实报错）
+
+## 结论表
+
+| # | 项目 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 1 | 编辑器输入、[[ 补全、原生下拉与日期控件（valid_until） | 🖐 待人工 | 截图 `01-editor-input.png`；✓ 00_Inbox/20261014-020754-ACCEPT-NOTE-A.md（刚生成） |
+| 2 | 导入对话框与导出（md / html / docx / pdf） | 🖐 待人工 | 截图 `02-export-dialog.png`；✓ 00_Inbox 存在 |
+| 3 | 备份创建 / 校验 / 恢复 | 🖐 待人工 | ✓ .knowledge/backups/KnowledgeBackup_20261014-020809.zip（刚生成）；✓ 界面存在「备份校验：清单文件存在」；✓ 界面存在「备份校验：Markdown 数量一致」；截图 `03-backup-created.png`；截图 `03b-backup-restored.png` |
+| 4 | 拖拽分栏、大纲三态的手感 | 🖐 待人工 | 截图 `04-outline-split.png` |
+| 5 | 版本历史：命名、还原、对比 | 🖐 待人工 | ✓ .knowledge/history 存在；截图 `05-history-dialog.png` |
+| 6 | 网页剪藏（真实网络抓取公开网页） | 🖐 待人工 | 截图 `06-web-clip.png`；✓ 00_Inbox/20261014-020916-Example-Domain.md（刚生成） |
+| 7 | 研究助手：本地调研全链路 | 🖐 待人工 | 截图 `07-research-plan.png`；✓ .knowledge/research 不存在（符合预期） |
+| 8 | 研究助手：联网检索 | 🖐 待人工 | 截图 `08-research-web.png` |
+| 9 | 首页「待复核」卡片点击跳转与时效角标 | 🖐 待人工 | ✓ 界面存在「首页的「待复核」卡片」；✓ 界面存在「时效角标「已过期」」；截图 `09-review-due.png` |
+| 10 | 首次启动放行（Gatekeeper） | 🖐 人工 | 只对「从网络下载的包」有意义；本机构建无 quarantine，脚本无法覆盖 |
+
+## 逐条明细
+
+### 1. 编辑器输入、[[ 补全、原生下拉与日期控件（valid_until）（🖐 待人工）
+
+- 期望：输入落盘、⌘S 立即写盘、[[ 弹出候选、日期控件弹出系统日历
+- [✅ 通过] `app` app=Personal Knowledge OS pid=98083
+- [✅ 通过] `keyCode` keyCode(53)
+- [✅ 通过] `click` click(152,200) · AXPress
+- [✅ 通过] `paste` 粘贴了一小段文本（不落进报告）
+- [✅ 通过] `click` click(1004,769) · AXPress
+- [✅ 通过] `keys` cmd+e
+- [✅ 通过] `paste` 粘贴了一小段文本（不落进报告）
+- [✅ 通过] `keys` cmd+s
+- [✅ 通过] `shot` 截图已存档
+- [✅ 通过] `check` 文件断言通过
+- [🖐 待人工] `manual` [[ 补全候选的内容与顺序、原生日期控件弹出系统日历，需人眼确认
+
+### 2. 导入对话框与导出（md / html / docx / pdf）（🖐 待人工）
+
+- 期望：三种导出各得合法文件，导入 .docx 能回读正文
+- [✅ 通过] `app` app=Personal Knowledge OS pid=98083
+- [✅ 通过] `keyCode` keyCode(53)
+- [✅ 通过] `click` click(1418,89) · AXPress
+- [✅ 通过] `shot` 截图已存档
+- [🖐 待人工] `manual` 导出走 macOS 原生保存面板：需要人眼选目录并确认三种格式的文件可打开；导入 .docx 需人眼核对正文
+- [✅ 通过] `check` 文件断言通过
+
+### 3. 备份创建 / 校验 / 恢复（🖐 待人工）
+
+- 期望：创建出 zip、校验逐项通过、恢复到空目录得到可用知识库
+- [✅ 通过] `app` app=Personal Knowledge OS pid=98083
+- [✅ 通过] `keyCode` keyCode(53)
+- [✅ 通过] `click` click(1418,89) · AXPress
+- [✅ 通过] `click` click(789,748) · AXPress
+- [✅ 通过] `check` 文件断言通过
+- [✅ 通过] `click` click(318,914) · AXPress
+- [✅ 通过] `pause` 等待 2500 ms（等界面自己完成）
+- [✅ 通过] `expectElement` 界面上找到了：备份校验：清单文件存在
+- [✅ 通过] `expectElement` 界面上找到了：备份校验：Markdown 数量一致
+- [✅ 通过] `shot` 截图已存档
+- [🖐 待人工] `manual` 「恢复」需要选目录（原生面板）：由人选一个空目录，确认恢复出来的知识库能打开
+- [✅ 通过] `shot` 截图已存档
+
+### 4. 拖拽分栏、大纲三态的手感（🖐 待人工）
+
+- 期望：固定 → mini → 钉住 → 隐藏 → 再显示走全；拖分割线比例变化并落库
+- [✅ 通过] `app` app=Personal Knowledge OS pid=98083
+- [✅ 通过] `keyCode` keyCode(53)
+- [✅ 通过] `keys` cmd+p
+- [✅ 通过] `paste` 粘贴了一小段文本（不落进报告）
+- [✅ 通过] `keyCode` keyCode(36)
+- [✅ 通过] `click` click(1425,324) · AXPress
+- [✅ 通过] `drag` drag(811,489) → (871,489)
+- [✅ 通过] `shot` 截图已存档
+- [🖐 待人工] `manual` 「跟手程度」与三态切换的主观手感，必须人手拖两下
+
+### 5. 版本历史：命名、还原、对比（🖐 待人工）
+
+- 期望：保存后生成 history 快照、对比面板显示增删、还原后正文回滚
+- [✅ 通过] `app` app=Personal Knowledge OS pid=98083
+- [✅ 通过] `keyCode` keyCode(53)
+- [✅ 通过] `keys` cmd+p
+- [✅ 通过] `paste` 粘贴了一小段文本（不落进报告）
+- [✅ 通过] `keyCode` keyCode(36)
+- [✅ 通过] `keys` cmd+s
+- [✅ 通过] `check` 文件断言通过
+- [✅ 通过] `shot` 截图已存档
+- [🖐 待人工] `manual` 「更多操作 → 历史版本…」的命名 / 还原 / 对比需要人眼看：菜单弹层与 diff 内容无法用 AX 断言
+
+### 6. 网页剪藏（真实网络抓取公开网页）（🖐 待人工）
+
+- 期望：抓 https://example.com 生成笔记：标题 / source_type / source_ref / 正文
+- [✅ 通过] `app` app=Personal Knowledge OS pid=98083
+- [✅ 通过] `keyCode` keyCode(53)
+- [✅ 通过] `click` click(152,200) · AXPress
+- [✅ 通过] `click` click(948,252) · AXPress
+- [✅ 通过] `click` click(719,523) · AXPress
+- [✅ 通过] `paste` 粘贴了一小段文本（不落进报告）
+- [✅ 通过] `click` click(999,523) · AXPress
+- [✅ 通过] `pause` 等待 8000 ms（等界面自己完成）
+- [✅ 通过] `shot` 截图已存档
+- [✅ 通过] `click` click(980,710) · AXPress
+- [✅ 通过] `pause` 等待 2500 ms（等界面自己完成）
+- [✅ 通过] `check` 文件断言通过
+- [🖐 待人工] `manual` 机器已验「抓取 → 生成笔记 → 落盘（含 source_ref）」；正文抽取的完整度与元数据展示需人眼核对一次
+
+### 7. 研究助手：本地调研全链路（🖐 待人工）
+
+- 期望：五步走通并确认写入；未开 AI 时被闸门挡住
+- [✅ 通过] `app` app=Personal Knowledge OS pid=98083
+- [✅ 通过] `keyCode` keyCode(53)
+- [✅ 通过] `click` click(152,410) · AXPress
+- [✅ 通过] `click` click(431,379) · AXPress
+- [✅ 通过] `paste` 粘贴了一小段文本（不落进报告）
+- [✅ 通过] `click` click(431,499) · AXPress
+- [✅ 通过] `shot` 截图已存档
+- [✅ 通过] `check` 文件断言通过
+- [🖐 待人工] `manual` 验收库的 AI 总开关默认关闭：本条机器断言的是**闸门挡住**（没有会话落盘）。打开 AI 后走完五步并确认写入，需要人眼确认报告六段与写入 diff
+
+### 8. 研究助手：联网检索（🖐 待人工）
+
+- 期望：配置检索源 → 允许联网 → 首次确认 → 收集到本地 + 外部来源，注入页被丢弃
+- [✅ 通过] `app` app=Personal Knowledge OS pid=98083
+- [✅ 通过] `keyCode` keyCode(53)
+- [🖐 待人工] `manual` 需要先起本机桩检索服务（scripts/research/）并在界面配置检索源、打开联网档位并逐次确认
+- [✅ 通过] `shot` 截图已存档
+
+### 9. 首页「待复核」卡片点击跳转与时效角标（🖐 待人工）
+
+- 期望：写一篇 valid_until 已过期的笔记 → 首页出现待复核卡片 → 点击跳转
+- [✅ 通过] `app` app=Personal Knowledge OS pid=98083
+- [✅ 通过] `keyCode` keyCode(53)
+- [✅ 通过] `click` click(152,240) · AXPress
+- [✅ 通过] `expectElement` 界面上找到了：首页的「待复核」卡片
+- [✅ 通过] `expectElement` 界面上找到了：时效角标「已过期」
+- [✅ 通过] `shot` 截图已存档
+- [🖐 待人工] `manual` 角标文案与跳转后的详情行（⚠ 可能已过期 / ✓ 已索引）需人眼确认

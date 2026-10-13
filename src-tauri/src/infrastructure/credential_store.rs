@@ -1,4 +1,4 @@
-//! 本机凭据存放（在线模型的 API Key）。
+//! 本机凭据存放（在线模型的 API Key、决策模型的 API Key）。
 //!
 //! 为什么单独放一个文件，而不写进工作区设置：
 //! - **不进工作区** → 不会被备份包 / 整库导出 / Markdown 带走（备份里出现 API Key 是事故）；
@@ -19,6 +19,8 @@ pub const CREDENTIAL_FILE: &str = "ai-credentials.json";
 #[serde(rename_all = "camelCase", default)]
 struct Credentials {
     remote_model_api_key: Option<String>,
+    /// 决策模型（TypeSafe Jev / Perplexity Decisions）的 API Key
+    decision_api_key: Option<String>,
 }
 
 fn path_of(data_dir: &Path) -> PathBuf {
@@ -51,10 +53,35 @@ pub fn set_remote_model_key(data_dir: &Path, key: Option<&str>) -> Result<()> {
     credentials.remote_model_api_key = key
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    persist(data_dir, &credentials)
+}
 
+/// 读取决策模型 API Key；未配置返回 `None`。
+pub fn decision_key(data_dir: &Path) -> Option<String> {
+    load(data_dir)
+        .decision_api_key
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+}
+
+/// 是否已配置决策模型 Key（**不回显 Key 本身**）。
+pub fn decision_key_set(data_dir: &Path) -> bool {
+    decision_key(data_dir).is_some()
+}
+
+/// 写入 / 清除决策模型 API Key（`None` 或空串表示清除）。
+pub fn set_decision_key(data_dir: &Path, key: Option<&str>) -> Result<()> {
+    let mut credentials = load(data_dir);
+    credentials.decision_api_key = key
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    persist(data_dir, &credentials)
+}
+
+/// 落盘：**两个 Key 都没有时把文件也删掉**，不留空壳，并收紧权限到 `0600`。
+fn persist(data_dir: &Path, credentials: &Credentials) -> Result<()> {
     let path = path_of(data_dir);
-    if credentials.remote_model_api_key.is_none() {
-        // 清除时把文件也删掉，不留空壳
+    if credentials.remote_model_api_key.is_none() && credentials.decision_api_key.is_none() {
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
@@ -99,5 +126,26 @@ mod tests {
         set_remote_model_key(dir.path(), Some("sk-2")).expect("写入");
         set_remote_model_key(dir.path(), Some("   ")).expect("空白视为清除");
         assert!(!remote_model_key_set(dir.path()));
+    }
+
+    #[test]
+    fn decision_key_is_independent_from_the_remote_model_key() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        set_remote_model_key(dir.path(), Some("sk-remote")).expect("写在线模型 Key");
+        set_decision_key(dir.path(), Some(" pplx-test ")).expect("写决策 Key");
+
+        assert_eq!(decision_key(dir.path()).as_deref(), Some("pplx-test"));
+        assert!(decision_key_set(dir.path()));
+        assert_eq!(remote_model_key(dir.path()).as_deref(), Some("sk-remote"), "互不影响");
+
+        // 清掉决策 Key 后，在线模型的 Key 还在 → 文件不能删
+        set_decision_key(dir.path(), None).expect("清决策 Key");
+        assert!(!decision_key_set(dir.path()));
+        assert_eq!(remote_model_key(dir.path()).as_deref(), Some("sk-remote"));
+        assert!(dir.path().join(CREDENTIAL_FILE).exists());
+
+        // 两个都清掉 → 文件也不留
+        set_remote_model_key(dir.path(), None).expect("清在线模型 Key");
+        assert!(!dir.path().join(CREDENTIAL_FILE).exists());
     }
 }

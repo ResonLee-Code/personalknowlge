@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { reportFailure } from '@/lib/actionFeedback';
 import { ROUTES } from '@/lib/constants';
 import { errorMessage } from '@/lib/format';
 import { buildNoteTree } from '@/lib/noteTree';
@@ -481,7 +482,7 @@ export function NoteListPanel() {
                     await purge(note.id);
                     removed += 1;
                   } catch (error) {
-                    toast.error(errorMessage(error));
+                    reportFailure('永久删除失败', errorMessage(error));
                     break;
                   }
                 }

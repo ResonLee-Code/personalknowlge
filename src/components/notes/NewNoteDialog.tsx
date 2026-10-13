@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input, Label, Textarea } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { errorMessage } from '@/lib/format';
 import { isTauriRuntime } from '@/services/api';
 import { pickDirectory, pickMarkdownFiles } from '@/services/appService';
@@ -155,7 +156,7 @@ function CreateForm({ categoryId, onClose }: { categoryId: string; onClose: () =
       setContent(rendered.content);
       setContentEdited(false);
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('载入模板失败', errorMessage(error));
       setTemplateName('');
     }
   };
@@ -182,7 +183,7 @@ function CreateForm({ categoryId, onClose }: { categoryId: string; onClose: () =
       toast.success('已创建笔记');
       navigate(`/notes/${detail.note.id}`);
     } else {
-      toast.error(useNotesStore.getState().error ?? '创建失败');
+      reportFailure('创建笔记失败', useNotesStore.getState().error);
     }
   };
 
@@ -291,7 +292,7 @@ function ClipForm({ categoryId, onClose }: { categoryId: string; onClose: () => 
       toast.success(`已抓取：${clipped.wordCount} 字`);
     } catch (error) {
       setPage(null);
-      toast.error(errorMessage(error));
+      reportFailure('抓取网页失败', errorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -331,7 +332,7 @@ function ClipForm({ categoryId, onClose }: { categoryId: string; onClose: () => 
       return;
     }
     setCreating(false);
-    toast.error(useNotesStore.getState().error ?? '创建失败');
+    reportFailure('创建笔记失败', useNotesStore.getState().error);
   };
 
   const preview = page ? page.markdown.split('\n').slice(0, 12).join('\n') : '';
@@ -434,7 +435,7 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
     try {
       addPaths(await pickMarkdownFiles());
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('选择 Markdown 文件失败', errorMessage(error));
     }
   };
 
@@ -443,7 +444,7 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
       const dir = await pickDirectory('选择要导入的文件夹');
       if (dir) addPaths([dir]);
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('选择文件夹失败', errorMessage(error));
     }
   };
 
@@ -493,7 +494,7 @@ function ImportForm({ categoryId, onClose }: { categoryId: string; onClose: () =
         toast.error('没有导入任何文件，请查看下方跳过原因');
       }
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('导入失败', errorMessage(error));
     } finally {
       setBusy(false);
     }

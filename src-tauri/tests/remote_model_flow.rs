@@ -170,8 +170,12 @@ fn handle(
     }
     let body = String::from_utf8_lossy(&body).to_string();
 
-    // 打分请求里带 `- id=<候选 id>`：把所有出现过的 id 回填（分数 1.0），不依赖固定 id
-    let content = if body.contains("只输出 JSON") {
+    // 冲突判定请求（Track C5）先认：桩模型一律判「存在冲突」。
+    // 注意要放在打分分支之前——两种提示词都含「只输出 JSON」。
+    let content = if body.contains("只有材料之间") {
+        serde_json::json!({ "conflict": true, "reason": "桩模型：两条材料结论相反" }).to_string()
+    } else if body.contains("只输出 JSON") {
+        // 打分请求里带 `- id=<候选 id>`：把所有出现过的 id 回填（分数 1.0），不依赖固定 id
         let ids: Vec<String> = body
             .match_indices("- id=")
             .filter_map(|(index, _)| {
@@ -247,8 +251,8 @@ fn authorized_remote_model_scores_and_writes_the_report() {
         stub.authorizations()
     );
 
-    research.verify(&session.id).expect("验证");
-    let composed = research.compose(&session.id).expect("汇总");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
     let report = composed.report.as_ref().expect("报告");
     assert_eq!(report.decision_provider, "remote.openai-compatible");
     assert_eq!(report.composer, "remote.openai-compatible:stub-model");
@@ -284,8 +288,8 @@ fn without_authorization_nothing_is_sent() {
     let session = research.start(request("Rust 异步调度")).expect("立项");
     let collected = research.collect(&session.id, false).expect("收集");
     assert_eq!(collected.decision_provider.as_deref(), Some("rule"), "未授权要退回规则档");
-    research.verify(&session.id).expect("验证");
-    let composed = research.compose(&session.id).expect("汇总");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
     assert_eq!(
         composed.report.as_ref().expect("报告").composer,
         "template.draft",
@@ -324,8 +328,8 @@ fn remote_failure_falls_back_to_local_model_then_template() {
     assert!(local.calls() >= 1, "降级后应当真的调用本地模型");
     assert!(collected.sources.iter().all(|source| source.credibility > 0.0));
 
-    research.verify(&session.id).expect("验证");
-    let composed = research.compose(&session.id).expect("汇总不应失败");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总不应失败");
     let report = composed.report.as_ref().expect("报告");
     assert_eq!(report.composer, "local.ollama:stub:latest");
     assert!(
@@ -348,8 +352,8 @@ fn online_failure_without_any_other_tier_falls_back_to_template() {
     let collected = research.collect(&session.id, false).expect("收集不应失败");
     assert_eq!(collected.decision_provider.as_deref(), Some("rule"));
 
-    research.verify(&session.id).expect("验证");
-    let composed = research.compose(&session.id).expect("汇总不应失败");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总不应失败");
     let report = composed.report.as_ref().expect("报告");
     assert_eq!(report.composer, "template.draft");
     assert!(
@@ -453,4 +457,207 @@ fn the_api_key_never_leaks_into_settings_or_responses() {
     // 清除后回显恢复为 false
     credential_store::set_remote_model_key(fixture.data.path(), None).expect("清除");
     assert!(!fixture.policy().policy().remote_model_key_set);
+}
+
+/// 开启「逐次外发确认」（Track C2）。
+fn enable_per_send_confirmation(fixture: &Fixture) {
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            confirm_each_outbound: Some(true),
+            ..Default::default()
+        })
+        .expect("开启逐次外发确认");
+}
+
+/// Track C2：开了「逐次确认」而本次没确认 —— **一个请求都不发**，自动降级并说明原因。
+#[test]
+fn per_send_confirmation_blocks_every_request_when_not_confirmed() {
+    let fixture = Fixture::new();
+    seed_notes(&fixture);
+    let stub = spawn_remote_server("（桩模型）不该被调用。");
+    fixture.configure_remote(&stub.endpoint, true, true, false);
+    enable_per_send_confirmation(&fixture);
+
+    let research = ResearchService::new(fixture.context());
+    let session = research.start(request("Rust 异步调度")).expect("立项");
+    research.collect(&session.id, false).expect("收集");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总要降级而不是失败");
+
+    assert_eq!(stub.calls(), 0, "未逐次确认时一个请求都不能发出去");
+    let report = composed.report.as_ref().expect("报告");
+    assert_eq!(report.composer, "template.draft", "应降级到模板实现");
+    assert!(
+        report.warnings.iter().any(|warning| warning.message.contains("逐次外发确认")),
+        "报告要说清为什么没用在线模型：{:?}",
+        report.warnings.iter().map(|warning| &warning.message).collect::<Vec<_>>()
+    );
+}
+
+/// Track C2：本次显式确认后才真的外发。
+#[test]
+fn per_send_confirmation_allows_the_request_when_confirmed() {
+    let fixture = Fixture::new();
+    seed_notes(&fixture);
+    let stub = spawn_remote_server("（桩模型）任务窃取是调度器的核心机制。");
+    fixture.configure_remote(&stub.endpoint, true, true, false);
+    enable_per_send_confirmation(&fixture);
+
+    let research = ResearchService::new(fixture.context());
+    let session = research.start(request("Rust 异步调度")).expect("立项");
+    research.collect(&session.id, false).expect("收集");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, true).expect("汇总");
+
+    assert!(stub.calls() >= 1, "逐次确认后应当真的外发");
+    let report = composed.report.as_ref().expect("报告");
+    assert_eq!(report.composer, "remote.openai-compatible:stub-model");
+}
+
+/// Track C2：预览要**只读**地说清「发给谁、发什么」，且未授权时如实说不发。
+#[test]
+fn outbound_preview_lists_host_and_snippets_without_sending() {
+    let fixture = Fixture::new();
+    seed_notes(&fixture);
+    let stub = spawn_remote_server("（桩模型）不会被调用。");
+    fixture.configure_remote(&stub.endpoint, true, true, false);
+
+    let research = ResearchService::new(fixture.context());
+    let session = research.start(request("Rust 异步调度")).expect("立项");
+    research.collect(&session.id, false).expect("收集");
+    research.verify(&session.id, false).expect("验证");
+
+    let preview = research.outbound_preview(&session.id).expect("预览");
+    assert!(preview.will_send, "已配置并授权 → 会外发：{preview:?}");
+    assert_eq!(preview.host.as_deref(), Some("localhost"), "要写清发给谁");
+    assert!(!preview.snippets.is_empty(), "必须把将要发送的片段列出来");
+    assert_eq!(stub.calls(), 0, "预览不能发任何请求");
+
+    // 未授权：预览如实说「不会外发」
+    let other = Fixture::new();
+    seed_notes(&other);
+    let other_stub = spawn_remote_server("（桩模型）不会被调用。");
+    other.configure_remote(&other_stub.endpoint, false, true, false);
+    let other_research = ResearchService::new(other.context());
+    let other_session = other_research.start(request("Rust 异步调度")).expect("立项");
+    other_research.collect(&other_session.id, false).expect("收集");
+    other_research.verify(&other_session.id, false).expect("验证");
+    let other_preview = other_research.outbound_preview(&other_session.id).expect("预览");
+    assert!(!other_preview.will_send, "未授权 → 不会外发");
+    assert!(other_preview.reason.contains("授权"), "{}", other_preview.reason);
+    assert_eq!(other_stub.calls(), 0);
+}
+
+/// 拿一个"没人听"的端口：绑定后立刻释放，用作"本地模型未部署"的地址。
+fn dead_endpoint() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("绑定端口");
+    let port = listener.local_addr().expect("端口").port();
+    drop(listener);
+    format!("http://127.0.0.1:{port}")
+}
+
+/// 造一对互相矛盾的材料（同一子问题下：一条支持、一条警示）。
+fn seed_opposing_notes(fixture: &Fixture) {
+    fixture.note(
+        "Rust 异步调度方案推荐实践",
+        "推荐使用工作窃取队列，这种方案适用于高并发场景。",
+    );
+    fixture.note(
+        "Rust 异步调度方案的风险",
+        "这种方案存在风险：误用会拖垮运行时，不建议在生产环境直接照搬。",
+    );
+}
+
+/// Track C5：冲突判定升级为语义档 —— 模型可用时由模型判 CONFLICT，报告注明档位。
+#[test]
+fn semantic_conflict_judgement_uses_the_model_when_available() {
+    let fixture = Fixture::new();
+    seed_opposing_notes(&fixture);
+    let stub = spawn_remote_server("（桩模型）推测段。");
+    // 打分侧开启 → 语义档可用（compose 侧没必要开，避免混淆生成来源）
+    fixture.configure_remote(&stub.endpoint, true, false, true);
+
+    let research = ResearchService::new(fixture.context());
+    let session = research.start(request("Rust 异步调度方案")).expect("立项");
+    research.collect(&session.id, false).expect("收集");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
+
+    let report = composed.report.as_ref().expect("报告");
+    assert_eq!(
+        report.conflict_provider.as_deref(),
+        Some("remote.openai-compatible"),
+        "冲突应当由模型判定"
+    );
+    assert!(!report.conflicts.is_empty(), "桩模型判冲突 → 第 3 段应有冲突");
+}
+
+/// Track C5：模型不可用时**回退规则档**，并在报告里注明是规则档判的。
+#[test]
+fn conflict_falls_back_to_the_rule_tier_and_says_so() {
+    let fixture = Fixture::new();
+    seed_opposing_notes(&fixture);
+    // 本地模型开关打开，但地址没人听 → 语义档不可用 → 规则档
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput { enabled: Some(true), ..Default::default() })
+        .expect("开启 AI");
+    fixture.configure_local(&dead_endpoint(), true, true);
+
+    let research = ResearchService::new(fixture.context());
+    let session = research.start(request("Rust 异步调度方案")).expect("立项");
+    research.collect(&session.id, false).expect("收集");
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
+
+    let report = composed.report.as_ref().expect("报告");
+    assert_eq!(
+        report.conflict_provider.as_deref(),
+        Some("rule"),
+        "模型不可用要回退规则档，并如实注明"
+    );
+    assert!(!report.conflicts.is_empty(), "规则档仍要认出对立表述");
+}
+
+/// Track D2 / N6：打分统一走决策引擎——**每次都有可解释 Trace**，
+/// 且**同输入第二次吃缓存**（不再打模型），报告里也能看到这条 Trace。
+#[test]
+fn scoring_records_a_trace_and_hits_the_cache_on_a_repeat_run() {
+    let fixture = Fixture::new();
+    seed_notes(&fixture);
+    let stub = spawn_remote_server("（桩模型）推测段。");
+    fixture.configure_remote(&stub.endpoint, true, false, true);
+
+    let research = ResearchService::new(fixture.context());
+    let first = research.start(request("Rust 异步调度")).expect("立项");
+    let collected = research.collect(&first.id, false).expect("收集");
+
+    let trace = collected.decision_trace.as_ref().expect("打分必须留下 Trace");
+    assert_eq!(trace.kind, "RELEVANCE");
+    assert_eq!(trace.cache, "miss", "第一次必然未命中");
+    assert_eq!(trace.provider, "remote.openai-compatible");
+    assert!(
+        trace
+            .attempts
+            .iter()
+            .any(|attempt| attempt.ok && attempt.provider == "remote.openai-compatible"),
+        "Trace 要记下是谁判的：{trace:?}"
+    );
+    let calls_after_first = stub.calls();
+    assert!(calls_after_first >= 1, "第一次应当真的调了在线模型");
+
+    // 同一批材料再走一遍（内容相同 → 键相同）：应当直接吃缓存，不再打模型
+    let second = research.start(request("Rust 异步调度")).expect("再次立项");
+    let again = research.collect(&second.id, false).expect("再次收集");
+    let trace_again = again.decision_trace.as_ref().expect("Trace");
+    assert_eq!(trace_again.cache, "hit", "同输入第二次应当命中缓存：{trace_again:?}");
+    assert_eq!(stub.calls(), calls_after_first, "命中缓存就不该再调模型");
+
+    // 报告里也要能看到这条 Trace（"每次打分都有可解释 Trace"）
+    research.verify(&second.id, false).expect("验证");
+    let composed = research.compose(&second.id, false).expect("汇总");
+    let report = composed.report.as_ref().expect("报告");
+    let report_trace = report.decision_trace.as_ref().expect("报告要带上打分的 Trace");
+    assert_eq!(report_trace.cache, "hit");
 }

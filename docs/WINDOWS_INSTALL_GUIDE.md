@@ -222,7 +222,7 @@ ea25ed29e5e7e33692cd2c16ab5956d9a4e96aad6ceaa3aa1b86c3187ed47392  Personal Knowl
 ```
 
 > 注意：交叉编译只能验证产物结构（架构、GUI 子系统、资源节、内部文件清单）
-> 与业务逻辑测试（Rust 29 个测试目标 + 前端 217 个用例 + E2E），
+> 与业务逻辑测试（Rust 集成测试 + 前端单元/组件用例 + E2E；数量随迭代变化，此处不写死），
 > **无法在 Windows 上做启动冒烟测试**。
 > 正式发布前建议在 Windows 机器上按第八节清单验收一次，或直接使用
 > `.github/workflows/release.yml` 在 Windows 运行器上构建。

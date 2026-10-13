@@ -42,6 +42,14 @@ interface UiState {
   setCommandPaletteOpen: (open: boolean) => void;
   setNewNoteDialogOpen: (open: boolean) => void;
   setQuickSwitcherOpen: (open: boolean) => void;
+  /**
+   * N5：从**搜索结果**跳进编辑器时要高亮的精确区间（码点下标）。
+   * 编辑器消费一次后清空；只活在内存里，不落库。
+   */
+  pendingHighlight: { noteId: string; charStart: number; charEnd: number } | null;
+  setPendingHighlight: (
+    value: { noteId: string; charStart: number; charEnd: number } | null,
+  ) => void;
   applyThemeToDocument: () => void;
   applyPreferences: (preferences: UiPreferences) => void;
 }
@@ -82,6 +90,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
   setNewNoteDialogOpen: (newNoteDialogOpen) => set({ newNoteDialogOpen }),
   setQuickSwitcherOpen: (quickSwitcherOpen) => set({ quickSwitcherOpen }),
+  pendingHighlight: null,
+  setPendingHighlight: (pendingHighlight) => set({ pendingHighlight }),
   applyThemeToDocument: () => {
     const { theme } = get();
     if (typeof document === 'undefined') return;

@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input, Label } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { ROUTES } from '@/lib/constants';
 import { useNotesStore } from '@/stores/notesStore';
 import type { NoteSummary } from '@/types';
@@ -55,7 +56,7 @@ export function CreateChildNoteDialog({
       toast.success(`已创建子文档`);
       navigate(`${ROUTES.notes}/${detail.note.id}`);
     } else {
-      toast.error(useNotesStore.getState().error ?? '创建失败');
+      reportFailure('创建子文档失败', useNotesStore.getState().error);
     }
   };
 

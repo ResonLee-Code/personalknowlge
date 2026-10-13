@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input, Label } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import type { CategoryDeleteStrategy } from '@/types';
 
@@ -48,7 +49,7 @@ export function CategoryFormDialog({
       toast.success(mode === 'create' ? '分类已创建' : '分类已重命名');
       onClose();
     } else {
-      toast.error(useCategoriesStore.getState().error ?? '操作失败');
+      reportFailure('分类操作失败', useCategoriesStore.getState().error);
     }
   };
 
@@ -115,7 +116,7 @@ export function CategoryDeleteDialog({
     if (report) {
       onDeleted(report.movedNotes + report.unassignedNotes);
     } else {
-      toast.error(useCategoriesStore.getState().error ?? '删除失败');
+      reportFailure('删除分类失败', useCategoriesStore.getState().error);
     }
   };
 

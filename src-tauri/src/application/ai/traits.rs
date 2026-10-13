@@ -26,6 +26,20 @@ pub enum DecisionKind {
     EvidenceSufficiency,
 }
 
+impl DecisionKind {
+    /// 与 serde 的 `SCREAMING_SNAKE_CASE` 一致的字符串（Trace、日志、缓存列都用它）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DecisionKind::Relevance => "RELEVANCE",
+            DecisionKind::Utility => "UTILITY",
+            DecisionKind::Freshness => "FRESHNESS",
+            DecisionKind::Conflict => "CONFLICT",
+            DecisionKind::Superseded => "SUPERSEDED",
+            DecisionKind::EvidenceSufficiency => "EVIDENCE_SUFFICIENCY",
+        }
+    }
+}
+
 /// 决策输出状态（与 V2.0 文档 §11 一致的枚举）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -99,6 +113,26 @@ pub trait DecisionModel: Send + Sync {
         kind: DecisionKind,
         state: &DecisionState,
     ) -> crate::core::error::Result<Vec<DecisionResult>>;
+
+    /// 判断一组材料是否**互相矛盾**（Track C5 的语义档）。
+    ///
+    /// 默认返回 `Ok(None)` = "这一档不做语义冲突判断"，调用方据此回退规则档（极性词）。
+    /// 本地 / 在线模型覆写它，让冲突判定从"关键词对峙"升级为"模型判 CONFLICT"。
+    fn judge_conflict(
+        &self,
+        _query: &str,
+        _candidates: &[DecisionCandidate],
+    ) -> crate::core::error::Result<Option<ConflictVerdict>> {
+        Ok(None)
+    }
+}
+
+/// 一组材料是否互相矛盾的判定结果（Track C5）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictVerdict {
+    pub conflict: bool,
+    pub reason: String,
 }
 
 /// 检索片段（分块后的证据单元）。
@@ -151,6 +185,22 @@ pub trait GenerativeModel: Send + Sync {
         &self,
         request: &GenerationRequest,
     ) -> crate::core::error::Result<GenerationResponse>;
+
+    /// 增量生成（Track C1）：成功时返回**完整**结果，并在过程中按块回调 `on_delta`。
+    ///
+    /// 默认实现退化为"一次性生成 + 一次回调"——不支持流式的 provider（例如模板实现）
+    /// 不必改一行代码，就能走同一条调用路径。支持流式的 provider 覆写它。
+    ///
+    /// 约定：`on_delta` 收到的是**增量片段**（不是累计文本），调用方自己累加。
+    fn complete_streaming(
+        &self,
+        request: &GenerationRequest,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> crate::core::error::Result<GenerationResponse> {
+        let response = self.complete(request)?;
+        on_delta(&response.text);
+        Ok(response)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

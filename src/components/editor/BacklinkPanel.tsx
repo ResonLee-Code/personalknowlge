@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 
 import { Skeleton } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { reportFailure } from '@/lib/actionFeedback';
 import { ROUTES } from '@/lib/constants';
 import { errorMessage, formatRelative } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -84,7 +85,7 @@ export function BacklinkPanel({ noteId, refreshKey = 0 }: BacklinkPanelProps) {
       toast.success(`已创建「${created.note.title}」并建立链接`);
       await loadRef.current();
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('创建关联笔记失败', errorMessage(error));
     } finally {
       setCreating(null);
     }

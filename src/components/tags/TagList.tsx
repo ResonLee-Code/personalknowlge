@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { cn } from '@/lib/utils';
 import { useTagsStore } from '@/stores/tagsStore';
 
@@ -33,7 +34,7 @@ export function TagList() {
       setOpen(false);
       setName('');
     } else {
-      toast.error(useTagsStore.getState().error ?? '创建失败');
+      reportFailure('创建标签失败', useTagsStore.getState().error);
     }
   };
 

@@ -246,6 +246,23 @@ export interface SearchHit {
   titleMatched: boolean;
   snippet: TextSegment[];
   matchedTerms: string[];
+  /** 命中在原文里的精确区间（N5）；`undefined` = 没能定位（例如只命中标签/分类） */
+  location?: SearchMatch;
+}
+
+/**
+ * 命中在原文里的精确区间（N5）。
+ *
+ * **区间按码点（Unicode 标量值）计**，与后端 `chunk_markdown` 同一口径——
+ * 换算到 CodeMirror / JS 的 UTF-16 下标请用 `codepointRangeToUtf16`。
+ */
+export interface SearchMatch {
+  /** 命中所在分块的标题路径（空串 = 标题之前） */
+  heading: string;
+  /** 命中所在分块的下标（检索通道化用它做去重身份） */
+  chunkIndex: number;
+  charStart: number;
+  charEnd: number;
 }
 
 export interface SearchResponse {
@@ -652,6 +669,29 @@ export interface AiPolicy {
   remoteModelAuthorizedAt?: string | null;
   /** 是否已配置 API Key（**只回显「有没有」，Key 本身不返回**） */
   remoteModelKeySet: boolean;
+  /** 逐次外发确认（Track C2，可选闸门）：开启后每次把内容交给在线模型都要单独确认 */
+  confirmEachOutbound: boolean;
+  /** 向量检索（D3/N7，默认关闭）：开启后检索多一路「向量召回」 */
+  vectorEnabled: boolean;
+  /** 嵌入模型名（例如 `text-embedding-3-small`）；为空 = 向量档不可用 */
+  remoteEmbeddingModel?: string | null;
+  /** 向量检索授权时间：查询词会发给嵌入端点，需要确认一次 */
+  vectorAuthorizedAt?: string | null;
+  /**
+   * 决策模型档（D4）：`rule`（默认，离线规则）/ `system_one`
+   * （TypeSafe Jev 或 Perplexity Decisions —— 两者协议相同，只有端点与模型名不同）
+   */
+  decisionProvider?: 'rule' | 'system_one' | null;
+  /** 决策模型端点基地址（为空 = 按 provider 预设） */
+  decisionBaseUrl?: string | null;
+  /** 决策模型名（为空 = 按 provider 预设） */
+  decisionModel?: string | null;
+  /** 决策档授权时间：打分会把材料片段发给该端点，需确认一次 */
+  decisionAuthorizedAt?: string | null;
+  /** 是否已配置决策模型 Key（**只回显布尔**） */
+  decisionKeySet: boolean;
+  /** 出站代理（默认跟随系统代理）；给"只有浏览器能上外网"的环境兜底 */
+  outboundProxy?: string | null;
   budget: AiResearchBudget;
   auditMaxEntries: number;
 }
@@ -680,7 +720,177 @@ export interface UpdateAiPolicyInput {
   confirmRemoteModel?: boolean;
   /** API Key：**只写不读**；传空字符串表示清除 */
   remoteModelApiKey?: string | null;
+  /** 逐次外发确认开关（Track C2，默认关闭） */
+  confirmEachOutbound?: boolean;
+  /** 向量检索开关（D3，默认关闭） */
+  vectorEnabled?: boolean;
+  /** 嵌入模型名；传空字符串表示清除（换模型会作废向量授权） */
+  remoteEmbeddingModel?: string | null;
+  /** 置 true 表示用户确认了「查询词与片段会发给嵌入端点」 */
+  confirmVector?: boolean;
+  /** 决策模型档：`rule` / `system_one` */
+  decisionProvider?: 'rule' | 'system_one';
+  /** 决策模型基地址；传空字符串表示回到预设 */
+  decisionBaseUrl?: string | null;
+  /** 决策模型名；传空字符串表示清除 */
+  decisionModel?: string | null;
+  /** 置 true 表示用户确认了「材料片段会发给决策端点」 */
+  confirmDecision?: boolean;
+  /** 决策模型 API Key：**只写不读**；传空字符串表示清除 */
+  decisionApiKey?: string | null;
+  /** 出站代理；传空字符串表示跟随系统 */
+  outboundProxy?: string | null;
   budget?: AiResearchBudget;
+}
+
+/** 决策模型契约探针的一条题目（D4） */
+export interface DecisionProbeItem {
+  name: string;
+  question: string;
+  /** 标准答案；`null` = 只观察（自洽性/矛盾判别） */
+  expectedYes?: boolean | null;
+  pYes: number;
+}
+
+/** 校准分箱（D4）：说多少 vs 实际对多少 */
+export interface CalibrationBin {
+  range: string;
+  count: number;
+  meanStated: number;
+  actualShare: number;
+}
+
+/** 校准评估（D4） */
+export interface Calibration {
+  samples: number;
+  /** 期望校准误差；公开研究用的线是 0.05 */
+  ece: number;
+  brier: number;
+  bins: CalibrationBin[];
+}
+
+/** 决策模型契约探针报告（D4）：用我们自己的中文题跑出来的实测指标 */
+export interface DecisionProbeReport {
+  provider: string;
+  model: string;
+  host: string;
+  items: DecisionProbeItem[];
+  /** 有标准答案的题目上的准确率 */
+  accuracy?: number | null;
+  scoredItems: number;
+  /** 期望校准误差（ECE）+ Brier + 分箱表 */
+  calibration: Calibration;
+  /** 只算「材料里能推出来」那一族 */
+  calibrationDeterminable: Calibration;
+  /** 只算「材料里没有答案」那一族：校准的模型应当给 ~0.5 */
+  calibrationUnderdetermined: Calibration;
+  /** 「材料里没有答案」那族的平均陈述概率（理想 ≈0.5） */
+  meanStatedUnderdetermined?: number | null;
+  /** 折外校准误差（一半拟合、一半评估）——"拟合到底有没有用"的诚实答案 */
+  outOfSampleEce?: number | null;
+  /** 自洽性：P(A) + P(¬A)，理想 ≈1 */
+  coherence?: number | null;
+  /** 同一请求跑两次是否逐位相同 */
+  deterministic: boolean;
+  conflictPairYes?: number | null;
+  nonConflictPairYes?: number | null;
+  calls: number;
+  inputTokens: number;
+  latencyMs: number;
+  /** 按公开单价估算的美元成本（估算值） */
+  estimatedUsd: number;
+  note: string;
+  /** A/B 对比（D4 收尾）：同一批打分任务上，规则档 vs 决策档 */
+  ab: AbReport;
+}
+
+/** A/B：一个档位在同一批打分任务上的表现 */
+export interface AbOutcome {
+  provider: string;
+  /** 判定为「该用」的准确率（阈值 0.5） */
+  accuracy: number;
+  meanRelevant: number;
+  meanIrrelevant: number;
+  /** 区分度：相关均分 − 不相关均分（越大越能分开；为负说明分反了） */
+  separation: number;
+  correct: number;
+  total: number;
+}
+
+/** A/B 报告 */
+export interface AbReport {
+  cases: number;
+  rule: AbOutcome;
+  decision: AbOutcome;
+  decisionBetter: boolean;
+  note: string;
+}
+
+/** 向量索引状态（D3/N7） */
+export interface VectorIndexStatus {
+  available: boolean;
+  builtChunks: number;
+  totalChunks: number;
+  model?: string | null;
+  builtAt?: string | null;
+  note: string;
+}
+
+/** 构建向量索引之前的预览（要发多少、发给谁） */
+export interface VectorIndexPreview {
+  willSend: boolean;
+  host?: string | null;
+  notes: number;
+  chunksTotal: number;
+  /** 本次真正要外发的片段数（增量） */
+  chunksToEmbed: number;
+  reason: string;
+}
+
+/** 一次向量索引构建的结果 */
+export interface VectorIndexReport {
+  model: string;
+  totalChunks: number;
+  embedded: number;
+  skipped: number;
+  tookMs: number;
+}
+
+/** 本地模型的「低配机型预设」（Track C3）：值来自后端常量，前端只展示与填充 */
+export interface LocalModelPreset {
+  /** Ollama 模型名（可直接 `ollama pull`） */
+  name: string;
+  label: string;
+  /** 近似下载体积（字节）；仅用于粗估，不作为精确值 */
+  approxBytes: number;
+  /** 展示用的体积文案（例如 `≈1.9 GB`） */
+  approxSize: string;
+  /** 内存提示（定性） */
+  memoryHint: string;
+  note: string;
+}
+
+/** 可用档位（Track C4） */
+export type AiTier = 'online' | 'local' | 'template';
+
+/** 模型自检的逐档核对 */
+export interface AiDiagnosisCheck {
+  tier: AiTier;
+  label: string;
+  available: boolean;
+  /** 为什么可用 / 不可用（人话） */
+  detail: string;
+}
+
+/** 模型自检结论：现在「写报告」会用哪一档、为什么 */
+export interface AiDiagnosis {
+  enabled: boolean;
+  tier: AiTier;
+  /** 与研究报告 `composer` 同源的 provider 标识 */
+  providerId: string;
+  reason: string;
+  checks: AiDiagnosisCheck[];
+  note?: string | null;
 }
 
 /** 联网检索候选（D3）：尚未抓正文 */
@@ -736,7 +946,42 @@ export type ResearchWarningKind =
   | 'templateGenerated'
   | 'modelGenerated'
   /** 有检索结果被域名策略（黑名单 / 白名单）丢弃，未进入来源列表 */
-  | 'droppedSources';
+  | 'droppedSources'
+  /** 证据不足（D5/N9）：材料撑不起结论，报告如实说「不够」，不硬答 */
+  | 'insufficientEvidence';
+
+/** 证据缺口的一类（D5/N9） */
+export type ResearchEvidenceGapKind =
+  | 'noMaterial'
+  | 'partialCoverage'
+  | 'noCrossCheck'
+  | 'thinEvidence'
+  | 'weakOnly'
+  | 'staleOnly';
+
+/** 一处证据缺口：差在哪、影响哪些子问题、涉及哪些来源 */
+export interface ResearchEvidenceGap {
+  kind: ResearchEvidenceGapKind;
+  message: string;
+  subQuestionIds?: string[];
+  references?: number[];
+}
+
+/**
+ * 证据充分性评估（D5/N9）：研究的「够不够」。
+ * 判定看 `sufficient` 与 `gaps`；`score` 只是展示用的趋势指标。
+ */
+export interface ResearchEvidenceAssessment {
+  sufficient: boolean;
+  score: number;
+  coveredSubQuestions: number;
+  totalSubQuestions: number;
+  independentSources: number;
+  usableSources: number;
+  gaps: ResearchEvidenceGap[];
+  verdict: string;
+  recommendation: string;
+}
 
 /** 研究请求（`research_start` 输入；只有课题必填） */
 export interface ResearchRequest {
@@ -765,6 +1010,8 @@ export interface ResearchPlan {
   topic: string;
   scope?: string | null;
   subQuestions: ResearchSubQuestion[];
+  /** 本次实际使用的检索查询（D5/N9 查询扩展）：第一条永远是课题原文 */
+  queries?: string[];
   localBaseline: ResearchKbBaseline[];
   timeWindowDays: number;
   budget: AiResearchBudget;
@@ -822,9 +1069,18 @@ export interface ResearchReport {
   generatedAt: string;
   /** 「资料截至 YYYY-MM-DD」 */
   dataCutoff: string;
+  /** 证据充分性（D5/N9）：材料够不够撑结论；旧会话的报告没有这一段 */
+  evidence?: ResearchEvidenceAssessment | null;
   composer: string;
   /** 打分用的决策模型标识（规则档 `rule`；Jev 接入后可能变化） */
   decisionProvider?: string;
+  /**
+   * 冲突判定用的档位（Track C5）：`rule`（规则档，极性词）或模型档
+   * （`local.ollama` / `remote.openai-compatible`；多个用 ` / ` 连接）
+   */
+  conflictProvider?: string;
+  /** 打分的可解释 Trace（Track D2/N6）：缓存是否命中、试过哪些档、为什么失败 */
+  decisionTrace?: DecisionTrace | null;
   conclusions: ResearchClaim[];
   keyFacts: ResearchClaim[];
   conflicts: ResearchClaim[];
@@ -897,6 +1153,89 @@ export interface ResearchProgress {
   detail: string;
   pagesFetched: number;
   sources: number;
+}
+
+/**
+ * 「推测段」的生成增量（事件 `ai://research-compose-delta`，Track C1 流式）。
+ *
+ * `text` 是**当前这一档的累计文本**（不是增量）：界面直接替换即可。
+ * 这一档失败时 `text` 为空串 + `state='failed'`——**不留下半截内容**。
+ * 它只是预览，最终以命令返回的报告（`report.speculation`）为准。
+ */
+export interface ResearchComposeDelta {
+  sessionId: string;
+  providerId: string;
+  text: string;
+  state: 'streaming' | 'failed' | 'done';
+}
+
+/** 逐次外发确认预览里的一条片段（Track C2） */
+export interface ResearchOutboundSnippet {
+  title: string;
+  snippet: string;
+}
+
+/**
+ * 「这一次会把什么发给谁」的预览（Track C2；命令 `research_outbound_preview`）。
+ * 只读：不发请求。桌面端用它渲染确认框。
+ */
+export interface ResearchOutboundPreview {
+  willSend: boolean;
+  /** 目标主机（不外发时为 null；不含 Key） */
+  host?: string | null;
+  snippets: ResearchOutboundSnippet[];
+  reason: string;
+}
+
+/** 决策试过的一档（Track D2/N6） */
+export interface DecisionAttempt {
+  /** provider 标识：`rule` / `local.ollama` / `remote.openai-compatible` … */
+  provider: string;
+  ok: boolean;
+  /** 人读原因（不含正文） */
+  detail: string;
+}
+
+/** 一次决策的可解释 Trace（Track D2/N6）：缓存是否命中、试过谁、为什么失败 */
+export interface DecisionTrace {
+  /** 决策类型（`RELEVANCE` 等） */
+  kind: string;
+  /** `hit` = 吃缓存；`miss` = 真的走了一遍候选链 */
+  cache: 'hit' | 'miss';
+  /** 最终生效的档位（全军覆没时为空串） */
+  provider: string;
+  candidates: number;
+  attempts: DecisionAttempt[];
+  tookMs: number;
+}
+
+/** 一个检索通道的状态（D3/N7）：这次检索用了哪些通道、谁不可用、为什么 */
+export interface RetrievalChannelStatus {
+  /** `bm25` / `vector` / `graph` */
+  id: string;
+  available: boolean;
+  note: string;
+}
+
+/** 融合后的一条检索命中（D3/N7） */
+export interface RetrievalHit {
+  noteId: string;
+  chunkIndex: number;
+  /** 标题路径（`A > B`） */
+  heading: string;
+  snippet: string;
+  charStart: number;
+  charEnd: number;
+  /** RRF 融合分（越大越靠前） */
+  score: number;
+  /** 贡献这条命中的通道 */
+  providers: string[];
+}
+
+/** 一次多通道检索的完整报告（命令 `ai_retrieval_search`） */
+export interface RetrievalReport {
+  channels: RetrievalChannelStatus[];
+  hits: RetrievalHit[];
 }
 
 export interface ResearchSessionSummary {

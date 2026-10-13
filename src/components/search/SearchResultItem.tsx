@@ -5,6 +5,7 @@ import { HighlightSegments } from '@/components/search/HighlightSegments';
 import { formatRelative } from '@/lib/format';
 import { splitHighlight } from '@/lib/highlight';
 import { cn } from '@/lib/utils';
+import { useUiStore } from '@/stores/uiStore';
 import type { SearchHit } from '@/types';
 
 export function SearchResultItem({
@@ -17,12 +18,23 @@ export function SearchResultItem({
   active?: boolean;
 }) {
   const navigate = useNavigate();
+  const setPendingHighlight = useUiStore((state) => state.setPendingHighlight);
   const titleSegments = splitHighlight(hit.note.title, hit.matchedTerms.length > 0 ? hit.matchedTerms : [keyword]);
 
   return (
     <button
       type="button"
-      onClick={() => navigate(`/notes/${hit.note.id}`)}
+      onClick={() => {
+        // N5：命中带了**原文精确区间**时，交给编辑器滚过去并选中那一段
+        if (hit.location) {
+          setPendingHighlight({
+            noteId: hit.note.id,
+            charStart: hit.location.charStart,
+            charEnd: hit.location.charEnd,
+          });
+        }
+        navigate(`/notes/${hit.note.id}`);
+      }}
       className={cn(
         'flex w-full flex-col gap-1 rounded-lg border px-3 py-2 text-left transition-colors',
         active
@@ -51,6 +63,7 @@ export function SearchResultItem({
         </span>
       ) : null}
       <span className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--ink-subtle)]">
+        {hit.location?.heading ? <span>§ {hit.location.heading}</span> : null}
         <span>{hit.note.categoryPath || 'Inbox'}</span>
         <span>· {formatRelative(hit.note.updatedAt)}</span>
         {hit.note.tags.map((tag) => (

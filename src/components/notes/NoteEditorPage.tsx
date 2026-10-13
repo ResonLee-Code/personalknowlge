@@ -36,7 +36,7 @@ import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
 import { SaveTemplateDialog } from '@/components/editor/SaveTemplateDialog';
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { SourceDialog } from '@/components/editor/SourceDialog';
-import { reportAction } from '@/lib/actionFeedback';
+import { reportAction, reportFailure } from '@/lib/actionFeedback';
 import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
 import { TagEditor } from '@/components/editor/TagEditor';
 import { ResizeHandle } from '@/components/layout/ResizeHandle';
@@ -53,6 +53,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/badge';
 import { useAutosave } from '@/hooks/useAutosave';
+import { codepointRangeToUtf16 } from '@/lib/highlightRange';
 import {
   attachmentAltText,
   buildImageMarkdown,
@@ -105,6 +106,8 @@ export function NoteEditorPage() {
   const fontSize = useUiStore((state) => state.fontSize);
   const editorSplitRatio = useUiStore((state) => state.editorSplitRatio);
   const setEditorSplitRatio = useUiStore((state) => state.setEditorSplitRatio);
+  const pendingHighlight = useUiStore((state) => state.pendingHighlight);
+  const setPendingHighlight = useUiStore((state) => state.setPendingHighlight);
 
   const [content, setContent] = useState('');
   const [title, setTitle] = useState('');
@@ -169,7 +172,7 @@ export function NoteEditorPage() {
           });
           snippets.push(buildImageMarkdown(saved.linkPath, attachmentAltText(file.name)));
         } catch (error) {
-          toast.error(errorMessage(error));
+          reportFailure('粘贴图片失败', errorMessage(error));
         }
       }
       if (snippets.length === 0) return null;
@@ -193,6 +196,31 @@ export function NoteEditorPage() {
     view.focus();
     setActiveHeadingOffset(offset);
   }, []);
+
+  /**
+   * N5：从搜索结果跳进来时，把命中的**精确区间**选中并滚到那里。
+   *
+   * 后端给的是**码点**下标，CodeMirror 要 **UTF-16** 下标 —— 这里显式换算
+   * （含 emoji 时两者会差位，`codepointRangeToUtf16` 有单测钉住）。
+   * 消费一次就清空待办，避免用户继续编辑时又被拽回去。
+   */
+  useEffect(() => {
+    if (!pendingHighlight) return;
+    if (!detail || detail.note.id !== pendingHighlight.noteId) return;
+    const view = editorViewRef.current?.view;
+    if (!view) return;
+    const { from, to } = codepointRangeToUtf16(
+      content,
+      pendingHighlight.charStart,
+      pendingHighlight.charEnd,
+    );
+    view.dispatch({
+      selection: to > from ? { anchor: from, head: to } : { anchor: from },
+      effects: EditorView.scrollIntoView(from, { y: 'start' }),
+    });
+    view.focus();
+    setPendingHighlight(null);
+  }, [pendingHighlight, detail, content, setPendingHighlight]);
 
   /**
    * 大纲点击：编辑器可用时跳编辑器；纯预览模式（编辑器未挂载）按标题**序号**

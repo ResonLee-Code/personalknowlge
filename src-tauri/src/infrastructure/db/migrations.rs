@@ -65,9 +65,24 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "note_declared_parent",
         sql: include_str!("../../../migrations/010_note_declared_parent.sql"),
     },
+    Migration {
+        version: 11,
+        name: "note_chunks",
+        sql: include_str!("../../../migrations/011_note_chunks.sql"),
+    },
+    Migration {
+        version: 12,
+        name: "decision_cache",
+        sql: include_str!("../../../migrations/012_decision_cache.sql"),
+    },
+    Migration {
+        version: 13,
+        name: "chunk_embeddings",
+        sql: include_str!("../../../migrations/013_chunk_embeddings.sql"),
+    },
 ];
 
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 13;
 
 /// 创建迁移记录表。
 fn ensure_migration_table(conn: &Connection) -> Result<()> {

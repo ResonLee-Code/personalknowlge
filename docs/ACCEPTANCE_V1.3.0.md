@@ -1,0 +1,71 @@
+# V1.3.0 验收记录
+
+口径与 [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) 一致：**没验的不写成通过**；
+只能人眼判断的标「待人工」；不确定的写清"哪里还不确定"。
+
+本文件记录 **V1.3.0** 出包前后的验证实况（2026-10-14，macOS 27 / arm64 本机）。
+
+## A. 发布前守护（✅ 本机全绿）
+
+| 项目 | 结果 | 证据 |
+| --- | --- | --- |
+| 版本一致性（四处） | ✅ `1.3.0` | `package.json` / `src-tauri/Cargo.toml` / `Cargo.lock` / `tauri.conf.json`；`pnpm test` 的版本身份守卫 + CI preflight 逻辑本地模拟 |
+| 前端 | ✅ 66 文件 / 353 用例 | `pnpm test`；`pnpm lint`、`pnpm build` 通过 |
+| Rust | ✅ 47 个测试目标全绿 | `cargo test --offline` |
+| E2E 主流程 | ✅ 1 条通过 | `pnpm test:e2e` |
+| 性能基准（E2） | ✅ 全部过线 | `pnpm bench`：检索 p95 **48.0 ms**、recall@5 **100%**；3 万图谱全量 **905.4 ms**（红线 1.5 s） |
+| 真机验收（E1 脚本） | ✅ 自动步骤 **71 步通过 / 0 步失败** | `docs/acceptance/20261014-020747/report.md`（跑的是**本版签过名的 .app**）；15 次点击全部走 `AXPress` |
+
+## B. 产物（✅ 本机产出并逐一验过）
+
+| 产物 | 结果 | 怎么验的 |
+| --- | --- | --- |
+| `.app` | ✅ 10,668,262 B，`CFBundleShortVersionString = 1.3.0` | `pnpm tauri build --bundles app`（tauri 日志显示 `Signing with identity "-"`） |
+| `.dmg` | ✅ 5,431,245 B | 本机默认路径需要「自动化 → 访达」授权（否则 `-1743`），改加 `--skip-jenkins` 产出；**已挂载验证**：里面有 `.app` 与 `Applications` 链接，卸载后卷正常卸载 |
+| ad-hoc 签名 | ✅ `valid on disk` / `satisfies its Designated Requirement` | `codesign --verify --deep --strict`；`Identifier=com.personalknowledge.os` |
+
+体积逐项对照见 [ARTIFACT_SIZES.md](./ARTIFACT_SIZES.md)（含 debug/release 口径差异、Windows 产物等）。
+
+## C. 安装 / 卸载（✅ 本机演练；🖐 干净机器待补）
+
+本机做的（2026-10-14）：
+
+1. `ditto` 把签好名的 `.app` 放进 `/Applications` → `codesign --verify` 通过 → **启动正常**（截图）；
+2. **卸载**：把 `/Applications` 下的 `.app` 移除（本机移到 `/tmp/pkos-uninstalled.*`，可随时搬回）；
+3. 卸载后检查**用户数据完好**：工作区 28 篇笔记 / 9.9 MB、`.knowledge/` 目录都在——
+   **卸载不碰知识库**；
+4. 顺带记录"卸载会留下什么"：`~/Library/Application Support/PersonalKnowledgeOS`（应用数据）与
+   `~/Library/Preferences/com.personalknowledge.os.plist`（偏好）**不会被自动清掉**，需要用户手动删。
+
+**待干净机器补（A2）**：在一台**没装过本应用**的机器上，走一遍
+「从网络下载 `.dmg` → 首次打开放行 → 拖进应用程序 → 建库 / 恢复备份 → 卸载 → 确认数据仍在」，
+并逐条截图。第 10 条（首次启动放行）**只对"从网络下载的包"有意义**，本机构建没有 quarantine 标记，
+所以这一条脚本覆盖不了。
+
+> 关于"首次打开放行"的实测（本机用 `xattr` 人工打上 quarantine 复现，2026-10-14）：
+> - **不配签名身份**（只留链接器签名）时，弹的是「已损坏，无法打开。你应该将它移到废纸篓。」
+>   ——**没有「打开」选项**，用户只能取消或移到废纸篓；
+> - 配上 `bundle.macOS.signingIdentity = "-"`（ad-hoc 签名）后，弹的是「**无法验证开发者**」，
+>   可以到 系统设置 → 隐私与安全性 → **仍要打开** 放行。
+>
+> 两种弹窗都截了图（`src-tauri/target/acceptance-debug/gk-*.png`），对照表见
+> [BUILD_COMMANDS.md](./BUILD_COMMANDS.md) 的「为什么必须有 ad-hoc 签名」。
+
+## D. 已知限制（不改代码也成立）
+
+1. **未签名（Developer ID）/ 未公证**：即便是 ad-hoc 签名，`spctl --assess` 仍是 `rejected`；
+   下载副本首次打开需要用户放行一次（见上）。要"双击即开"需要 Apple 开发者证书 + 公证；
+2. **Windows 产物未签名**：SmartScreen 需放行；且由 macOS 交叉编译产出，**尚未在真实 Windows 上验收**；
+3. **`.dmg` 的窗口装饰**：本机没授权「自动化 → 访达」，本地产出的 `.dmg` 用 `--skip-jenkins`
+   跳过了装饰（没有背景图与图标排布）；CI（有图形会话）产出的是带装饰的版本；
+4. **观察记录**：本机用 AppleScript 的 `quit` 事件没能让应用退出（应用不响应该事件），
+   `⌘Q` 与 `SIGTERM` 正常——日常使用无影响，但写自动化脚本时要注意；
+5. 其余沿用 [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) §G（模型默认不接、检索源自己填等）。
+
+## E. 相关文档
+
+- [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md)：上一版完整验收清单与已知限制
+- [PLAN_V1.3.0.md](./PLAN_V1.3.0.md)：本版计划、剩余任务与证据
+- [BUILD_COMMANDS.md](./BUILD_COMMANDS.md)：打包命令、签名要求、常见坑
+- [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)：发版步骤与 CI 流水线
+- [ARTIFACT_SIZES.md](./ARTIFACT_SIZES.md)：体积对照与口径

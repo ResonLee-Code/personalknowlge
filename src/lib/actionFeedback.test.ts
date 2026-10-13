@@ -22,7 +22,16 @@ describe('reportAction（失败不能报成功）', () => {
   it('失败时报错并带上 store 里的原因', () => {
     reportAction(false, '已收藏', '笔记不存在或已被删除。', '收藏失败');
     expect(toast.success).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith('收藏失败：笔记不存在或已被删除。');
+    // Track F2：标题只有摘要，**完整原因**放 description（长文本不再挤在标题里被截断），
+    // 停留时间放长，并给一个「复制详情」动作
+    const [message, options] = vi.mocked(toast.error).mock.calls[0] as [
+      string,
+      { description?: string; duration?: number; action?: { label: string } },
+    ];
+    expect(message).toBe('收藏失败');
+    expect(options?.description).toBe('笔记不存在或已被删除。');
+    expect(options?.duration).toBeGreaterThan(5000);
+    expect(options?.action?.label).toBe('复制详情');
   });
 
   it('失败且没有原因时用兜底文案', () => {

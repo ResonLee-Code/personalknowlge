@@ -36,7 +36,9 @@ preflight（ubuntu-22.04）
 # 2) 本地回归
 cargo test --offline --manifest-path src-tauri/Cargo.toml
 pnpm test && pnpm build && pnpm test:e2e
-# 3) 提交并打标签
+# 3) 性能守护（1 万检索 + 3 万图谱，超阈值即失败；数字抄进 CHANGELOG）
+pnpm bench
+# 4) 提交并打标签
 git add -A && git commit -m "release: VX.Y.Z"
 git tag vX.Y.Z && git push origin main --tags
 ```
@@ -47,13 +49,14 @@ git tag vX.Y.Z && git push origin main --tags
 
 | 平台 | 文件 | 备注 |
 | --- | --- | --- |
-| macOS（arm64） | `Personal Knowledge OS_X.Y.Z_aarch64.dmg` | 未签名，首次打开需右键 →「打开」 |
+| macOS（arm64） | `Personal Knowledge OS_X.Y.Z_aarch64.dmg` | **ad-hoc 签名**（无 Developer ID、无公证）：下载副本首次打开会提示「无法验证开发者」，到 系统设置 → 隐私与安全性 → **仍要打开** 放行一次。若看到的是「**已损坏**」，说明这一版没走 ad-hoc 签名——见 [BUILD_COMMANDS.md](./BUILD_COMMANDS.md) 的「为什么必须有 ad-hoc 签名」 |
 | Windows（x64） | `..._x64-setup.exe`（NSIS）、`..._x64-portable.zip` | 未签名，SmartScreen 需放行 |
 | Linux（x64） | `*.deb`、`*.rpm`、`*.AppImage` | 需 WebKitGTK 4.1；AppImage 需 `chmod +x` |
 
 每个平台各自的 `SHA256SUMS-<platform>.txt` 会一并附在 Release 上，另有汇总的
 `SHA256SUMS-all.txt`。验收清单见：
-[当前版本（V1.2.1）](./ACCEPTANCE_V1.2.1.md) ·
+[当前版本（V1.3.0）](./ACCEPTANCE_V1.3.0.md) ·
+[上一版（V1.2.1）](./ACCEPTANCE_V1.2.1.md) ·
 [上一版产物（V1.2.0）](./ACCEPTANCE_V1.2.0.md) ·
 [Windows 安装说明](./WINDOWS_INSTALL_GUIDE.md) · [Linux 安装说明](./LINUX_INSTALL_GUIDE.md)。
 

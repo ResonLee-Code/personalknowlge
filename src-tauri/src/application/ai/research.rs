@@ -21,9 +21,11 @@ use crate::application::ai::template_provider::TemplateGenerativeModel;
 use crate::application::ai::tools::AiTools;
 use crate::application::ai::rule_provider::RuleDecisionProvider;
 use crate::application::ai::local_model::OllamaModel;
+use crate::application::ai::decision_engine::DecisionEngine;
 use crate::application::ai::remote_model::RemoteModel;
+use crate::application::ai::system_one::SystemOneDecisionModel;
 use crate::application::ai::traits::{
-    DecisionCandidate, DecisionKind, DecisionModel, DecisionResult, DecisionState,
+    DecisionCandidate, DecisionKind, DecisionModel, DecisionState,
     GenerationRequest, GenerativeModel, RetrievalOrigin, RetrievedChunk,
 };
 use super::web_search;
@@ -34,15 +36,16 @@ use crate::core::events::events as event_names;
 use crate::core::ids::ulid;
 use crate::core::text::first_sentence;
 use crate::core::time::{date_offset_days, now_iso, today_date};
-use crate::domain::ai::NetworkMode;
+use crate::domain::ai::{DecisionTrace, NetworkMode};
 use crate::domain::note::{CreateNoteInput, NoteListQuery, SaveNoteInput, SetSourceInput};
 use crate::domain::research::{
     DuplicateNote, KbBaseline, KbRelation, ResearchClaim, ResearchPlan, ResearchProposal,
     ResearchReport, ResearchRequest, ResearchSession, ResearchSessionSummary, ResearchSource,
     ResearchStatus, ResearchStepLog, ResearchWarning, SourceLevel, SourceOrigin, SubQuestion,
     WarningKind, ResearchWriteInput, ResearchWriteResult, WRITE_MODE_ABANDON, WRITE_MODE_APPEND,
-    WRITE_MODE_CREATE, DroppedSource,
+    WRITE_MODE_CREATE, DroppedSource, ResearchOutboundPreview, ResearchOutboundSnippet,
 };
+use super::host::host_of;
 
 /// 每个子问题最多采纳的本地材料条数。
 const HITS_PER_SUB_QUESTION: usize = 6;
@@ -127,6 +130,24 @@ impl ResearchService {
                 "detail": detail,
                 "pagesFetched": pages,
                 "sources": sources,
+            }),
+        );
+    }
+
+    /// 推送「推测段」的生成增量（Track C1 流式）。
+    ///
+    /// `text` 传的是**当前这一档的累计文本**（不是增量），界面直接替换即可：
+    /// 新的一档从空串开始，于是上一档的半截内容会被自然清掉；这一档失败时
+    /// 显式发一次空串 + `failed`，保证**界面上不留下半截内容**。
+    /// 这些只是预览——最终以命令返回的报告（`report.speculation`）为准。
+    fn emit_compose_delta(&self, session_id: &str, provider_id: &str, text: &str, state: &str) {
+        self.ctx.events.emit(
+            event_names::RESEARCH_COMPOSE_DELTA,
+            serde_json::json!({
+                "sessionId": session_id,
+                "providerId": provider_id,
+                "text": text,
+                "state": state,
             }),
         );
     }
@@ -217,13 +238,30 @@ impl ResearchService {
     ///
     /// 「本地机器跑不动模型」是常态（应用是本地软件、跨平台部署），所以在线这一档必须存在；
     /// 但它**永远排在闸门之后**，不是自动生效的。
-    fn decision_candidates(&self) -> Vec<Arc<dyn DecisionModel>> {
+    fn model_decision_candidates(&self, confirm_outbound: bool) -> Vec<Arc<dyn DecisionModel>> {
         let policy = self.ctx.settings().ai;
         let service = self.policy();
         let mut candidates: Vec<Arc<dyn DecisionModel>> = Vec::new();
+        // ① 决策档（D4：Jev / Perplexity Decisions）——**排在最前**：
+        //    它是专用决策模型（类型化输出 + 校准置信度），配好了就该它先判。
+        //    与其它出站档同一套闸门：没配好/没授权就不构造；开了逐次确认则每次都要确认。
+        if let Some(config) = service.decision_config() {
+            if service.outbound_confirmed(confirm_outbound) {
+                candidates.push(Arc::new(SystemOneDecisionModel::new(&config)));
+            } else {
+                service.audit("research_score", false, "denied", 0, Some("OUTBOUND_UNCONFIRMED"));
+            }
+        }
         if policy.remote_model_score && service.ensure_remote_model_allowed("research_score").is_ok() {
-            if let Some((base, model, key)) = service.remote_model() {
-                candidates.push(Arc::new(RemoteModel::new(&base, &model, &key)));
+            if service.outbound_confirmed(confirm_outbound) {
+                if let Some((base, model, key)) = service.remote_model() {
+                    candidates.push(Arc::new(
+                        RemoteModel::new(&base, &model, &key).with_proxy(service.outbound_proxy()),
+                    ));
+                }
+            } else {
+                // Track C2：逐次确认未通过 —— 不构造在线档，**一个请求都不会发**
+                service.audit("research_score", false, "denied", 0, Some("OUTBOUND_UNCONFIRMED"));
             }
         }
         if policy.local_model_score {
@@ -232,28 +270,101 @@ impl ResearchService {
                 candidates.push(Arc::new(OllamaModel::new(&endpoint, &model)));
             }
         }
+        candidates
+    }
+
+    /// 打分用的候选链：模型档（在线 / 本地）+ **规则档兜底**（永远可用）。
+    fn decision_candidates(&self, confirm_outbound: bool) -> Vec<Arc<dyn DecisionModel>> {
+        let mut candidates = self.model_decision_candidates(confirm_outbound);
         candidates.push(Arc::clone(&self.decision));
         candidates
+    }
+
+    /// 语义档判冲突（Track C5）：先试模型档（在线 / 本地），全部不可用就**回退规则档**（极性词）。
+    ///
+    /// 返回 `(是否存在冲突, 实际生效的档位)`——档位会写进报告，便于事后核对到底是"模型判的"
+    /// 还是"规则判的"。
+    fn judge_conflict(
+        &self,
+        question: &SubQuestion,
+        evidence: &[&ResearchSource],
+        confirm_outbound: bool,
+    ) -> (bool, String) {
+        // 一条材料谈不上"互相矛盾"：直接走规则档（它同样要求 ≥2 条），省一次调用
+        if evidence.len() >= 2 {
+            let candidates: Vec<DecisionCandidate> = evidence
+                .iter()
+                .enumerate()
+                .map(|(index, source)| DecisionCandidate {
+                    note_id: format!("s{}", index + 1),
+                    title: source.title.clone(),
+                    snippet: source.snippet.clone(),
+                    updated_at: source.published_at.clone().unwrap_or_default(),
+                    source_reliability: Some(source.reliability),
+                    // 来源的时效是"可能过时"标记，不是有效期末尾：这里不臆造，留空
+                    valid_until: None,
+                })
+                .collect();
+            for model in self.model_decision_candidates(confirm_outbound) {
+                let provider = model.id().to_string();
+                match model.judge_conflict(&question.question, &candidates) {
+                    Ok(Some(verdict)) => {
+                        tracing::debug!(
+                            target: "ai",
+                            "冲突判定（{provider}）：{} — {}",
+                            verdict.conflict,
+                            verdict.reason
+                        );
+                        return (verdict.conflict, provider);
+                    }
+                    // 这一档不做语义判断（例如规则实现）：换下一档
+                    Ok(None) => continue,
+                    Err(error) => {
+                        tracing::debug!(target: "ai", "冲突判定失败（{provider}）：{}", error.message);
+                        continue;
+                    }
+                }
+            }
+        }
+        (has_polarity_conflict(evidence), "rule".to_string())
     }
 
     /// 生成侧可用的模型，同样**按优先级排队**：在线（已授权）→ 本地 → 模板实现（调用方兜底）。
     ///
     /// 与打分侧同一套闸门口径：在线这一档没配好或没授权时**根本不构造**，
     /// 所以「没有授权 → 一个字节都不会外发」是靠结构保证的，不是靠调用时记得判断。
-    fn composer_candidates(&self) -> Vec<Arc<dyn GenerativeModel>> {
+    /// 生成档候选链：`(完整 provider 标识, 实现)`。
+    ///
+    /// 携带完整标识（含模型名）是刻意的：流式事件、降级提示、报告 `composer` 必须
+    /// 说同一个名字，否则界面会出现"本地写一半变成 local.ollama，最后又变成 local.ollama:xxx"。
+    fn composer_candidates(&self, confirm_outbound: bool) -> Vec<(String, Arc<dyn GenerativeModel>)> {
         let policy = self.ctx.settings().ai;
         let service = self.policy();
-        let mut candidates: Vec<Arc<dyn GenerativeModel>> = Vec::new();
+        let mut candidates: Vec<(String, Arc<dyn GenerativeModel>)> = Vec::new();
         if policy.remote_model_compose
             && service.ensure_remote_model_allowed("research_compose").is_ok()
         {
-            if let Some((base, model, key)) = service.remote_model() {
-                candidates.push(Arc::new(RemoteModel::new(&base, &model, &key)));
+            if service.outbound_confirmed(confirm_outbound) {
+                if let Some((base, model, key)) = service.remote_model() {
+                    candidates.push((
+                        RemoteModel::provider_id(&model),
+                        Arc::new(
+                            RemoteModel::new(&base, &model, &key)
+                                .with_proxy(service.outbound_proxy()),
+                        ),
+                    ));
+                }
+            } else {
+                // Track C2：逐次确认未通过 —— 不构造在线档，**一个请求都不会发**
+                service.audit("research_compose", false, "denied", 0, Some("OUTBOUND_UNCONFIRMED"));
             }
         }
         if policy.local_model_compose {
             if let Some((endpoint, model)) = service.local_model() {
-                candidates.push(Arc::new(OllamaModel::new(&endpoint, &model)));
+                candidates.push((
+                    OllamaModel::provider_id(&model),
+                    Arc::new(OllamaModel::new(&endpoint, &model)),
+                ));
             }
         }
         candidates
@@ -263,9 +374,14 @@ impl ResearchService {
     ///
     /// 返回**实际生效的** provider 标识：排在前面的一档出错（没装模型 / 超时 / 输出不合规）就
     /// 自动降到下一档，并把降级原因写进审计与报告，绝不让研究流程卡住。
-    fn score_sources(&self, topic: &str, sources: &mut [ResearchSource]) -> (String, Option<String>) {
+    fn score_sources(
+        &self,
+        topic: &str,
+        sources: &mut [ResearchSource],
+        confirm_outbound: bool,
+    ) -> (String, Option<String>, Option<DecisionTrace>) {
         if sources.is_empty() {
-            return (self.decision.id().to_string(), None);
+            return (self.decision.id().to_string(), None, None);
         }
         let key_of = |source: &ResearchSource| -> String {
             source
@@ -288,30 +404,39 @@ impl ResearchService {
                 })
                 .collect(),
         };
-        let candidates = self.decision_candidates();
-        let mut provider = self.decision.id().to_string();
-        let mut scores: Option<Vec<DecisionResult>> = None;
-        let mut fallback_note = None;
-        // 从高到低试：某一档不可用（没装 / 没 pull / 超时 / 输出不合规）就换下一档，流程不中断
-        for (index, model) in candidates.iter().enumerate() {
-            match model.decide(DecisionKind::Relevance, &state) {
-                Ok(results) => {
-                    provider = model.id().to_string();
-                    scores = Some(results);
-                    break;
-                }
-                Err(error) => {
-                    if index + 1 < candidates.len() {
-                        fallback_note = Some(format!(
-                            "{} 打分失败（{}），已退回 {}",
-                            model.id(),
-                            error.message,
-                            candidates[index + 1].id()
-                        ));
-                    }
-                }
+        let candidates = self.decision_candidates(confirm_outbound);
+        // D2/N6：打分统一走**决策引擎** —— 先查缓存、再逐档试，并留下可解释 Trace
+        let engine = DecisionEngine::new();
+        let outcome = engine.decide(&self.ctx.db, DecisionKind::Relevance, &state, &candidates);
+        let (provider, scores, trace) = match outcome {
+            Ok(outcome) => {
+                let provider = if outcome.provider.is_empty() {
+                    self.decision.id().to_string()
+                } else {
+                    outcome.provider.clone()
+                };
+                let scores = if outcome.results.is_empty() {
+                    None
+                } else {
+                    Some(outcome.results)
+                };
+                (provider, scores, Some(outcome.trace))
             }
-        }
+            Err(error) => {
+                tracing::debug!(target: "ai", "决策引擎失败，按「没有模型分」处理：{}", error.message);
+                (self.decision.id().to_string(), None, None)
+            }
+        };
+        // 降级提示：从 Trace 里取第一条失败（文案与之前保持一致）
+        let fallback_note = trace.as_ref().and_then(|trace| {
+            trace
+                .attempts
+                .iter()
+                .find(|attempt| !attempt.ok)
+                .map(|failed| {
+                    format!("{} 打分失败（{}），已退回 {provider}", failed.provider, failed.detail)
+                })
+        });
         for source in sources.iter_mut() {
             let key = key_of(source);
             let model_score = scores.as_ref().and_then(|results| {
@@ -322,7 +447,7 @@ impl ResearchService {
             });
             source.credibility = blended_credibility(model_score, source.reliability);
         }
-        (provider, fallback_note)
+        (provider, fallback_note, trace)
     }
 
     // ---------------------------------------------------------------- ① 立项
@@ -349,6 +474,14 @@ impl ResearchService {
             })
             .collect();
 
+        // D5/N9：一次检索只发一条查询太容易漏——把课题扩成一组查询（第一条仍是课题原文）
+        let expanded = crate::application::ai::query_expansion::expand(
+            &topic,
+            &sub_questions,
+            crate::application::ai::query_expansion::MAX_QUERIES,
+        );
+        let queries: Vec<String> = expanded.iter().map(|item| item.text.clone()).collect();
+
         let mut notes = vec![
             "本次只用本地知识库材料（外部检索属于阶段 D3，接入前不会发起任何请求）。".to_string(),
             format!(
@@ -357,7 +490,16 @@ impl ResearchService {
                 max = sub_questions.len(),
                 days = time_window_days
             ),
-            "子问题与关键词由模板生成；语义化的查询改写要等模型接入（N5/D4）。".to_string(),
+            format!(
+                "检索查询 {} 条（课题原文 + 规则扩展）：{}。扩展只做「括号短语 / 连接词切分 / 拉丁词」，不发明新词。",
+                queries.len(),
+                queries
+                    .iter()
+                    .map(|query| format!("`{query}`"))
+                    .collect::<Vec<_>>()
+                    .join("、")
+            ),
+            "子问题由模板生成；语义化的查询改写要等模型接入（N5/D4）。".to_string(),
             "来源按 §9.3 规则分级：域名内置表 → 内容自证（标题/作者/日期）→ 兜底「弱」。"
                 .to_string(),
         ];
@@ -385,6 +527,7 @@ impl ResearchService {
                 topic: request.topic.trim().to_string(),
                 scope: request.scope.clone(),
                 sub_questions,
+                queries,
                 local_baseline,
                 time_window_days,
                 budget,
@@ -402,6 +545,7 @@ impl ResearchService {
             abort_reason: None,
             written_note_id: None,
             decision_provider: None,
+            decision_trace: None,
             dropped_sources: Vec::new(),
         };
         self.save(&session)?;
@@ -443,8 +587,49 @@ impl ResearchService {
 
         let tools = self.tools();
         let notes = NoteService::new(Arc::clone(&self.ctx));
-        self.emit_progress(session_id, "collect", "正在检索本地知识库…", 0, 0);
-        let hits = tools.kb_search(&plan.topic, MAX_SOURCES * 2)?;
+        // D5/N9：按扩展出来的一组查询逐条检索，再按笔记去重合并。
+        // 顺序有意义：**课题原文的结果排在前面**（它是用户真正问的），扩展查询只做补充。
+        let queries: Vec<String> = if plan.queries.is_empty() {
+            vec![plan.topic.clone()]
+        } else {
+            plan.queries.clone()
+        };
+        self.emit_progress(
+            session_id,
+            "collect",
+            &format!("正在检索本地知识库（{} 条查询）…", queries.len()),
+            0,
+            0,
+        );
+        let mut hits: Vec<crate::application::ai::tools::KbHit> = Vec::new();
+        let mut matched_queries = 0usize;
+        for query in &queries {
+            let found = match tools.kb_search(query, MAX_SOURCES * 2) {
+                Ok(found) => found,
+                Err(error) => {
+                    // 单条查询失败不该让整步崩掉（例如扩展出来的片段被 FTS 判为非法）
+                    tracing::debug!(target: "ai", "查询「{}」检索失败，跳过：{}", query, error.message);
+                    continue;
+                }
+            };
+            matched_queries += 1;
+            for hit in found {
+                if hits.iter().any(|existing| existing.note_id == hit.note_id) {
+                    continue;
+                }
+                hits.push(hit);
+            }
+            if hits.len() >= MAX_SOURCES * 2 {
+                break;
+            }
+        }
+        tracing::debug!(
+            target: "ai",
+            "本地检索：{} 条查询成功 {} 条、去重后命中 {} 篇笔记",
+            queries.len(),
+            matched_queries,
+            hits.len()
+        );
 
         let mut sources: Vec<ResearchSource> = Vec::new();
         let mut per_question: Vec<usize> = vec![0; plan.sub_questions.len()];
@@ -505,6 +690,9 @@ impl ResearchService {
                 fetched_at,
                 applicable_version: None,
                 snippet,
+                char_start: hit.char_start,
+                char_end: hit.char_end,
+                heading: hit.heading.clone(),
                 stale,
                 // 真正入库前由 `score_sources` 用决策层统一打分
                 credibility: grade.level.reliability() as f32 / 5.0,
@@ -613,6 +801,10 @@ impl ResearchService {
                             fetched_at: now_iso(),
                             applicable_version: None,
                             snippet,
+                            // 外部来源没有"原文字符区间"这回事（正文是抓来的，不落库）
+                            char_start: None,
+                            char_end: None,
+                            heading: None,
                             stale,
                             credibility: grade.level.reliability() as f32 / 5.0,
                         });
@@ -652,8 +844,11 @@ impl ResearchService {
             }
         }
         // 决策层打分（§9.6）：规则档默认；开了本地模型就由它打分、失败自动降级
-        let (decision_provider, score_fallback) = self.score_sources(&plan.topic, &mut sources);
+        let (decision_provider, score_fallback, decision_trace) =
+            self.score_sources(&plan.topic, &mut sources, confirmed);
         session.decision_provider = Some(decision_provider.clone());
+        // D2/N6：把这次打分的 Trace 留在会话上，verify 时写进报告（可解释）
+        session.decision_trace = decision_trace;
         if let Some(note) = score_fallback {
             tracing::debug!(target: "ai", "{note}");
             self.policy()
@@ -710,7 +905,10 @@ impl ResearchService {
     // ---------------------------------------------------------------- ③ 验证
 
     /// 验证：按子问题汇总，判定交叉验证与时效。
-    pub fn verify(&self, session_id: &str) -> Result<ResearchSession> {
+    ///
+    /// `confirm_outbound`（Track C2/C5）：冲突判定可能调用在线模型，因此同样受
+    /// 「逐次外发确认」约束——未确认时不构造在线档（零请求），回退本地 / 规则档。
+    pub fn verify(&self, session_id: &str, confirm_outbound: bool) -> Result<ResearchSession> {
         let started = Instant::now();
         self.policy().ensure_enabled("research_verify")?;
         let mut session = self.load(session_id)?;
@@ -726,8 +924,10 @@ impl ResearchService {
             .ok_or_else(|| AppError::internal("会话缺少研究计划。"))?;
 
         let mut claims = Vec::new();
-        // 同一子问题下出现对立表述 → 并列呈现、不进结论段（D4 规则档）
+        // 同一子问题下出现对立表述 → 并列呈现、不进结论段
         let mut conflicting: Vec<String> = Vec::new();
+        // 冲突判定实际用到的档位（C5）：模型判的？还是规则判的？
+        let mut conflict_providers: Vec<String> = Vec::new();
         for question in &plan.sub_questions {
             let all_evidence: Vec<&ResearchSource> = session
                 .sources
@@ -768,11 +968,9 @@ impl ResearchService {
             }
             let mut independent: Vec<String> = Vec::new();
             for source in &evidence {
-                let key = source
-                    .note_id
-                    .clone()
-                    .or_else(|| source_grade::host_of(source.url.as_deref().unwrap_or("")))
-                    .unwrap_or_else(|| format!("ref{}", source.reference));
+                // 独立性口径与证据充分性评估**共用同一个函数**（D5/N9）：
+                // 两处各写一遍迟早会漂移，然后出现"评估说够、结论段却进不去"。
+                let key = crate::application::ai::evidence::source_identity(source);
                 if !independent.contains(&key) {
                     independent.push(key);
                 }
@@ -783,7 +981,9 @@ impl ResearchService {
                 .map(|source| first_sentence(&source.snippet))
                 .filter(|value| !value.is_empty())
                 .collect();
-            let conflict = has_polarity_conflict(&evidence);
+            let (conflict, conflict_provider) =
+                self.judge_conflict(question, &evidence, confirm_outbound);
+            conflict_providers.push(conflict_provider);
             if conflict {
                 conflicting.push(question.id.clone());
             }
@@ -823,7 +1023,26 @@ impl ResearchService {
             .decision_provider
             .clone()
             .unwrap_or_else(|| self.decision.id().to_string());
-        let draft = pending_report(&session, claims, &conflicting, &provider);
+        // 冲突判定用了哪些档（去重后按出现顺序）：报告里要如实写出来
+        let mut unique_conflict_providers: Vec<String> = Vec::new();
+        for used in &conflict_providers {
+            if !unique_conflict_providers.contains(used) {
+                unique_conflict_providers.push(used.clone());
+            }
+        }
+        let conflict_provider = if unique_conflict_providers.is_empty() {
+            "rule".to_string()
+        } else {
+            unique_conflict_providers.join(" / ")
+        };
+        let draft = pending_report(
+            &session,
+            claims,
+            &conflicting,
+            &provider,
+            &conflict_provider,
+            session.decision_trace.clone(),
+        );
         session.report = Some(draft);
         session.status = ResearchStatus::Verified;
         session.updated_at = now_iso();
@@ -873,8 +1092,58 @@ impl ResearchService {
 
     // ---------------------------------------------------------------- ④ 汇总
 
-    /// 汇总：用模板实现生成推测段，渲染固定六段报告。
-    pub fn compose(&self, session_id: &str) -> Result<ResearchSession> {
+    /// 逐次外发确认用的预览（Track C2）：**只读**——不发请求、不写审计。
+    ///
+    /// 回答「如果现在调用在线模型，会把哪些片段、发到哪台主机」。
+    pub fn outbound_preview(&self, session_id: &str) -> Result<ResearchOutboundPreview> {
+        let session = self.load(session_id)?;
+        let policy = self.ctx.settings().ai;
+        let service = self.policy();
+
+        let blocked = |reason: &str| ResearchOutboundPreview {
+            will_send: false,
+            host: None,
+            snippets: Vec::new(),
+            reason: reason.to_string(),
+        };
+        if !policy.enabled {
+            return Ok(blocked("AI 总开关关闭：不会外发任何内容。"));
+        }
+        if !policy.remote_model_compose && !policy.remote_model_score {
+            return Ok(blocked("未开启在线模型：内容不会离开本机。"));
+        }
+        if service.remote_model().is_none() {
+            return Ok(blocked(
+                "在线模型未配置完整（缺基地址 / 模型名 / API Key）：内容不会外发。",
+            ));
+        }
+        if policy.remote_model_authorized_at.is_none() {
+            return Ok(blocked("在线模型尚未授权：内容不会外发。"));
+        }
+
+        let host = service.remote_diagnosis().0.and_then(|(base, _)| host_of(&base));
+        let snippets: Vec<ResearchOutboundSnippet> = session
+            .sources
+            .iter()
+            .take(5)
+            .map(|source| ResearchOutboundSnippet {
+                title: source.title.clone(),
+                snippet: source.snippet.clone(),
+            })
+            .collect();
+        let reason = if policy.confirm_each_outbound {
+            "本次会把下列片段交给在线模型（已开启逐次确认：要点确认才会发送）。".to_string()
+        } else {
+            "在线模型已开启，本次会把下列片段交给它。".to_string()
+        };
+        Ok(ResearchOutboundPreview { will_send: true, host, snippets, reason })
+    }
+
+    /// ④ 汇总：渲染六段报告。
+    ///
+    /// `confirm_outbound` 只在开启「逐次外发确认」（Track C2）时才有意义：
+    /// 为 `false` 时**在线档不参与**（零请求），自动降级到本地 / 模板。
+    pub fn compose(&self, session_id: &str, confirm_outbound: bool) -> Result<ResearchSession> {
         let started = Instant::now();
         let policy = self.policy().ensure_enabled("research_compose")?;
         let mut session = self.load(session_id)?;
@@ -904,18 +1173,34 @@ impl ResearchService {
             .map(|(index, source)| RetrievedChunk {
                 note_id: source.note_id.clone().unwrap_or_else(|| format!("ref{}", index + 1)),
                 chunk_index: index as i64,
-                heading_path: vec![source.title.clone()],
+                // 有分块标题路径就用它（真实分块），否则退回笔记标题
+                heading_path: source
+                    .heading
+                    .clone()
+                    .filter(|heading| !heading.is_empty())
+                    .map(|heading| heading.split(" > ").map(str::to_string).collect())
+                    .unwrap_or_else(|| vec![source.title.clone()]),
                 snippet: source.snippet.clone(),
-                char_start: 0,
-                char_end: source.snippet.chars().count() as i64,
+                // N5：带上**真实的原文字符区间**；定位不到时退回 0..摘要长度（如实标注为粗略）
+                char_start: source.char_start.unwrap_or(0),
+                char_end: source
+                    .char_end
+                    .unwrap_or_else(|| source.snippet.chars().count() as i64),
                 score: source.reliability as f32,
                 origin: RetrievalOrigin::Bm25,
             })
             .collect();
-        let composers: Vec<Arc<dyn GenerativeModel>> = self.composer_candidates();
+        let composers: Vec<(String, Arc<dyn GenerativeModel>)> =
+            self.composer_candidates(confirm_outbound);
+        // Track C2：开了逐次确认而本次没确认 —— 报告里要说清楚"为什么没用在线模型"。
+        // 这里只做只读判断（真正的拒绝与审计发生在 `composer_candidates` 里）。
+        let unconfirmed_remote = policy.remote_model_compose
+            && policy.remote_model_authorized_at.is_some()
+            && self.policy().remote_model().is_some()
+            && !self.policy().outbound_confirmed(confirm_outbound);
         let mut model_fallback: Option<String> = None;
         let mut response = None;
-        for (index, model) in composers.iter().enumerate() {
+        for (index, (provider_id, model)) in composers.iter().enumerate() {
             // 外发标记只对在线这一档为真：本地模型不需要，模板更不需要
             let request = GenerationRequest {
                 prompt: format!("为课题「{}」写推测段", plan.topic),
@@ -923,18 +1208,28 @@ impl ResearchService {
                 max_tokens: Some(512),
                 allow_remote: !model.is_local(),
             };
-            match model.complete(&request) {
+            // 这一档开始：先发一次空串，保证上一档（若有）的半截内容不会留在界面上
+            self.emit_compose_delta(&session.id, provider_id, "", "streaming");
+            // 流式生成：累加增量并实时推给界面（不支持的 provider 会退化成"一次性 + 一次回调"）
+            let mut accumulated = String::new();
+            let streamed = model.complete_streaming(&request, &mut |delta| {
+                accumulated.push_str(delta);
+                self.emit_compose_delta(&session.id, provider_id, &accumulated, "streaming");
+            });
+            match streamed {
                 Ok(done) => {
                     response = Some(done);
                     break;
                 }
                 Err(error) => {
+                    // 这一档失败：显式清掉预览（**不留下半截内容**），再降级到下一档
+                    self.emit_compose_delta(&session.id, provider_id, "", "failed");
                     model_fallback = Some(format!(
                         "{} 生成失败（{}），本次退回{}",
-                        model.id(),
+                        provider_id,
                         error.message,
                         if index + 1 < composers.len() {
-                            composers[index + 1].id()
+                            composers[index + 1].0.as_str()
                         } else {
                             "模板实现"
                         }
@@ -953,6 +1248,9 @@ impl ResearchService {
             Some(done) => done,
             None => template.complete(&request)?,
         };
+        // 流式结束的正式收尾：把最终文本连同 provider 一起发一次 `done`，
+        // 界面据此把预览定格为"就是它写的"（真正的权威版本仍是命令返回的报告）
+        self.emit_compose_delta(&session.id, &response.model, &response.text, "done");
         if let Some(note) = &model_fallback {
             tracing::debug!(target: "ai", "{note}");
             self.policy().audit(
@@ -987,6 +1285,15 @@ impl ResearchService {
                 references: Vec::new(),
             });
         }
+        if unconfirmed_remote {
+            report.warnings.push(ResearchWarning {
+                kind: WarningKind::ModelGenerated,
+                message:
+                    "在线模型已开启「逐次外发确认」：本次未确认，一个字节都没有外发，已改用下一档。"
+                        .to_string(),
+                references: Vec::new(),
+            });
+        }
         report.valid_until = Some(date_offset_days(REVIEW_PERIOD_DAYS));
         report.source_reliability = session
             .sources
@@ -994,6 +1301,44 @@ impl ResearchService {
             .map(|source| source.reliability)
             .min()
             .unwrap_or(1);
+
+        // —— D5/N9 证据充分性：材料够不够撑结论，明明白白写在报告里 ——
+        // 定稿前算一次（此时来源与结论都已确定），结论段是否为空必须能被解释。
+        let assessment = crate::application::ai::evidence::assess(
+            &plan.topic,
+            &plan.sub_questions,
+            &session.sources,
+        );
+        if !assessment.sufficient {
+            let gaps = assessment
+                .gaps
+                .iter()
+                .map(|gap| gap.message.clone())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let recommendation = if assessment.recommendation.trim().is_empty() {
+                String::new()
+            } else {
+                format!(" {}", assessment.recommendation)
+            };
+            report.warnings.push(ResearchWarning {
+                kind: WarningKind::InsufficientEvidence,
+                message: format!(
+                    "{} {} 本报告不给结论段。{}",
+                    assessment.verdict.trim(),
+                    gaps.trim(),
+                    recommendation.trim()
+                )
+                .trim_end()
+                .to_string(),
+                references: assessment
+                    .gaps
+                    .iter()
+                    .flat_map(|gap| gap.references.clone())
+                    .collect(),
+            });
+        }
+        report.evidence = assessment;
         report.markdown = render_markdown(&session, &plan, &report);
 
         session.report = Some(report);
@@ -1551,6 +1896,8 @@ fn pending_report(
     claims: Vec<ResearchClaim>,
     conflicting: &[String],
     decision_provider: &str,
+    conflict_provider: &str,
+    decision_trace: Option<DecisionTrace>,
 ) -> ResearchReport {
     let mut seen: Vec<Vec<usize>> = Vec::new();
     let mut conclusions = Vec::new();
@@ -1581,8 +1928,12 @@ fn pending_report(
     ResearchReport {
         generated_at: now_iso(),
         data_cutoff: today_date(),
+        // 证据充分性由 compose 在定稿前算（此处保持默认，避免"先写后算"两处漂移）
+        evidence: Default::default(),
         composer: TemplateGenerativeModel::new().id().to_string(),
         decision_provider: decision_provider.to_string(),
+        conflict_provider: Some(conflict_provider.to_string()),
+        decision_trace,
         conclusions,
         key_facts,
         conflicts,
@@ -1810,6 +2161,29 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
         report.references.len()
     ));
 
+    // D5/N9：证据充分性写在最前面。默认的失败方式不是答错，而是**材料不够还硬答**——
+    // 用户看报告时第一眼就该知道"这份东西的底子有多厚"。
+    if report.evidence.total_sub_questions > 0 || !report.evidence.gaps.is_empty() {
+        let evidence = &report.evidence;
+        out.push_str(&format!(
+            "> **证据充分性：{}** · 覆盖 {}/{} 个子问题 · 独立来源 {} 个 · 可用来源 {} 条\n",
+            if evidence.sufficient { "充分" } else { "不足" },
+            evidence.covered_sub_questions,
+            evidence.total_sub_questions,
+            evidence.independent_sources,
+            evidence.usable_sources
+        ));
+        if !evidence.sufficient {
+            for gap in &evidence.gaps {
+                out.push_str(&format!("> - ⛔ {}\n", gap.message));
+            }
+            if !evidence.recommendation.trim().is_empty() {
+                out.push_str(&format!("> - 建议：{}\n", evidence.recommendation.trim()));
+            }
+        }
+        out.push('\n');
+    }
+
     if !report.warnings.is_empty() {
         out.push_str("> **⚠️ 警告**\n");
         for warning in &report.warnings {
@@ -1833,7 +2207,14 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
 
     out.push_str("## 1. 结论先行\n\n");
     if report.conclusions.is_empty() {
-        out.push_str("_本次没有达到「≥2 个独立来源」的结论。_\n\n");
+        if report.evidence.sufficient {
+            out.push_str("_本次没有达到「≥2 个独立来源」的结论。_\n\n");
+        } else {
+            // 关键区别：不是"碰巧没有"，而是"材料不够，所以故意不给"
+            out.push_str(
+                "_证据不足，本次**不给结论**（不是「查过没有」）——缺口与建议见报告顶部。_\n\n",
+            );
+        }
     } else {
         for (index, claim) in report.conclusions.iter().enumerate() {
             out.push_str(&format!(
@@ -2147,6 +2528,9 @@ mod tests {
             fetched_at: "2026-10-11T10:00:00+08:00".to_string(),
             applicable_version: None,
             snippet: snippet.to_string(),
+            char_start: None,
+            char_end: None,
+            heading: None,
             stale: false,
             credibility: 0.6,
         }

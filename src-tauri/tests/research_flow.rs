@@ -158,8 +158,8 @@ fn run_until(fixture: &Fixture, request: ResearchRequest, steps: &[&str]) -> Res
     for step in steps {
         session = match *step {
             "collect" => research.collect(&session.id, false).expect("收集"),
-            "verify" => research.verify(&session.id).expect("验证"),
-            "compose" => research.compose(&session.id).expect("汇总"),
+            "verify" => research.verify(&session.id, false).expect("验证"),
+            "compose" => research.compose(&session.id, false).expect("汇总"),
             "proposal" => research.proposal(&session.id).expect("写入提案"),
             other => panic!("未知步骤 {other}"),
         };
@@ -196,7 +196,7 @@ fn research_needs_the_ai_gate_and_a_specific_topic() {
         5,
         "默认拆 5 个子问题（预算上限）"
     );
-    let premature = research.verify(&session.id).expect_err("未收集不能验证");
+    let premature = research.verify(&session.id, false).expect_err("未收集不能验证");
     assert_eq!(premature.code.as_str(), "INVALID_INPUT");
 }
 
@@ -380,7 +380,7 @@ fn sessions_are_persisted_and_can_be_aborted_with_materials_kept() {
     assert_eq!(aborted.status, ResearchStatus::Aborted);
     assert_eq!(aborted.abort_reason.as_deref(), Some("测试终止"));
     assert!(!aborted.sources.is_empty(), "中止后已得材料仍作为草稿保留");
-    let blocked = research.verify(&session.id).expect_err("中止后不能再推进");
+    let blocked = research.verify(&session.id, false).expect_err("中止后不能再推进");
     assert_eq!(blocked.code.as_str(), "INVALID_INPUT");
 
     let listed = research.list(10).expect("列表");
@@ -801,8 +801,8 @@ fn every_research_step_is_gated_by_the_ai_switch() {
             "collect",
             research.collect(&session.id, false).expect_err("收集").code.as_str().to_string(),
         ),
-        ("verify", research.verify(&session.id).expect_err("验证").code.as_str().to_string()),
-        ("compose", research.compose(&session.id).expect_err("汇总").code.as_str().to_string()),
+        ("verify", research.verify(&session.id, false).expect_err("验证").code.as_str().to_string()),
+        ("compose", research.compose(&session.id, false).expect_err("汇总").code.as_str().to_string()),
         ("proposal", research.proposal(&session.id).expect_err("提案").code.as_str().to_string()),
         (
             "write",

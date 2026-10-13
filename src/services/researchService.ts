@@ -1,4 +1,5 @@
 import type {
+  ResearchOutboundPreview,
   ResearchRequest,
   ResearchSession,
   ResearchSessionSummary,
@@ -28,11 +29,27 @@ export const researchService = {
   collect: (sessionId: string, confirmed = false) =>
     call<ResearchSession>('research_collect', { sessionId, confirmed }),
 
-  /** ③ 验证：≥2 个独立来源才算交叉验证 */
-  verify: (sessionId: string) => call<ResearchSession>('research_verify', { sessionId }),
+  /**
+   * ③ 验证：≥2 个独立来源才算交叉验证。
+   *
+   * `confirmOutbound`（Track C2/C5）：冲突判定可能调用在线模型；为 `false` 时在线档不参与
+   * （零请求），冲突判定回退本地 / 规则档。
+   */
+  verify: (sessionId: string, confirmOutbound = false) =>
+    call<ResearchSession>('research_verify', { sessionId, confirmOutbound }),
 
-  /** ④ 汇总：渲染固定六段报告 */
-  compose: (sessionId: string) => call<ResearchSession>('research_compose', { sessionId }),
+  /**
+   * ④ 汇总：渲染固定六段报告。
+   *
+   * `confirmOutbound`（Track C2）：开启「逐次外发确认」时，为 `true` 才允许把片段交给
+   * 在线模型；为 `false` 时在线档不参与（零请求），自动降级到本地 / 模板。
+   */
+  compose: (sessionId: string, confirmOutbound = false) =>
+    call<ResearchSession>('research_compose', { sessionId, confirmOutbound }),
+
+  /** 逐次外发确认的预览（Track C2）：将要发送的片段 + 目标主机；只读，不发请求 */
+  outboundPreview: (sessionId: string) =>
+    call<ResearchOutboundPreview>('research_outbound_preview', { sessionId }),
 
   /** ⑤ 写入提案（纯建议，不落库） */
   proposal: (sessionId: string) => call<ResearchSession>('research_proposal', { sessionId }),

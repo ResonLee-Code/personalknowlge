@@ -16,6 +16,10 @@
 | 出 Windows 安装包 | macOS/Linux（交叉） | `scripts/windows/build-installer.sh [版本号]` | `dist-windows/…_x64-setup.exe` + `…-portable.zip` |
 | 出 Windows 安装包 | Windows | `.\scripts\windows\build-windows.ps1` | 同上 |
 | 出 Linux 安装包 | Linux（必须） | `./scripts/linux/build-linux.sh [deb rpm appimage]` | `.deb` / `.rpm` / `.AppImage` |
+| 真机验收（E 节，一条命令） | macOS + 应用在运行 | `scripts/acceptance/run.sh` | `docs/acceptance/<时间戳>/report.md` + 截图 |
+| 真机验收：只看用例 / 环境自检 / 空跑 | macOS | `scripts/acceptance/run.sh --list / --preflight / --dry-run` | 同上（`--dry-run` 只出结论表骨架） |
+| 发布前性能守护（E2：1 万检索 + 3 万图谱） | 当前平台 | `pnpm bench` | 控制台结论 + `src-tauri/target/bench/*.log` |
+| 看产物体积对照表（E3） | 当前平台 | `scripts/size-report.sh` | 控制台的 Markdown 表（`--json` 可机读） |
 | 三平台一次产出 + Release | CI | `git tag vX.Y.Z && git push origin main --tags` | GitHub Release + 三平台工件 + `SHA256SUMS-*` |
 
 ## 1. 前提条件（一次性）
@@ -57,9 +61,13 @@ pnpm tauri build --no-bundle
 
 | 平台 | 可执行文件路径 | 体积（2026-10-11 实测） |
 | --- | --- | --- |
-| macOS arm64 | `src-tauri/target/release/personal-knowledge-os` | **9,842,176 B（9.84 MB）**；V1.2.0 为 7,787,328 B，差值是网页剪藏与联网检索引入的 `ureq` / `dom_query` |
-| Windows x64（交叉编译） | `src-tauri/target/x86_64-pc-windows-gnu/release/personal-knowledge-os.exe` | 约 8.5 MB |
+| macOS arm64 | `src-tauri/target/release/personal-knowledge-os` | **10,537,136 B（10.05 MiB）**，2026-10-14 实测（V1.2.1 记录值 9,842,176 B、V1.2.0 为 7,787,328 B） |
+| Windows x64（交叉编译） | `src-tauri/target/x86_64-pc-windows-gnu/release/personal-knowledge-os.exe` | 8,495,616 B（8.10 MiB，V1.2.0 源码状态的交叉编译产物） |
 | Linux x64 | `src-tauri/target/release/personal-knowledge-os` | 与平台/链接方式有关 |
+
+> **只看这一行数字容易被误导**：体积随 **平台 + 构建配置 + 版本** 三者变，release 与 debug
+> 能差 8 倍多。逐形态的口径、复现命令与"哪个数不能和哪个数比"，见
+> [ARTIFACT_SIZES.md](./ARTIFACT_SIZES.md)（一条命令重新量：`scripts/size-report.sh`）。
 
 **实测耗时（macOS arm64，M 系列，依赖已缓存）**
 
@@ -95,15 +103,56 @@ pnpm tauri build --bundles app dmg
 产物：
 
 - `src-tauri/target/release/bundle/macos/Personal Knowledge OS.app`
-- `src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.2.0_aarch64.dmg`
+- `src-tauri/target/release/bundle/dmg/Personal Knowledge OS_<版本>_aarch64.dmg`
 
-未签名，首次打开需右键 →「打开」（见 [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) 的已知限制）。
+#### 为什么必须有 ad-hoc 签名（2026-10-14 实测）
+
+不配签名身份时，tauri 只留下链接器给的那份 ad-hoc 签名，**bundle 的签名封条是坏的**：
+
+```bash
+codesign --verify --deep --strict "…/Personal Knowledge OS.app"   # ❌ code has no resources but signature indicates they must be present
+spctl --assess --type execute "…/Personal Knowledge OS.app"       # ❌ 同上
+```
+
+后果不是"提示未验证开发者"，而是**"已损坏，无法打开。你应该将它移到废纸篓"**——
+那条弹窗里**没有「打开」选项**，用户会以为下载坏了（实测：把 app 打上 `com.apple.quarantine`
+再启动，就是这个弹窗）。配上 `bundle.macOS.signingIdentity = "-"` 之后：
+
+| | 不配（只靠链接器签名） | 配 `-`（显式 ad-hoc 签名） |
+| --- | --- | --- |
+| `codesign --verify --deep --strict` | ❌ 封条无效 | ✅ `valid on disk` / `satisfies its Designated Requirement` |
+| 签名标识 | `personal_knowledge_os-<hash>` | `com.personalknowledge.os` |
+| 下载后首次打开 | ❌ **"已损坏"**（无「打开」选项） | ⚠️ **"无法验证开发者"**（可去 系统设置 → 隐私与安全性 → 仍要打开） |
+
+两条纪律：① 这是**ad-hoc** 签名，不是 Developer ID——`spctl --assess` 仍会 `rejected`，
+离"双击就能开"还差一张证书；② 出包后**顺手验一次**
+（`codesign --verify --deep --strict` + 打 quarantine 试启动），别等用户来报"文件损坏"。
+
+**没有 Developer ID 签名、也没有公证**（见 [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) 的已知限制）。
+但**必须做 ad-hoc 签名**——`tauri.conf.json` 里已固定
+`bundle.macOS.signingIdentity = "-"`（实测差别很大，见下方"为什么必须有 ad-hoc 签名"）。
 目前只出 arm64；要 Intel 包需 `--target x86_64-apple-darwin` 并提前 `rustup target add`。
 
 > 建议**始终显式写 `--bundles`**：`tauri.conf.json` 的 `bundle.targets` 为了跨平台发版同时列了
 > `app / dmg / nsis / deb / rpm / appimage`，裸跑 `pnpm tauri build` 会去尝试当前平台不支持的打包目标，
 > 白等时间甚至直接报错。CI 的三个平台 job 分别用 `--bundles app dmg`（macOS）、
 > `--bundles nsis`（Windows）、`--bundles deb rpm appimage`（Linux）。
+
+**本地出 `.dmg`（跳过装饰）**：`create-dmg` 默认会调 AppleScript 摆 Finder 窗口布局，
+本机没授权「自动化 → 访达」时会报 `-1743`（见下方排错表）。不授权也能拿到**可用**的 `.dmg`
+——去掉装饰步骤即可（产物能挂载、能拖进「应用程序」，只是没有背景图与图标排布）：
+
+```bash
+cd src-tauri/target/release/bundle/dmg
+bash ./bundle_dmg.sh --volname "Personal Knowledge OS" --icon "Personal Knowledge OS.app" \
+  180 170 --app-drop-link 480 170 --window-size 660 400 \
+  --hide-extension "Personal Knowledge OS.app" --skip-jenkins \
+  "Personal Knowledge OS_$(node -p "require('../../../../../package.json').version")_aarch64.dmg" \
+  "$PWD/../macos"
+```
+
+> CI（GitHub runner 有图形会话）走的是**默认**路径，产出的 `.dmg` 带装饰；
+> 本地这条只用于出包演练与"先看产物长什么样"，不作为发布产物。
 
 ### Windows
 
@@ -200,11 +249,42 @@ dist-windows/                           # Windows 安装包与便携版（NSIS �
 | 运行时白屏（裸二进制） | `dist/` 缺失或过期，先 `pnpm build` 再用 `pnpm tauri build --no-bundle` |
 | 想彻底重来 | `cargo clean --manifest-path src-tauri/Cargo.toml`（清 Rust 缓存，下一次全量编译），必要时再删 `dist/`。**注意**：这两个目录删除后需要重新编译，不要在出包验收前顺手清 |
 | 版本号不一致导致 preflight 失败 | 四处版本（见场景 C）必须一致，`tauri.conf.json` 里现在是 `1.2.0` |
+| 出 `.dmg` 报 `hdiutil: create failed - 设备上无剩余空间`（磁盘明明空着） | **误导性错误**：上一次失败把半成品临时镜像 `rw.<PID>.<名字>.dmg` 留在了**源目录**（`src-tauri/target/release/bundle/macos/`），这一次它被当成要打包的内容，撑爆了镜像。先移走残留文件再重跑 |
+| 出 `.dmg` 报 `未获得授权将 Apple 事件发送给 Finder。（-1743）` | `create-dmg` 要用 AppleScript 摆 Finder 窗口布局（背景图、图标位置这些**装饰**）。两条路：① 授权——系统设置 → 隐私与安全性 → **自动化** → 允许终端 / Codex 控制「访达」，之后 `pnpm tauri build --bundles dmg` 直接可用；② **不授权也能出可用的 `.dmg`**：手动跑一次脚本并加 `--skip-jenkins`（跳过装饰步骤），命令见下方「本地出 `.dmg`（跳过装饰）」 |
 
-## 7. 相关文档
+## 7. 发布前性能守护（E2：一条命令，超阈值即失败）
+
+```bash
+pnpm bench                                     # 发布规格：1 万篇检索 + 3 万篇图谱
+pnpm bench -- --search-notes 2000 --graph-notes 3000   # 冒烟（约 10 s）
+pnpm bench -- --only search                    # 只跑检索（或 --only graph）
+```
+
+脚本是 `scripts/bench/run.sh`，它依次跑两个已有基准（`src-tauri/tests/search_bench.rs`、
+`src-tauri/tests/graph_bench.rs`，平时靠 `--ignored` 挂起），并对**超阈值以非零码退出**：
+
+| 指标 | 红线 | 覆盖变量 |
+| --- | --- | --- |
+| 检索 p95 延迟（1 万篇） | < 200 ms | `BENCH_MAX_P95_MS` |
+| 检索 recall@5（1 万篇） | ≥ 100% | `BENCH_MIN_RECALL_PCT` |
+| 图谱全量查询（3 万篇） | < 1500 ms（M3 口径） | `BENCH_MAX_GRAPH_MS` |
+| 扫描采纳超时 | < 600 s | `BENCH_SCAN_TIMEOUT_S` |
+
+两个基准各自会在末尾打印一行机器可读的 `PKOS_BENCH search …` / `PKOS_BENCH graph …`；
+脚本**核对这一行是否存在**——基准没真的跑起来（例如测试名过滤写错、0 个用例）会被判失败，
+不会出现"什么都没跑也算通过"。日志与摘要落在 `src-tauri/target/bench/`（在 `.gitignore` 里）。
+
+本机实测（2026-10-13，macOS arm64，`pnpm bench` 约 56 s）：
+检索 1 万篇 **p95 47.4 ms / 平均 20.0 ms / recall@5 100%**、库 34.5 MB；
+图谱 3 万篇全量 **895.9 ms**、分类过滤 351.7 ms、2 跳聚焦 669.3 ms。数字用于发版记录，
+不是硬编码期望值——**换机器只比红线，不比具体毫秒**。
+
+## 8. 相关文档
 
 - [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)：发版流程与 CI 流水线细节
+- [ARTIFACT_SIZES.md](./ARTIFACT_SIZES.md)：产物体积对照表（口径 / 逐形态 / 复现命令，E3）
 - [DEVELOPMENT_RULES.md](./DEVELOPMENT_RULES.md)：本地回归命令与文档同步规则
 - [WINDOWS_INSTALL_GUIDE.md](./WINDOWS_INSTALL_GUIDE.md) / [LINUX_INSTALL_GUIDE.md](./LINUX_INSTALL_GUIDE.md)：安装与放行说明
-- [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md)：当前版本的验收清单（回归矩阵 / 性能实测 / 待打包与真机项）
+- [ACCEPTANCE_V1.3.0.md](./ACCEPTANCE_V1.3.0.md)：**当前版本**（V1.3.0）的验收记录（发布前守护 / 产物与签名 / 安装卸载 / 待干净机器项）
+- [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md)：上一版的验收清单（回归矩阵 / 性能实测 / 已知限制）
 - [ACCEPTANCE_V1.2.0.md](./ACCEPTANCE_V1.2.0.md)：上一版产物完整性（安装包仍对应该版本）

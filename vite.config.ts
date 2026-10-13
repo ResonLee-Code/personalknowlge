@@ -35,5 +35,8 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     css: false,
+    // 发布前的全套回归会同时起 60+ 个 jsdom 环境，机器忙时单个用例偶发超时（实测一次）。
+    // 放宽到 15 秒：**慢不等于错**，让它有时间跑完；真正的断言失败照旧失败。
+    testTimeout: 15000,
   },
 });

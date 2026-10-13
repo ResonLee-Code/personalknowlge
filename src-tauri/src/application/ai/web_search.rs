@@ -38,15 +38,23 @@ pub struct WebSearchHit {
 
 /// 按地址模板执行一次检索。
 pub fn search(endpoint: &str, keyword: &str, limit: usize) -> Result<Vec<WebSearchHit>> {
+    search_with_proxy(endpoint, keyword, limit, None)
+}
+
+/// 同上，但显式指定出站代理（`None` = 按环境变量 / 系统代理走）。
+pub fn search_with_proxy(
+    endpoint: &str,
+    keyword: &str,
+    limit: usize,
+    proxy: Option<&str>,
+) -> Result<Vec<WebSearchHit>> {
     let trimmed = keyword.trim();
     if trimmed.is_empty() {
         return Err(AppError::invalid_input("检索关键词不能为空。"));
     }
     let limit = limit.clamp(1, MAX_RESULTS);
     let url = build_query_url(endpoint, trimmed, limit)?;
-    let agent = ureq::Agent::new_with_config(
-        ureq::Agent::config_builder().timeout_global(Some(TIMEOUT)).build(),
-    );
+    let agent = crate::core::net::agent_for(&url, TIMEOUT, proxy);
     let response = agent
         .get(&url)
         .header("Accept", "application/json")

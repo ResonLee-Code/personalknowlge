@@ -35,4 +35,23 @@ describe('SaveStatusBadge', () => {
     expect(badge).toHaveTextContent('保存失败');
     expect(badge.getAttribute('data-degraded')).toBeNull();
   });
+
+  /**
+   * 回归（2026-10-11 真机验收，Track B1）：**保存失败的原因不能只藏在悬停提示里**。
+   * 现场是「头部只显示一个红的『保存失败』，没有任何原因」；实际原因存在于 `title`
+   * （原生 tooltip），但没人会去悬停——和上面「索引待重建」那条是同一类问题。
+   */
+  it('保存失败时原因必须显式可见（不靠悬停）', () => {
+    const reason = '文件已被其他程序修改，请选择重新加载或覆盖保存。';
+    render(<SaveStatusBadge status="error" detail={reason} />);
+    const badge = screen.getByTestId('save-status-badge');
+    expect(badge).toHaveTextContent('保存失败');
+    expect(badge).toHaveTextContent('文件已被其他程序修改');
+    expect(badge).toHaveAttribute('title', reason);
+  });
+
+  it('没有原因时不拖一个空冒号', () => {
+    render(<SaveStatusBadge status="error" />);
+    expect(screen.getByTestId('save-status-badge')).toHaveTextContent(/^保存失败$/);
+  });
 });

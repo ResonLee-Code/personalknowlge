@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ROUTES } from '@/lib/constants';
+import { reportFailure } from '@/lib/actionFeedback';
 import { errorMessage, formatBytes, formatDateTime } from '@/lib/format';
 import { attachmentService } from '@/services/attachmentService';
 import type { AttachmentEntry, AttachmentListReport } from '@/types';
@@ -17,6 +18,8 @@ export function AttachmentsPage() {
   const [report, setReport] = useState<AttachmentListReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // F3：孤儿（未被任何笔记引用）是清理时的目标，单独筛出来看更省事
+  const [onlyOrphans, setOnlyOrphans] = useState(false);
   const loadRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
@@ -43,7 +46,8 @@ export function AttachmentsPage() {
   }, []);
 
   const groups = useMemo(() => {
-    const items = report?.items ?? [];
+    const all = report?.items ?? [];
+    const items = onlyOrphans ? all.filter((item) => item.references.length === 0) : all;
     const byMonth = new Map<string, AttachmentEntry[]>();
     for (const item of items) {
       const list = byMonth.get(item.month);
@@ -51,7 +55,7 @@ export function AttachmentsPage() {
       else byMonth.set(item.month, [item]);
     }
     return [...byMonth.entries()].sort((left, right) => right[0].localeCompare(left[0]));
-  }, [report]);
+  }, [report, onlyOrphans]);
 
   const remove = async (entry: AttachmentEntry) => {
     const warning =
@@ -70,13 +74,16 @@ export function AttachmentsPage() {
       toast.success(`已删除附件，释放 ${formatBytes(freed)}`);
       await reload();
     } catch (cause) {
-      toast.error(errorMessage(cause));
+      reportFailure('删除附件失败', errorMessage(cause));
     } finally {
       setBusy(null);
     }
   };
 
   const orphanCount = (report?.items.length ?? 0) - (report?.referencedCount ?? 0);
+  const orphanBytes = (report?.items ?? [])
+    .filter((item) => item.references.length === 0)
+    .reduce((sum, item) => sum + item.bytes, 0);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
@@ -88,6 +95,23 @@ export function AttachmentsPage() {
             {report.items.length} 个文件 · 共 {formatBytes(report.totalBytes)} · 被引用{' '}
             {report.referencedCount} · 未引用 {orphanCount}
           </span>
+        ) : null}
+        {report && orphanCount > 0 ? (
+          <button
+            type="button"
+            data-testid="attachments-only-orphans"
+            aria-pressed={onlyOrphans}
+            onClick={() => setOnlyOrphans((value) => !value)}
+            className={[
+              'rounded-full border px-2 py-0.5 text-[11px] transition-colors',
+              onlyOrphans
+                ? 'border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand)]'
+                : 'border-[var(--border-subtle)] text-[var(--ink-subtle)] hover:text-[var(--ink)]',
+            ].join(' ')}
+            title="未引用 = 没有任何笔记的正文提到它（含 ![[文件名]] 与相对路径两种写法）"
+          >
+            只看未引用（{orphanCount} 个 · {formatBytes(orphanBytes)}）
+          </button>
         ) : null}
         <Button
           size="icon"

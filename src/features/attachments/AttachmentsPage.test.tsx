@@ -94,4 +94,44 @@ describe('AttachmentsPage', () => {
     );
     await waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(1));
   });
+
+  /** F3：孤儿（未被任何笔记引用）是清理目标，要能单独筛出来看，并显示占多少空间。 */
+  it('可以只看未引用附件（清理时用）', async () => {
+    list.mockResolvedValue({
+      items: [
+        entry({
+          relativePath: 'attachments/2026-10/used.png',
+          fileName: 'used.png',
+          references: [{ noteId: 'note_a', title: '在用的笔记' }],
+        }),
+        entry({
+          relativePath: 'attachments/2026-10/orphan.png',
+          fileName: 'orphan.png',
+          bytes: 4096,
+        }),
+      ],
+      totalBytes: 6144,
+      referencedCount: 1,
+    });
+
+    render(
+      <MemoryRouter>
+        <AttachmentsPage />
+      </MemoryRouter>,
+    );
+
+    const toggle = await screen.findByTestId('attachments-only-orphans');
+    expect(toggle).toHaveTextContent('只看未引用（1 个 · 4.0 KB）');
+    expect(screen.getAllByTestId('attachment-row')).toHaveLength(2);
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    const rows = screen.getAllByTestId('attachment-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent('orphan.png');
+
+    // 再点一次恢复全部——筛选不该是"一去不回"的单向动作
+    await userEvent.click(toggle);
+    expect(screen.getAllByTestId('attachment-row')).toHaveLength(2);
+  });
 });

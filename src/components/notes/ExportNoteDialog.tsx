@@ -12,6 +12,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { logAppFailure } from '@/lib/appLog';
+import { reportFailure } from '@/lib/actionFeedback';
 import { errorMessage } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { isTauriRuntime } from '@/services/api';
@@ -118,7 +120,8 @@ export function ExportNoteDialog({
         });
       }
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('导出失败', errorMessage(error));
+      void logAppFailure('note_export', error);
     } finally {
       setBusy(false);
     }

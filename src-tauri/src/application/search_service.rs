@@ -12,7 +12,9 @@ use crate::core::text::{build_fts_match, build_snippet, highlight_terms, markdow
 use crate::domain::note::{Note, NoteListQuery, NoteSummary};
 use crate::domain::search::{IndexStatus, SearchHit, SearchQuery, SearchResponse, SearchSort};
 use crate::infrastructure::fts::{FtsRequest, SearchIndex, SqliteSearchIndex};
+use crate::repositories::chunk_repository::{ChunkRepository, SqliteChunkRepository};
 use crate::repositories::{NoteRepository, SqliteNoteRepository};
+use crate::domain::search::SearchMatch;
 
 use super::context::WorkspaceContext;
 use super::index_service::IndexService;
@@ -61,6 +63,7 @@ impl SearchService {
                     title_matched: false,
                     snippet: Vec::new(),
                     matched_terms: Vec::new(),
+                    location: None,
                 })
                 .collect();
             return Ok(SearchResponse {
@@ -125,15 +128,19 @@ impl SearchService {
                 continue;
             };
             let title_matched = matches_any(&summary.title, &terms);
-            let snippet = self
-                .snippet_for(&summary, &keyword)
+            // 读一次正文，摘要与「精确区间」共用（少一次磁盘读）
+            let body = self
+                .body_for(&summary)
                 .unwrap_or_default();
+            let snippet = build_snippet(&markdown_to_plain_text(&body), &keyword, SNIPPET_CHARS);
+            let location = self.locate_match(&summary.id, &body, &keyword, &terms);
             hits.push(SearchHit {
                 note: summary,
                 score: fts_hit.score,
                 title_matched,
                 snippet,
                 matched_terms: terms.clone(),
+                location,
             });
         }
 
@@ -178,16 +185,89 @@ impl SearchService {
         IndexService::new(Arc::clone(&self.ctx)).rebuild()
     }
 
-    /// 生成摘要：优先使用文件正文，文件不可读时退化为空摘要。
-    fn snippet_for(
-        &self,
-        summary: &NoteSummary,
-        keyword: &str,
-    ) -> Option<Vec<crate::core::text::TextSegment>> {
-        let stored = self.ctx.storage.read_note(&summary.file_path).ok()?;
-        let plain = markdown_to_plain_text(&stored.body);
-        Some(build_snippet(&plain, keyword, SNIPPET_CHARS))
+    /// 读正文（不含 frontmatter）；文件不可读时退化为空。摘要与精确区间共用它。
+    fn body_for(&self, summary: &NoteSummary) -> Option<String> {
+        Some(self.ctx.storage.read_note(&summary.file_path).ok()?.body)
     }
+
+    /// 定位命中在**原文里的精确区间**（N5）。
+    ///
+    /// 做法：在该笔记的**分块表**里逐块找第一个包含关键词（或某个高亮词）的块，
+    /// 在块内按 `char` 下标定位，再加上块的起点换算成全文坐标。
+    /// 找不到就返回 `None`（例如只命中了标签/分类）——**不猜**，界面据此不跳转。
+    fn locate_match(
+        &self,
+        note_id: &str,
+        body: &str,
+        keyword: &str,
+        terms: &[String],
+    ) -> Option<SearchMatch> {
+        if body.is_empty() {
+            return None;
+        }
+        let chunks = self
+            .ctx
+            .db
+            .with_conn(|conn| SqliteChunkRepository.list(conn, note_id))
+            .ok()?;
+        if chunks.is_empty() {
+            return None;
+        }
+        let chars: Vec<char> = body.chars().collect();
+        let mut needles: Vec<Vec<char>> = Vec::new();
+        for candidate in std::iter::once(keyword).chain(terms.iter().map(String::as_str)) {
+            let trimmed = candidate.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let needle: Vec<char> = trimmed.chars().collect();
+            if !needles.contains(&needle) {
+                needles.push(needle);
+            }
+        }
+        if needles.is_empty() {
+            return None;
+        }
+
+        for chunk in &chunks {
+            let start = chunk.char_start.max(0) as usize;
+            let end = chunk.char_end.max(0) as usize;
+            if start >= end || end > chars.len() {
+                continue;
+            }
+            let window = &chars[start..end];
+            for needle in &needles {
+                if let Some(offset) = find_chars(window, needle) {
+                    return Some(SearchMatch {
+                        heading: chunk.heading.clone(),
+                        chunk_index: chunk.index,
+                        char_start: (start + offset) as i64,
+                        char_end: (start + offset + needle.len()) as i64,
+                    });
+                }
+            }
+        }
+        None
+    }
+}
+
+/// 在字符切片里找第一个大小写不敏感的子串，返回**相对字符下标**。
+///
+/// 刻意不用 `to_lowercase()` 后的字符串下标：那会在罕见字符上改变长度、把区间算歪。
+fn find_chars(haystack: &[char], needle: &[char]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    for start in 0..=(haystack.len() - needle.len()) {
+        let hit = haystack[start..start + needle.len()]
+            .iter()
+            .zip(needle.iter())
+            .all(|(left, right)| left == right || left.to_lowercase().eq(right.to_lowercase()));
+        if hit {
+            return Some(start);
+        }
+    }
+    None
 }
 
 fn matches_any(text: &str, terms: &[String]) -> bool {

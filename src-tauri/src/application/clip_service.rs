@@ -94,12 +94,13 @@ fn decode_html(bytes: &[u8], content_type: &str) -> String {
 
 /// 抓取并转换一个网页。**只读**，不写库。
 pub fn clip(raw_url: &str) -> Result<ClippedPage> {
+    clip_with_proxy(raw_url, None)
+}
+
+/// 同上，但显式指定出站代理（`None` = 按环境变量 / 系统代理走，见 `core::net`）。
+pub fn clip_with_proxy(raw_url: &str, proxy: Option<&str>) -> Result<ClippedPage> {
     let url = normalize_url(raw_url)?;
-    let agent = ureq::Agent::new_with_config(
-        ureq::Agent::config_builder()
-            .timeout_global(Some(TIMEOUT))
-            .build(),
-    );
+    let agent = crate::core::net::agent_for(&url, TIMEOUT, proxy);
     let response = agent
         .get(&url)
         .header("User-Agent", USER_AGENT)

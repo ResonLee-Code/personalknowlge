@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input, Label } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { errorMessage } from '@/lib/format';
 import { isTauriRuntime } from '@/services/api';
 import { templateService } from '@/services/templateService';
@@ -54,7 +55,7 @@ export function SaveTemplateDialog({
       onSaved?.();
       onClose();
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('保存模板失败', errorMessage(error));
     } finally {
       setBusy(false);
     }

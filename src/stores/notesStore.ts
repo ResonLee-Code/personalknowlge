@@ -1,6 +1,7 @@
 import { toast } from 'sonner';
 import { create } from 'zustand';
 
+import { logAppFailure } from '@/lib/appLog';
 import { errorMessage } from '@/lib/format';
 import { createRequestGuard } from '@/lib/latestRequest';
 import { noteService } from '@/services/noteService';
@@ -298,6 +299,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       await get().refresh();
       return true;
     } catch (error) {
+      // 保存失败的原因同时写进应用日志（Track B3）：界面上看得到，日志里查得到
+      void logAppFailure('note_save', error);
       const code = (error as { code?: string }).code;
       if (code === 'NOTE_CONFLICT') {
         const details = (error as { details?: { currentContent?: string } }).details;

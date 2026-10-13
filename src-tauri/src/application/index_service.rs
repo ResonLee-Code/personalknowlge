@@ -12,6 +12,7 @@ use crate::core::events::events as event_names;
 use crate::core::paths::TRASH_DIR;
 use crate::core::hash::sha256_hex_str;
 use crate::core::ids::note_id;
+use crate::core::chunk::chunk_markdown;
 use crate::core::text::{count_words, markdown_to_plain_text, tag_key};
 use crate::core::time::now_iso;
 use crate::domain::note::{Note, NoteStatus};
@@ -23,6 +24,9 @@ use crate::repositories::settings_repository::{
     INDEX_REBUILT_AT_KEY, INDEX_STATE_KEY,
 };
 use crate::repositories::tag_repository::{tags_for_note, SqliteTagRepository, TagRepository};
+use crate::repositories::chunk_repository::{
+    ChunkRepository, SqliteChunkRepository,
+};
 use crate::repositories::{
     trash_path_of, NoteRepository, SettingsRepository, SqliteNoteRepository,
     SqliteSettingsRepository,
@@ -76,9 +80,14 @@ impl IndexService {
     ) -> Result<()> {
         let plain_text = markdown_to_plain_text(body);
         let document = SearchDocument::build(note_id, title, &plain_text, tags, category_path);
+        // 分块索引（N5）：与 FTS 同一事务写入，保证「命中能定位」与「能搜到」同步生效
+        let chunks = chunk_markdown(body);
         self.ctx
             .db
-            .with_conn(|conn| self.index.upsert(conn, &document))
+            .with_conn(|conn| {
+                self.index.upsert(conn, &document)?;
+                SqliteChunkRepository.replace(conn, note_id, &chunks)
+            })
             .map_err(|error| self.index_failure(error))
     }
 
@@ -98,7 +107,10 @@ impl IndexService {
     pub fn remove_note(&self, note_id: &str) -> Result<()> {
         self.ctx
             .db
-            .with_conn(|conn| self.index.remove(conn, note_id))
+            .with_conn(|conn| {
+                self.index.remove(conn, note_id)?;
+                SqliteChunkRepository.delete(conn, note_id)
+            })
             .map_err(|error| self.index_failure(error))
     }
 
@@ -150,6 +162,14 @@ impl IndexService {
                 SqliteNoteRepository.count_by_status(conn, self.workspace_id(), NoteStatus::Active)
             })
             .unwrap_or(0);
+        // 分块索引（N5）是索引的一部分：**有笔记却没分块**说明这批派生数据缺了
+        // （典型场景：从更早的版本升级上来），
+        // 这时同样报「落后」，让界面提示重建、并让打开工作区时的自动重建把它补上。
+        let chunk_rows = self
+            .ctx
+            .db
+            .with_conn(|conn| SqliteChunkRepository.count(conn))
+            .unwrap_or(0);
 
         let state = if self.ctx.is_index_rebuilding() {
             IndexState::Rebuilding
@@ -160,7 +180,7 @@ impl IndexService {
             } else {
                 IndexState::Stale
             }
-        } else if indexed_notes < total_notes {
+        } else if indexed_notes < total_notes || (indexed_notes > 0 && chunk_rows == 0) {
             IndexState::Stale
         } else {
             IndexState::Ready
@@ -173,6 +193,29 @@ impl IndexService {
             last_rebuilt_at: self.ctx.last_rebuilt_at(),
             last_error: self.ctx.index_error(),
         })
+    }
+
+    /// 分块索引是否缺失（升级上来、或有人手工删过派生库）。
+    ///
+    /// 用来决定**要不要在打开工作区时自动重建**——只补 FTS 而不补分块的话，
+    /// 检索是能用的，但"跳回原文精确区间"会静默失效。
+    pub fn chunks_missing(&self) -> bool {
+        let chunks = self
+            .ctx
+            .db
+            .with_conn(|conn| SqliteChunkRepository.count(conn))
+            .unwrap_or(0);
+        if chunks > 0 {
+            return false;
+        }
+        let total_notes = self
+            .ctx
+            .db
+            .with_conn(|conn| {
+                SqliteNoteRepository.count_by_status(conn, self.workspace_id(), NoteStatus::Active)
+            })
+            .unwrap_or(0);
+        total_notes > 0
     }
 
     fn emit_status(&self) {
@@ -195,7 +238,11 @@ impl IndexService {
         let result = (|| -> Result<i64> {
             self.ctx
                 .db
-                .with_conn(|conn| self.index.clear(conn))
+                .with_conn(|conn| {
+                    self.index.clear(conn)?;
+                    // 分块与 FTS 同生共死：重建时一起清空，再从文件重算
+                    SqliteChunkRepository.clear(conn)
+                })
                 .map_err(|error| self.index_failure(error))?;
 
             let notes = self.ctx.db.with_conn(|conn| {
@@ -215,9 +262,13 @@ impl IndexService {
                 let plain_text = markdown_to_plain_text(&body);
                 let document =
                     SearchDocument::build(&note.id, &note.title, &plain_text, &tags, &category_path);
+                let chunks = chunk_markdown(&body);
                 self.ctx
                     .db
-                    .with_conn(|conn| self.index.upsert(conn, &document))
+                    .with_conn(|conn| {
+                        self.index.upsert(conn, &document)?;
+                        SqliteChunkRepository.replace(conn, &note.id, &chunks)
+                    })
                     .map_err(|error| self.index_failure(error))?;
                 self.mark_indexed(&note.id)?;
                 indexed += 1;
@@ -227,6 +278,12 @@ impl IndexService {
                 .db
                 .with_conn(|conn| self.index.optimize(conn))
                 .map_err(|error| self.index_failure(error))?;
+            // 重建索引 ⇒ 派生数据整体刷新：决策缓存也一起清掉（键虽内容寻址，
+            // 但清掉能避免历史条目长期堆积；下次判定重算一遍即可）
+            let _ = self
+                .ctx
+                .db
+                .with_conn(|conn| crate::application::ai::decision_cache::DecisionCache.clear(conn));
             Ok(indexed)
         })();
 
@@ -559,6 +616,8 @@ impl IndexService {
         struct Prepared {
             note: Note,
             plain_text: String,
+            /// 正文原文（Markdown，不含 frontmatter）：分块索引要从它算字符区间
+            source: String,
             tags: Vec<String>,
             category_path: String,
             /// frontmatter 里声明的父文档（id 或标题），批次结束后统一解析
@@ -644,6 +703,7 @@ impl IndexService {
                     pinned: stored.frontmatter.pinned,
                 },
                 plain_text,
+                source: stored.body.clone(),
                 tags: stored.frontmatter.tags.clone(),
                 category_path,
                 declared_parent,
@@ -705,6 +765,8 @@ impl IndexService {
                         &item.category_path,
                     );
                     SqliteSearchIndex.upsert(tx, &document)?;
+                    // 分块索引（N5）：与 FTS 同一批次写入
+                    SqliteChunkRepository.replace(tx, &note.id, &chunk_markdown(&item.source))?;
                     tx.execute(
                         "UPDATE notes SET last_indexed_at = ?2 WHERE id = ?1",
                         rusqlite::params![note.id, now_iso()],

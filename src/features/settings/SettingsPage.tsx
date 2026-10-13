@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { AiSettingsPanel } from '@/features/settings/AiSettingsPanel';
-import { reportAction } from '@/lib/actionFeedback';
+import { reportAction, reportFailure } from '@/lib/actionFeedback';
 import { AUTOSAVE_DELAY_OPTIONS, FONT_SIZE_OPTIONS, ROUTES, THEME_OPTIONS } from '@/lib/constants';
+import { logAppFailure } from '@/lib/appLog';
 import { errorMessage, formatBytes, formatDateTime } from '@/lib/format';
 import { formatWarningsToast } from '@/lib/warnings';
 import { backupService } from '@/services/backupService';
@@ -45,6 +46,7 @@ export function SettingsPage() {
       .catch((error: unknown) => {
         setBackups([]);
         setBackupListError(errorMessage(error));
+        void logAppFailure('backup_list', error, 'warn');
       });
   }, []);
 
@@ -60,7 +62,8 @@ export function SettingsPage() {
       setBackupListError(null);
       toast.success(`备份完成：${info.fileName}`);
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('备份失败', errorMessage(error));
+      void logAppFailure('backup_create', error);
     } finally {
       setBusy(false);
     }
@@ -74,7 +77,8 @@ export function SettingsPage() {
         result.valid ? '校验通过' : '校验未通过，请查看详情',
       );
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('校验失败', errorMessage(error));
+      void logAppFailure('backup_validate', error);
     }
   };
 
@@ -87,7 +91,8 @@ export function SettingsPage() {
       const report = await backupService.restore(path, target);
       toast.success(`已恢复 ${report.extractedFiles} 个文件到 ${report.targetDir}`);
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('恢复失败', errorMessage(error));
+      void logAppFailure('backup_restore', error);
     }
   };
 
@@ -100,7 +105,8 @@ export function SettingsPage() {
       const result = await backupService.exportMarkdown(target);
       toast.success(`已导出 ${result.noteCount} 篇笔记与 ${result.attachmentCount} 个附件`);
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('导出失败', errorMessage(error));
+      void logAppFailure('export_markdown', error);
     }
   };
 
@@ -225,7 +231,7 @@ export function SettingsPage() {
               onClick={() =>
                 void scan().then((report) => {
                   if (!report) {
-                    toast.error('扫描失败');
+                    reportFailure('扫描失败', useWorkspaceStore.getState().error);
                     return;
                   }
                   toast.success(
@@ -245,9 +251,11 @@ export function SettingsPage() {
               size="sm"
               variant="secondary"
               onClick={() =>
-                void openPath(workspace?.rootPath ?? '').catch(() =>
-                  toast.error('无法打开目录'),
-                )
+                void openPath(workspace?.rootPath ?? '').catch((error: unknown) => {
+                  // F2：原因（含系统返回的原文）要点得开，而不是只有一个"无法打开"
+                  reportFailure('无法打开目录', errorMessage(error));
+                  void logAppFailure('open_path', error, 'warn');
+                })
               }
             >
               <FolderOpen className="h-3.5 w-3.5" />
@@ -285,7 +293,11 @@ export function SettingsPage() {
                 读取备份列表失败：{backupListError}
               </p>
             ) : backups.length === 0 ? (
-              <p className="text-xs text-[var(--ink-subtle)]">暂无备份文件。</p>
+              // 「校验 / 恢复」是逐条渲染在备份卡片下方的按钮：没有备份时它们不存在。
+              // 真机验收时你我都因为看不到这两个入口而各花了时间找（Track B2），所以空态说清楚。
+              <p data-testid="backup-empty" className="text-xs text-[var(--ink-subtle)]">
+                暂无备份文件。点上方「立即备份」创建后，每份备份下方会出现「校验 / 恢复」。
+              </p>
             ) : (
               backups.map((backup) => (
                 <div

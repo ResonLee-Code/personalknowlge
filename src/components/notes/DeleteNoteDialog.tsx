@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { reportFailure } from '@/lib/actionFeedback';
 import { errorMessage } from '@/lib/format';
 import { useNotesStore } from '@/stores/notesStore';
 import type { NoteSummary } from '@/types';
@@ -43,7 +44,7 @@ export function DeleteNoteDialog({
     try {
       const removedOk = await remove(note.id);
       if (!removedOk) {
-        toast.error(useNotesStore.getState().error ?? '移入回收站失败');
+        reportFailure('移入回收站失败', useNotesStore.getState().error);
         return;
       }
       if (withChildren) {
@@ -82,7 +83,7 @@ export function DeleteNoteDialog({
       onDeleted?.();
       onClose();
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('删除笔记失败', errorMessage(error));
     } finally {
       setBusy(false);
     }

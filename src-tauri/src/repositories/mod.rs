@@ -4,6 +4,7 @@
 //! 这样既保证「UI 不直接访问数据库」，也避免同一连接被重复加锁。
 
 pub mod category_repository;
+pub mod chunk_repository;
 pub mod link_repository;
 pub mod note_repository;
 pub mod relation_repository;
@@ -12,6 +13,7 @@ pub mod tag_repository;
 pub mod workspace_repository;
 
 pub use category_repository::{CategoryRepository, SqliteCategoryRepository};
+pub use chunk_repository::{ChunkRepository, SqliteChunkRepository, StoredChunk};
 pub use link_repository::{
     LinkRepository, NoteLinkRow, NoteTitleRow, SqliteLinkRepository,
 };

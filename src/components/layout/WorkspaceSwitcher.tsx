@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { reportFailure } from '@/lib/actionFeedback';
 import { ROUTES } from '@/lib/constants';
 import { pickDirectory } from '@/services/appService';
 import { isTauriRuntime } from '@/services/api';
@@ -57,7 +58,7 @@ export function WorkspaceSwitcher() {
       afterSwitch();
       toast.success('已打开知识库');
     } else {
-      toast.error(useWorkspaceStore.getState().error ?? '打开失败');
+      reportFailure('打开知识库失败', useWorkspaceStore.getState().error);
     }
   };
 

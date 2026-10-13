@@ -35,6 +35,112 @@ impl NetworkMode {
     }
 }
 
+/// 一次决策**试过的一档**（Track D2 / N6）：可解释 Trace 的一行。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionAttempt {
+    /// provider 标识（`rule` / `local.ollama` / `remote.openai-compatible` …）
+    pub provider: String,
+    pub ok: bool,
+    /// 人读原因（成功：给了几条结果；失败：为什么不可用）。**不含正文**。
+    pub detail: String,
+}
+
+/// 决策 Trace（Track D2 / N6）：**每一次打分/决策都能解释清楚**它是怎么来的。
+///
+/// 纪律：只记元数据（类型 / 档位 / 条数 / 耗时），**不记笔记正文**——
+/// 与审计同一条隐私口径。`kind` 用字符串，避免 domain 依赖 application 的枚举。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionTrace {
+    /// 决策类型（`RELEVANCE` / `UTILITY` / `CONFLICT` …，与 `DecisionKind` 序列化一致）
+    pub kind: String,
+    /// `hit` = 直接吃缓存；`miss` = 真的走了一遍候选链
+    pub cache: String,
+    /// 最终生效的档位；全军覆没时为空串
+    pub provider: String,
+    /// 候选条数
+    pub candidates: usize,
+    /// 逐档尝试结果（按尝试顺序）
+    pub attempts: Vec<DecisionAttempt>,
+    pub took_ms: u64,
+}
+
+/// 一个检索通道的状态（D3/N7）：这次检索**实际用了哪些通道**、谁不可用、为什么。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetrievalChannelStatus {
+    /// `bm25` / `vector` / `graph`
+    pub id: String,
+    pub available: bool,
+    /// 人读说明（召回了几条 / 为什么跳过）
+    pub note: String,
+}
+
+/// 融合后的一条检索命中（D3/N7）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetrievalHit {
+    pub note_id: String,
+    pub chunk_index: i64,
+    /// 标题路径（`A > B`）
+    pub heading: String,
+    pub snippet: String,
+    pub char_start: i64,
+    pub char_end: i64,
+    /// RRF 融合分（越大越靠前）
+    pub score: f32,
+    /// 贡献这条命中的通道
+    pub providers: Vec<String>,
+}
+
+/// 一次检索的完整报告：通道状态 + 融合结果。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetrievalReport {
+    pub channels: Vec<RetrievalChannelStatus>,
+    pub hits: Vec<RetrievalHit>,
+}
+
+/// 向量索引状态（D3/N7 第二步）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VectorIndexStatus {
+    /// 向量通道现在能不能用（配置就绪 + 已构建过向量）
+    pub available: bool,
+    pub built_chunks: i64,
+    pub total_chunks: i64,
+    /// 上次构建用的嵌入模型标识
+    pub model: Option<String>,
+    pub built_at: Option<String>,
+    /// 人读说明（为什么可用 / 不可用）
+    pub note: String,
+}
+
+/// 构建向量索引**之前**的预览（给确认框用）：要发多少、发给谁。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VectorIndexPreview {
+    pub will_send: bool,
+    pub host: Option<String>,
+    pub notes: i64,
+    pub chunks_total: i64,
+    /// 本次真正要外发的片段数（增量：内容没变的不重发）
+    pub chunks_to_embed: i64,
+    pub reason: String,
+}
+
+/// 一次构建的结果。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VectorIndexReport {
+    pub model: String,
+    pub total_chunks: i64,
+    pub embedded: i64,
+    pub skipped: i64,
+    pub took_ms: u64,
+}
+
 /// 研究/抓取的预算上限（防止一次研究失控烧掉时间与额度）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -109,6 +215,41 @@ pub struct AiPolicy {
     /// Key 存在应用数据目录的 `ai-credentials.json`，不进工作区与备份）
     #[serde(default)]
     pub remote_model_key_set: bool,
+    /// **逐次外发确认**（Track C2，可选闸门）：开启后，把内容交给在线模型的**每一次**调用
+    /// 都必须由调用方带上「本次已确认」；否则在线这一档**根本不参与**（零请求）。
+    /// 默认关闭——默认口径仍是「首次授权 + 换地址作废」。
+    #[serde(default)]
+    pub confirm_each_outbound: bool,
+    /// 向量检索（D3/N7 第二步，**默认关闭**）：开启后检索多一路「向量召回」。
+    /// 嵌入**与在线模型共用地址与 Key**，但模型名单独一项（嵌入模型通常与聊天模型不同）。
+    #[serde(default)]
+    pub vector_enabled: bool,
+    /// 嵌入模型名（例如 `text-embedding-3-small`）；为空 = 向量档不可用
+    #[serde(default)]
+    pub remote_embedding_model: Option<String>,
+    /// 向量检索授权时间：**查询词**会发给嵌入端点，需要确认一次；
+    /// 换地址 / 换嵌入模型后作废（与在线模型同一套口径）。
+    #[serde(default)]
+    pub vector_authorized_at: Option<String>,
+    /// 决策模型档（D4）：`None`/`rule` = 离线规则档（默认）；
+    /// `system_one` = TypeSafe Jev / Perplexity Decisions（结构相同的托管决策模型）。
+    #[serde(default)]
+    pub decision_provider: Option<String>,
+    /// 决策模型端点基地址；为空 = 用 provider 预设
+    #[serde(default)]
+    pub decision_base_url: Option<String>,
+    /// 决策模型名；为空 = 用 provider 预设（`pplx-decider-v1.1-27b` / `jev-latest`）
+    #[serde(default)]
+    pub decision_model: Option<String>,
+    /// 决策档授权时间：打分会把**材料片段**发给该端点，需确认一次；换地址/换模型后作废
+    #[serde(default)]
+    pub decision_authorized_at: Option<String>,
+    /// 是否已配置决策模型 Key（**只回显布尔**）
+    #[serde(default)]
+    pub decision_key_set: bool,
+    /// 出站代理（默认跟随系统代理）；给"只有浏览器能上外网"的环境兜底
+    #[serde(default)]
+    pub outbound_proxy: Option<String>,
     /// 审计日志条数上限（超出后截断最旧的记录）
     pub audit_max_entries: u32,
 }
@@ -134,6 +275,16 @@ impl Default for AiPolicy {
             remote_model_score: false,
             remote_model_authorized_at: None,
             remote_model_key_set: false,
+            confirm_each_outbound: false,
+            vector_enabled: false,
+            remote_embedding_model: None,
+            vector_authorized_at: None,
+            decision_provider: None,
+            decision_base_url: None,
+            decision_model: None,
+            decision_authorized_at: None,
+            decision_key_set: false,
+            outbound_proxy: None,
             audit_max_entries: 500,
         }
     }
@@ -166,6 +317,26 @@ pub struct UpdateAiPolicyInput {
     pub confirm_remote_model: Option<bool>,
     /// API Key：**只写不读**（读路径只返回 `remote_model_key_set`）；传空串表示清除
     pub remote_model_api_key: Option<String>,
+    /// 逐次外发确认开关（Track C2，默认关闭）
+    pub confirm_each_outbound: Option<bool>,
+    /// 向量检索开关（D3，默认关闭）
+    pub vector_enabled: Option<bool>,
+    /// 嵌入模型名；传空字符串表示清除（换模型会作废向量授权）
+    pub remote_embedding_model: Option<String>,
+    /// 置 true 表示用户确认了「查询词与片段会发给嵌入端点」（写入授权时间戳）
+    pub confirm_vector: Option<bool>,
+    /// 决策模型档：`rule`（默认）/ `system_one`
+    pub decision_provider: Option<String>,
+    /// 决策模型基地址；传空字符串表示清除（回到 provider 预设）
+    pub decision_base_url: Option<String>,
+    /// 决策模型名；传空字符串表示清除
+    pub decision_model: Option<String>,
+    /// 置 true 表示用户确认了「材料片段会发给决策端点」
+    pub confirm_decision: Option<bool>,
+    /// 决策模型 API Key：**只写不读**；传空字符串表示清除
+    pub decision_api_key: Option<String>,
+    /// 出站代理（`http://host:port` / `socks5h://host:port`）；传空字符串表示跟随系统
+    pub outbound_proxy: Option<String>,
     pub budget: Option<ResearchBudget>,
 }
 

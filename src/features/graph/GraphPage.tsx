@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/badge';
+import { reportFailure } from '@/lib/actionFeedback';
 import { ROUTES } from '@/lib/constants';
 import { errorMessage, formatCount } from '@/lib/format';
 import { communityColor, communitySizes, detectCommunities } from '@/lib/graphCommunity';
@@ -138,7 +139,7 @@ export function GraphPage() {
       });
       toast.success(`已导出到 ${saved.relativePath}`);
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('导出图谱失败', errorMessage(error));
     }
   };
 
@@ -152,7 +153,7 @@ export function GraphPage() {
       });
       toast.success(`已导出到 ${saved.relativePath}`);
     } catch (error) {
-      toast.error(errorMessage(error));
+      reportFailure('导出图谱失败', errorMessage(error));
     }
   };
 

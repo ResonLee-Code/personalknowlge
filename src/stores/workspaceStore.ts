@@ -1,6 +1,7 @@
 import { toast } from 'sonner';
 import { create } from 'zustand';
 
+import { logAppFailure } from '@/lib/appLog';
 import { errorMessage } from '@/lib/format';
 import { formatWarningsToast } from '@/lib/warnings';
 import { workspaceService } from '@/services/workspaceService';
@@ -204,6 +205,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return await workspaceService.scan();
     } catch (error) {
       set({ error: errorMessage(error) });
+      void logAppFailure('scan', error);
       return null;
     }
   },

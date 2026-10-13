@@ -83,6 +83,11 @@ AI 编程工具必须：
   统一用 `reportAction(ok, success, storeError, fallbackError)`（`src/lib/actionFeedback.ts`）；
 - 批量操作要**如实计数**（`已恢复 1/2 篇，1 篇失败：原因`），不得把部分失败报成全部成功；
 - 确实要「静默降级」的次要数据（例如首页统计、审计列表）必须在注释里写明理由。
+- **失败原因必须"点得开"（2026-10-14，Track F2）**：所有失败提示统一走
+  `reportFailure(摘要, 原因)`（摘要进标题、完整原因进 `description`、停留 8 秒、带「复制详情」）；
+  长原因另有 `FailureDetail`（`src/components/ui/failure-detail.tsx`）可点开看全文、错误码与补充信息。
+  禁止再写 `toast.error(errorMessage(error))` 这类"把原因直接丢给原生 toast"的写法——
+  守卫 `src/lib/failureFeedback.test.ts` 会扫描源码拦下来。
 
 ### 表单控件必须有程序化标签（2026-10-11）
 
@@ -133,7 +138,13 @@ AI 编程工具必须：
 cd src-tauri && cargo fmt --check && cargo test --offline
 cd .. && pnpm lint && pnpm test && pnpm build
 pnpm build && pnpm test:e2e      # 端到端 UI 验证，截图输出到 docs/screenshots
+pnpm bench                       # 发布前必跑：1 万检索 + 3 万图谱，超阈值即失败（约 1 分钟）
 ```
+
+> `pnpm bench` 对应 Track E2 的性能守护（脚本 `scripts/bench/run.sh`）。**日常小改不用跑**，
+> 但**出包前必须跑一次**：它会在 p95 延迟、召回率、图谱全量查询任一越线时以非零码退出，
+> 并把本机实测值打印成一行 `PKOS_BENCH …` 供写进 CHANGELOG。改检索 / 索引 / 图谱相关代码后
+> 尤其别跳过——这类退化从功能测试里看不出来。
 
 > `cargo test` 里包含一条**命令契约守卫**（`src-tauri/tests/command_contract.rs`）：
 > 它把「前端 `services/*.ts` 调用的命令名」「`lib.rs` 里注册的命令」「mock 的 `case` 分支」

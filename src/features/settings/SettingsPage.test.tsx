@@ -62,7 +62,30 @@ describe('SettingsPage · 备份列表', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('暂无备份文件。')).toBeInTheDocument();
+    // 空态文案现在是「暂无备份文件。点上方『立即备份』创建后…」（B2 加了入口说明），
+    // 这条测试只关心「确实显示了空态、且不是错误态」。
+    expect(await screen.findByTestId('backup-empty')).toHaveTextContent('暂无备份文件');
     expect(screen.queryByTestId('backup-list-error')).not.toBeInTheDocument();
+  });
+
+  /**
+   * Track B2（2026-10-11 真机验收）：**空态要说清「校验 / 恢复」从哪来**。
+   *
+   * 「校验 / 恢复」是逐条渲染在每张备份卡片下方的按钮——没有备份时它们根本不存在。
+   * 验收时你和我都因此找不到这两个入口（各自花了几分钟），所以空态要主动说明。
+   */
+  it('空态里说明「创建备份后可校验 / 恢复」（这两个按钮只在有备份时出现）', async () => {
+    vi.spyOn(backupService, 'list').mockResolvedValue([]);
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+
+    const empty = await screen.findByTestId('backup-empty');
+    expect(empty).toHaveTextContent('暂无备份文件');
+    expect(empty).toHaveTextContent(/校验/);
+    expect(empty).toHaveTextContent(/恢复/);
   });
 });
