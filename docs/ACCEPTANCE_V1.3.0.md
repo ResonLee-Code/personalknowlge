@@ -48,7 +48,7 @@
 4. 顺带记录"卸载会留下什么"：`~/Library/Application Support/PersonalKnowledgeOS`（应用数据）与
    `~/Library/Preferences/com.personalknowledge.os.plist`（偏好）**不会被自动清掉**，需要用户手动删。
 
-**待干净机器补（A2）**：在一台**没装过本应用**的机器上（现在可以直接从上面那个 Release 下载），走一遍
+**待干净机器补（A2）**：在一台**没装过本应用**的机器上（本机当前是锁屏状态，交互步骤做不了；解锁后我也可以代跑），走一遍
 「从网络下载 `.dmg` → 首次打开放行 → 拖进应用程序 → 建库 / 恢复备份 → 卸载 → 确认数据仍在」，
 并逐条截图。第 10 条（首次启动放行）**只对"从网络下载的包"有意义**，本机构建没有 quarantine 标记，
 所以这一条脚本覆盖不了。
@@ -61,6 +61,22 @@
 >
 > 两种弹窗都截了图（`src-tauri/target/acceptance-debug/gk-*.png`），对照表见
 > [BUILD_COMMANDS.md](./BUILD_COMMANDS.md) 的「为什么必须有 ad-hoc 签名」。
+
+### A2 的可复制操作（给人工/给解锁后的自动化）
+
+```bash
+# 1) 下载并校验（应 6/6 OK、退出码 0）
+curl -L -O https://github.com/ResonLee-Code/personalknowlge/releases/download/v1.3.0/SHA256SUMS-all.txt
+for f in Personal.Knowledge.OS_1.3.0_*; do curl -L -O "https://github.com/ResonLee-Code/personalknowlge/releases/download/v1.3.0/$f"; done
+shasum -a 256 -c SHA256SUMS-all.txt
+
+# 2) 首次打开放行：挂载 .dmg → 把 app 拖进「应用程序」→ 双击
+#    看到「无法验证开发者」时：系统设置 → 隐私与安全性 → 「仍要打开」→ 再确认一次
+hdiutil attach Personal.Knowledge.OS_1.3.0_aarch64.dmg
+
+# 3) 建库 / 恢复备份 / 卸载后确认数据仍在
+#    卸载 = 把 /Applications 里的 app 拖到废纸篓；知识库目录（含 .knowledge/）不应受影响
+```
 
 ## C2. 产物完整性（✅ 2026-10-14，对着 **Release 里发布的文件**逐项验）
 

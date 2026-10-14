@@ -45,6 +45,26 @@ git tag vX.Y.Z && git push origin main --tags
 
 推送标签后流水线自动跑完并建 Release；若只想验证工件，用「手动运行」。
 
+### 发布后抽验（2026-10-14 加，血泪教训）
+
+流水线绿**不等于**发布物没问题。v1.3.0 发布后按「用户会怎么验」实测，发现 macOS 那份校验文件
+**自己过不了自己的校验**（混进一行 `du` 输出，`shasum -c` 报格式错并以非 0 退出），
+而且三份清单里写的是 CI 产物路径、与用户下载到的资产名对不上。所以发布后**必须**抽一次：
+
+```bash
+# 1) 把 Release 的产物与校验文件下到一个空目录，按用户的方式校验（必须 6/6 OK 且退出码 0）
+shasum -a 256 -c SHA256SUMS-all.txt
+# 2) macOS：挂载 .dmg，确认签名与版本
+hdiutil attach "Personal.Knowledge.OS_X.Y.Z_aarch64.dmg"
+codesign --verify --deep --strict --verbose=2 "/Volumes/Personal Knowledge OS/Personal Knowledge OS.app"
+plutil -p "/Volumes/Personal Knowledge OS/Personal Knowledge OS.app/Contents/Info.plist" | grep CFBundleShortVersionString
+# 3) Windows 便携版里那个应用 exe（不是 NSIS 外壳）过一遍结构校验
+python3 scripts/cross/verify-pe.py "<解包出来的>/Personal Knowledge OS.exe"
+```
+
+> 注意：`x64-setup.exe` 是 NSIS 安装器，**外壳是 32 位 stub 属正常**，
+> 别拿 `verify-pe.py` 直接判它「不是 x64」。
+
 ## 4. 产物与校验
 
 | 平台 | 文件 | 备注 |
