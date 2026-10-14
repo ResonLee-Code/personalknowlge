@@ -26,6 +26,17 @@
 
 体积逐项对照见 [ARTIFACT_SIZES.md](./ARTIFACT_SIZES.md)（含 debug/release 口径差异、Windows 产物等）。
 
+## B2. 发布（✅ 2026-10-14）
+
+- 仓库：`https://github.com/ResonLee-Code/personalknowlge`；`main` 与标签 `v1.3.0` 已推送；
+- **Release**：<https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.0>
+  —— macOS `.dmg`、Windows `setup.exe` + `portable.zip`、Linux `.deb`/`.rpm`/`.AppImage`，外加 4 份 `SHA256SUMS-*.txt`；
+- **发布产物抽验（不是"CI 绿了就算"）**：把 Release 里的 `.dmg` 下载回来 →
+  sha256 与 `SHA256SUMS-macos.txt` **一致** → 挂载后 `codesign --verify --deep --strict` **通过**
+  （`Identifier=com.personalknowledge.os`、版本 `1.3.0`）；`spctl --assess` 仍 `rejected`（预期，需用户放行一次）；
+- 流水线首跑修掉 5 个"只在干净环境现形"的仓库缺陷（pnpm 版本冲突、Node 版本、esbuild 构建批准、
+  归档链接守卫、preflight 缺 Linux 依赖），清单见 [CHANGELOG.md](./CHANGELOG.md) 的「出包」一节。
+
 ## C. 安装 / 卸载（✅ 本机演练；🖐 干净机器待补）
 
 本机做的（2026-10-14）：
@@ -37,7 +48,7 @@
 4. 顺带记录"卸载会留下什么"：`~/Library/Application Support/PersonalKnowledgeOS`（应用数据）与
    `~/Library/Preferences/com.personalknowledge.os.plist`（偏好）**不会被自动清掉**，需要用户手动删。
 
-**待干净机器补（A2）**：在一台**没装过本应用**的机器上，走一遍
+**待干净机器补（A2）**：在一台**没装过本应用**的机器上（现在可以直接从上面那个 Release 下载），走一遍
 「从网络下载 `.dmg` → 首次打开放行 → 拖进应用程序 → 建库 / 恢复备份 → 卸载 → 确认数据仍在」，
 并逐条截图。第 10 条（首次启动放行）**只对"从网络下载的包"有意义**，本机构建没有 quarantine 标记，
 所以这一条脚本覆盖不了。

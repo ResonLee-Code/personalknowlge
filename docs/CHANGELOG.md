@@ -480,6 +480,29 @@ B3 已经让失败原因**可见**（不再只挂悬停提示）并写进应用�
 完整的验收实况（发布前守护 / 产物与签名 / 安装卸载演练 / 待干净机器项）记在
 [ACCEPTANCE_V1.3.0.md](./ACCEPTANCE_V1.3.0.md)。
 
+### 出包：V1.3.0 已发布（2026-10-14）
+
+- 仓库首次接入远端：`https://github.com/ResonLee-Code/personalknowlge`，`main` 与 `v1.3.0` 均已推送；
+- **Release 已创建**：<https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.0>
+  —— 三平台 10 个产物：macOS `.dmg`(5.35 MB)、Windows `setup.exe`(4.26 MB) + `portable.zip`(5.42 MB)、
+  Linux `.deb`(6.10 MB) / `.rpm`(6.11 MB) / `.AppImage`(80.50 MB)，外加 4 份 `SHA256SUMS-*.txt`；
+- **发布产物已抽验**（不是"CI 绿了就算"）：下载 Release 里的 `.dmg` → 与 `SHA256SUMS-macos.txt`
+  的哈希**一致** → 挂载后 `codesign --verify --deep --strict` **通过**、`Identifier=com.personalknowledge.os`、
+  版本 `1.3.0`；`spctl --assess` 仍 `rejected`（预期：没有 Developer ID，需要用户放行一次）。
+
+**流水线首跑暴露并修掉的 5 个仓库缺陷**（都是"本地看不出来、只在 CI 现形"的那一类）：
+
+| # | 现象 | 根因 | 修法 |
+| --- | --- | --- | --- |
+| 1 | `Setup pnpm` 失败：`Multiple versions of pnpm specified` | workflow 里写 `version: 11`，与 `package.json` 的 `packageManager` 冲突 | 删掉 action 的 `version`，版本只由 `packageManager` 决定 |
+| 2 | `Setup Node.js` 失败：`This version of pnpm requires at least Node.js v22.13` | 四处都写 `node-version: 20` | 改 `22`（与本机验证口径一致） |
+| 3 | `pnpm install` 退出 1：`ERR_PNPM_IGNORED_BUILDS: esbuild` | `pnpm-workspace.yaml` 里 `allowBuilds.esbuild` 一直是 pnpm 交互提示留下的**占位字符串** | 改成 `true` —— 本地用「全新 node_modules」复现并验证修法 |
+| 4 | `docsLinks` 守卫失败：`docs/yuque-manuals/README.md → ./books/*/README.md` | 指向**刻意不入库**的第三方归档（本地有文件、全新 clone 没有） | 守卫加精确例外：只放行"目标落在 `docs/yuque-manuals/` 里"的链接 |
+| 5 | `cargo test` 在 preflight 链接失败 | 裸 ubuntu 上没装 webkit2gtk/gtk 等开发包 | preflight 补上与 linux 打包 job 相同的 apt 依赖 |
+
+> 教训：**"能在本机跑通"与"能在干净环境跑通"是两回事**。这 5 条里没有一条是应用逻辑的问题，
+> 但每一条都会让第一次发版卡住；第 3 条还顺手解释了我们为什么能在本地一直没发现它。
+
 ---
 
 ## V1.2.1（2026-10-11）
