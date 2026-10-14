@@ -62,6 +62,29 @@
 > 两种弹窗都截了图（`src-tauri/target/acceptance-debug/gk-*.png`），对照表见
 > [BUILD_COMMANDS.md](./BUILD_COMMANDS.md) 的「为什么必须有 ad-hoc 签名」。
 
+## C2. 产物完整性（✅ 2026-10-14，对着 **Release 里发布的文件**逐项验）
+
+不再是"CI 绿了就算"：把 Release 上的 9 个产物**全部下载回来**（经本机代理），逐项核验。
+
+| 项 | 结果 |
+| --- | --- |
+| 6 个产物 × 发布的校验值 | ✅ **6/6 一致**（dmg / setup.exe / portable.zip / deb / rpm / AppImage） |
+| macOS `.dmg` | ✅ 挂载正常；内含 `.app` 与 `Applications` 链接；`codesign --verify --deep --strict` **通过**（`Identifier=com.personalknowledge.os`）；版本 `1.3.0`；`spctl` 仍 `rejected`（预期：无 Developer ID） |
+| Windows `setup.exe` | ✅ `file` 识别为 **PE32 NSIS 自解压安装器**；⚠️ **NSIS 的安装器外壳本身是 32 位 stub，这是正常的**（真正的应用在载荷里），别拿 `verify-pe.py` 直接判它"不是 x64" |
+| Windows `portable.zip` → 里面的 `Personal Knowledge OS.exe` | ✅ 解包后用仓库自带 `scripts/cross/verify-pe.py` 校验：**x86-64 / GUI / 有资源节 / 校验通过** |
+| Linux `.deb` | ✅ `ar t` 结构完整（`debian-binary` + `control.tar.gz` + `data.tar.gz`） |
+| Linux `.rpm` | ✅ `file` 识别为 `RPM v3.0 bin` |
+| Linux `.AppImage` | ✅ `file` 识别为 `ELF 64-bit LSB pie executable, x86-64`（84.4 MB） |
+| **用户视角的校验流程** | ✅ 在下载目录里直接 `shasum -a 256 -c SHA256SUMS-all.txt` → **6/6 OK、退出码 0** |
+
+> **这一步顺带抓到一个真缺陷**：v1.3.0 发布后按"用户会怎么验"实测，
+> `shasum -c SHA256SUMS-macos.txt` 报 `1 line is improperly formatted` 并以非 0 退出——
+> 根因是 macOS job 把一行 `du -k` 的体积输出也写进了哈希清单；而且三个平台的清单里写的都是
+> **CI 产物路径**（`dmg/Personal Knowledge OS_x.dmg`、`deb/…`），用户在下载目录里按文件名找**对不上**
+> （GitHub 上传资产时会把空格换成点）。
+> 已修：workflow 改为**只写哈希行 + 按用户下载到的资产名写**；并把已发布的 4 份 `SHA256SUMS-*.txt`
+> 一并替换（哈希值不变，只是格式与文件名；替换时四个文件的下载数均为 0）。
+
 ## D. 已知限制（不改代码也成立）
 
 1. **未签名（Developer ID）/ 未公证**：即便是 ad-hoc 签名，`spctl --assess` 仍是 `rejected`；

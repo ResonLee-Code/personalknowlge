@@ -486,9 +486,17 @@ B3 已经让失败原因**可见**（不再只挂悬停提示）并写进应用�
 - **Release 已创建**：<https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.0>
   —— 三平台 10 个产物：macOS `.dmg`(5.35 MB)、Windows `setup.exe`(4.26 MB) + `portable.zip`(5.42 MB)、
   Linux `.deb`(6.10 MB) / `.rpm`(6.11 MB) / `.AppImage`(80.50 MB)，外加 4 份 `SHA256SUMS-*.txt`；
-- **发布产物已抽验**（不是"CI 绿了就算"）：下载 Release 里的 `.dmg` → 与 `SHA256SUMS-macos.txt`
-  的哈希**一致** → 挂载后 `codesign --verify --deep --strict` **通过**、`Identifier=com.personalknowledge.os`、
-  版本 `1.3.0`；`spctl --assess` 仍 `rejected`（预期：没有 Developer ID，需要用户放行一次）。
+- **发布产物逐项抽验**（不是「CI 绿了就算」）：把 Release 上的 **9 个产物全部下载回来**——
+  6 个产物与发布的校验值 **6/6 一致**；`.dmg` 挂载后签名 `valid on disk`、版本 `1.3.0`；
+  便携版 zip 里的应用 exe 用仓库自带 `scripts/cross/verify-pe.py` 校验 **x86-64 / GUI 通过**；
+  `.deb` / `.rpm` / `.AppImage` 结构各自识别正常；`spctl` 仍 `rejected`（预期：没有 Developer ID）。
+  详细逐项见 [ACCEPTANCE_V1.3.0.md](./ACCEPTANCE_V1.3.0.md) §C2。
+- **顺带修掉一个「发布物自身的缺陷」**：按「用户会怎么验」实测时发现，
+  `shasum -a 256 -c SHA256SUMS-macos.txt` 会报 `1 line is improperly formatted` 并以非 0 退出
+  （macOS job 把一行 `du -k` 的体积输出也写进了哈希清单），且三份清单里写的是 **CI 产物路径**
+  （`dmg/…`、`deb/…`），用户在下载目录里对不上（GitHub 上传资产时会把空格换成点）。
+  已修 workflow（只写哈希行 + 按用户下载到的资产名写），并把已发布的 4 份 `SHA256SUMS-*.txt` 一并替换
+  （哈希值不变、替换时下载数为 0）；现在在下载目录里 `shasum -c SHA256SUMS-all.txt` → **6/6 OK、退出码 0**。
 
 **流水线首跑暴露并修掉的 5 个仓库缺陷**（都是"本地看不出来、只在 CI 现形"的那一类）：
 
