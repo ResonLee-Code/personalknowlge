@@ -1,5 +1,5 @@
 {
-  "startedAt": "2026-10-13T18:09:44.154Z",
+  "startedAt": "2026-10-14T13:24:18.083Z",
   "mode": "real（真机执行）",
   "appName": "Personal Knowledge OS",
   "workspace": "/private/tmp/pkos-acceptance",
@@ -40,7 +40,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=98083",
+          "detail": "app=Personal Knowledge OS pid=19075",
           "evidence": ""
         },
         {
@@ -52,7 +52,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(152,200) · AXPress",
+          "detail": "click(152,196) · AXPress",
           "evidence": ""
         },
         {
@@ -64,7 +64,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(1004,769) · AXPress",
+          "detail": "click(1004,767) · AXPress",
           "evidence": ""
         },
         {
@@ -95,7 +95,7 @@
           "op": "check",
           "status": "passed",
           "detail": "文件断言通过",
-          "evidence": "✓ 00_Inbox/20261014-020754-ACCEPT-NOTE-A.md（刚生成）"
+          "evidence": "✓ 00_Inbox/20261014-212217-ACCEPT-NOTE-A.md（刚生成）"
         },
         {
           "op": "manual",
@@ -114,7 +114,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=98083",
+          "detail": "app=Personal Knowledge OS pid=19075",
           "evidence": ""
         },
         {
@@ -126,7 +126,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(1418,89) · AXPress",
+          "detail": "click(1418,85) · AXPress",
           "evidence": ""
         },
         {
@@ -158,7 +158,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=98083",
+          "detail": "app=Personal Knowledge OS pid=19075",
           "evidence": ""
         },
         {
@@ -170,25 +170,25 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(1418,89) · AXPress",
+          "detail": "click(1418,85) · AXPress",
           "evidence": ""
         },
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(789,748) · AXPress",
+          "detail": "click(789,744) · AXPress",
           "evidence": ""
         },
         {
           "op": "check",
           "status": "passed",
           "detail": "文件断言通过",
-          "evidence": "✓ .knowledge/backups/KnowledgeBackup_20261014-020809.zip（刚生成）"
+          "evidence": "✓ .knowledge/backups/KnowledgeBackup_20261014-212235.zip（刚生成）"
         },
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(318,914) · AXPress",
+          "detail": "click(318,910) · AXPress",
           "evidence": ""
         },
         {
@@ -238,7 +238,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=98083",
+          "detail": "app=Personal Knowledge OS pid=19075",
           "evidence": ""
         },
         {
@@ -268,13 +268,13 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(1425,324) · AXPress",
+          "detail": "click(1425,320) · AXPress",
           "evidence": ""
         },
         {
           "op": "drag",
           "status": "passed",
-          "detail": "drag(811,489) → (871,489)",
+          "detail": "drag(811,487) → (871,487)",
           "evidence": ""
         },
         {
@@ -300,7 +300,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=98083",
+          "detail": "app=Personal Knowledge OS pid=19075",
           "evidence": ""
         },
         {
@@ -362,7 +362,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=98083",
+          "detail": "app=Personal Knowledge OS pid=19075",
           "evidence": ""
         },
         {
@@ -374,19 +374,19 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(152,200) · AXPress",
+          "detail": "click(152,196) · AXPress",
           "evidence": ""
         },
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(948,252) · AXPress",
+          "detail": "click(948,250) · AXPress",
           "evidence": ""
         },
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(719,523) · AXPress",
+          "detail": "click(719,521) · AXPress",
           "evidence": ""
         },
         {
@@ -398,7 +398,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(999,523) · AXPress",
+          "detail": "click(999,521) · AXPress",
           "evidence": ""
         },
         {
@@ -416,7 +416,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(980,710) · AXPress",
+          "detail": "click(980,708) · AXPress",
           "evidence": ""
         },
         {
@@ -429,7 +429,7 @@
           "op": "check",
           "status": "passed",
           "detail": "文件断言通过",
-          "evidence": "✓ 00_Inbox/20261014-020916-Example-Domain.md（刚生成）"
+          "evidence": "✓ 00_Inbox/20261014-212348-Example-Domain.md（刚生成）"
         },
         {
           "op": "manual",
@@ -448,7 +448,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=98083",
+          "detail": "app=Personal Knowledge OS pid=19075",
           "evidence": ""
         },
         {
@@ -460,13 +460,13 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(152,410) · AXPress",
+          "detail": "click(152,406) · AXPress",
           "evidence": ""
         },
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(431,379) · AXPress",
+          "detail": "click(431,375) · AXPress",
           "evidence": ""
         },
         {
@@ -478,7 +478,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(431,499) · AXPress",
+          "detail": "click(431,495) · AXPress",
           "evidence": ""
         },
         {
@@ -510,7 +510,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=98083",
+          "detail": "app=Personal Knowledge OS pid=19075",
           "evidence": ""
         },
         {
@@ -542,7 +542,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=98083",
+          "detail": "app=Personal Knowledge OS pid=19075",
           "evidence": ""
         },
         {
@@ -554,7 +554,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(152,240) · AXPress",
+          "detail": "click(152,236) · AXPress",
           "evidence": ""
         },
         {
