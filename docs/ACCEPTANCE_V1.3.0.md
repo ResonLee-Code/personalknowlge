@@ -39,14 +39,28 @@
 
 ## C. 安装 / 卸载（✅ 本机演练；🖐 干净机器待补）
 
-本机做的（2026-10-14）：
+本机做的（2026-10-14，**用的是从 GitHub Release 真实下载的 `.dmg`**）：
 
-1. `ditto` 把签好名的 `.app` 放进 `/Applications` → `codesign --verify` 通过 → **启动正常**（截图）；
-2. **卸载**：把 `/Applications` 下的 `.app` 移除（本机移到 `/tmp/pkos-uninstalled.*`，可随时搬回）；
-3. 卸载后检查**用户数据完好**：工作区 28 篇笔记 / 9.9 MB、`.knowledge/` 目录都在——
-   **卸载不碰知识库**；
-4. 顺带记录"卸载会留下什么"：`~/Library/Application Support/PersonalKnowledgeOS`（应用数据）与
-   `~/Library/Preferences/com.personalknowledge.os.plist`（偏好）**不会被自动清掉**，需要用户手动删。
+1. **装**：把发布版 `.dmg` 里的 `.app` 拷进 `/Applications` → `codesign --verify --deep --strict` 通过、
+   `CFBundleShortVersionString = 1.3.0`；
+2. **首次打开（E 节第 10 条）**：给副本打上下载标记后双击 → macOS 弹
+   「**Apple 无法验证"Personal Knowledge OS"…**」（*不是*「已损坏」——这正是 ad-hoc 签名换来的可放行变体），
+   且 系统设置 → 隐私与安全性 里出现「**已阻止"Personal Knowledge OS"以保护 Mac。**」与放行入口；
+   放行后应用**正常启动出窗口**（本机用等效的 `xattr -d com.apple.quarantine` 放行：
+   「仍要打开」按钮在系统设置里点不到——那是 web 化界面，AX 树几乎不暴露侧边栏，已如实记录）；
+3. **清空应用数据后的"首跑"**：把 `~/Library/Application Support/PersonalKnowledgeOS` 挪走后重启 →
+   欢迎页正确显示空态（「还没有记录。创建或打开一个目录后会显示在这里。」），并**自动重建**应用数据目录；
+4. **首次建库**：填目录 → 创建 → 工作区结构完整（`.knowledge/{config.json,database.sqlite,index,logs,templates,backups,research}`
+   + `00_Inbox/` 欢迎笔记）✓；
+5. **用已安装的发布版跑 E 节自动验收**：**71 步自动断言通过 / 0 失败**（16 次点击全走 `AXPress`）——
+   这是"发布出来的那个二进制真的能用"的最硬证据；
+6. **卸载**：退出 → 把 `/Applications` 里的应用移除 → 知识库数据（32 篇笔记 + `.knowledge`）
+   与应用数据（4 条「最近打开」）**完好**，重装后列表还在。
+
+> 这一步又抓到**脚手架自己的一个真缺陷**：跑验收时 Chrome 抢到了前台，
+> 而 `paste`/`keys` 这类**键盘事件只送给最前面的应用**，于是文本打进了 Chrome、应用里标题是空的，
+> 18 步断言失败——而报告里每一步都写着 ✅（"步骤通过 ≠ 动作生效"的又一次现形）。
+> 已修：每个键盘类步骤前重新激活应用（`scripts/acceptance/run.js`），复跑后 71/0 通过。
 
 **待干净机器补（A2）**：在一台**没装过本应用**的机器上（本机当前是锁屏状态，交互步骤做不了；解锁后我也可以代跑），走一遍
 「从网络下载 `.dmg` → 首次打开放行 → 拖进应用程序 → 建库 / 恢复备份 → 卸载 → 确认数据仍在」，

@@ -249,6 +249,17 @@ function runCase(appName, workspace, outDir, item, dryRun) {
       continue;
     }
     const execute = () => {
+      /**
+       * 键盘类步骤（粘贴 / 快捷键 / 按键码）必须先确认应用在前台。
+       *
+       * 为什么：`AXPress` 点击与前台无关，但**键盘事件只送给最前面的应用**。
+       * 2026-10-14 实测踩过：跑验收途中 Chrome 抢到前台，于是 `paste` 打进了 Chrome，
+       * 应用里的标题是空的、后续断言全崩（18 步失败）——而报告里每个步骤都写着 ✅。
+       * 这里的教训与「步骤通过 ≠ 动作生效」是同一条。
+       */
+      if (step.op === 'paste' || step.op === 'keys' || step.op === 'keyCode' || step.op === 'type') {
+        mac.activate(appName);
+      }
       switch (step.op) {
         case 'app': {
           const pid = mac.pidOf(appName);
