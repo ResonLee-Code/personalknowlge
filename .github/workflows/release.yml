@@ -150,8 +150,11 @@ jobs:
       - name: 生成校验值
         run: |
           cd src-tauri/target/release/bundle
-          { shasum -a 256 dmg/*.dmg; echo "$(du -k "dmg"/*.dmg | awk '{print $1" KB\t"$2}')"; } \
-            > "$GITHUB_WORKSPACE/SHA256SUMS-macos.txt"
+          # 只写哈希行：以前这里还塞了一行 `du -k` 的体积输出，
+          # 结果用户跑 `shasum -a 256 -c SHA256SUMS-macos.txt` 会报「1 line is improperly formatted」、
+          # 并以非 0 退出——等于这份校验文件自己过不了自己的校验（2026-10-14 v1.3.0 发布后发现）。
+          shasum -a 256 dmg/*.dmg > "$GITHUB_WORKSPACE/SHA256SUMS-macos.txt"
+          # 体积不再写进校验文件；要记录体积请看 docs/ARTIFACT_SIZES.md（口径与复现命令都在那里）。
           cat "$GITHUB_WORKSPACE/SHA256SUMS-macos.txt"
 
       - name: 上传工件
