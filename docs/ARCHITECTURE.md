@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 表现层 | 界面与交互，不直接访问 SQLite 与文件系统 | `src/` |
 | 命令层 | Tauri 命令，参数校验与线程调度 | `src-tauri/src/commands/` |
-| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件、模板、图谱、剪藏、关系、历史；**AI 策略闸门 / 只读工具 / 研究助手 / 本地模型**） | `src-tauri/src/application/` |
+| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件、模板、图谱、剪藏、关系、历史；**AI 策略闸门 / 出站代理 / 只读工具 / 研究助手 / 决策引擎+缓存+Trace / 校准与探针 / 证据充分性与查询扩展 / 嵌入与向量索引 / 本地与在线模型**） | `src-tauri/src/application/` |
 | 领域层 | 数据结构与不变量，不依赖框架 | `src-tauri/src/domain/` |
 | 仓储层 | 隔离 SQL 细节（trait + SQLite 实现） | `src-tauri/src/repositories/` |
 | 基础设施层 | SQLite、Markdown 存储、FTS5、文件监听、备份、frontmatter、docx 生成 | `src-tauri/src/infrastructure/` |
@@ -114,12 +114,17 @@ Markdown 文件 + SQLite（WAL）+ FTS5 索引 + 回收站
 ### 3.5 研究助手（V1.2.1 阶段 D）
 
 ```text
-research_start  → 校验课题（过于宽泛要追问范围）→ 拆 3–5 个子问题（模板）→ 本地基线（kb_search）→ 会话落盘
-research_collect→ 本地 FTS5 检索 → 按「意图标记」把材料归属到子问题 → 逐条分级（A–E）
+research_start  → 校验课题（过于宽泛要追问范围）→ 拆 3–5 个子问题（模板）→ 本地基线（kb_search）
+                  └ **查询扩展（N9）**：课题 → 括号短语 / 连接词切分 / 拉丁词（≤6 条，规则化、离线，不发明新词）
+                    → 计划里记下这组查询（`plan.queries`）→ 会话落盘
+research_collect→ 按上面那组查询**逐条**检索本地 FTS5 → 按笔记去重合并 → 按「意图标记」归属到子问题 → 逐条分级（A–E）
                   └ 联网档位开启 + 本次确认 + 已配置检索源时才走外部检索（失败/未配置都只警告）
 research_verify → 按子问题汇总：≥2 个独立来源才算交叉验证；正负表述对立判为「冲突」（不选边）
-research_compose→ 六段报告（结论先行 / 关键事实 / 争议 / 与本库关系 / 待验证 / 参考来源）
-                  └ 生成侧：本地模型（开启且可用）否则模板实现；失败自动降级并写警告
+research_compose→ **证据充分性（N9）**：按六个缺口逐条判定（无材料 / 覆盖不全 / 无交叉验证 /
+                  材料太薄 / 只有 E 级 / 全部可能过时）→ 结果写进报告 `evidence` 与界面面板
+                  → 六段报告（结论先行 / 关键事实 / 争议 / 与本库关系 / 待验证 / 参考来源）
+                  └ 生成侧：在线模型 → 本地模型 → 模板实现；失败自动降级并写警告
+                  └ **不足时不给结论**：报告顶部 + 警告块 + 结论段三处明说「证据不足」，并列出缺口与怎么补
 research_proposal→ 标题 / 分类 / diff / 同标题提示（不覆盖）
 research_write  → 用户确认后 note_create 或 note_save（追加留历史快照）→ 补 N1 元数据
 ```
@@ -127,7 +132,9 @@ research_write  → 用户确认后 note_create 或 note_save（追加留历史�
 - 会话存 `.knowledge/research/<sessionId>.json`（可丢弃的中间产物，删掉不影响笔记）；
 - 每一步都写 `research_*` 审计（`capability / outbound / outcome / durationMs / note`，**不含正文**）；
 - 打分由决策层给出：`credibility`（模型分与级别折算各半）、`confidence`（交叉验证折扣），
-  provider 标识写进报告（`rule` / `local.ollama:<模型>`）。
+  provider 标识写进报告（`rule` / `system_one:<模型>` / `local.ollama:<模型>`）；
+- **独立性口径唯一**：`evidence::source_identity()`（本地笔记按 id、外部来源按域名）同时供
+  「结论是否交叉验证」与「证据是否充分」使用，不允许两处各写一套。
 
 ## 4. 可替换性设计
 
@@ -268,6 +275,16 @@ application/ai/policy.rs      AiPolicyService    ← ★ 唯一的闸门判定�
 application/ai/tools.rs       AiTools            ← 只读：kb_search / note_read / web_fetch / web_search
    ▼
 application/ai/research.rs    ResearchService    ← 五步流程 + 会话落盘 + 报告渲染
+   ├─ query_expansion.rs      查询扩展（纯函数：课题 → ≤6 条查询；不做同义词替换）
+   ├─ evidence.rs             证据充分性（纯函数：六个缺口 → sufficient/gaps/怎么补）
+   ├─ net.rs                  出站代理解析（显式设置 → 环境变量 → macOS 系统代理；**loopback 永不代理**）
+   ├─ decision_engine.rs      决策引擎：内容寻址缓存 → 候选链逐档试 → 写缓存 + Trace
+   ├─ decision_cache.rs       决策缓存（迁移 012；材料或模型配置一变即不命中）
+   ├─ system_one.rs           System One 适配器（Perplexity Decisions / Jev 同协议，路径按域名切换）
+   ├─ calibration.rs          ECE / Brier / 10 等宽箱 / 等渗拟合 / **折外** ECE
+   ├─ decision_probe.rs       契约探针 + 100 题校准评测 + 规则档 vs 决策档 A/B
+   ├─ embeddings.rs / vector_index.rs  在线嵌入 + chunk 向量（迁移 013，派生、可重建）
+   ├─ diagnose.rs             模型自检（只读；在线档只核对配置，不联系远端）
    ├─ source_grade.rs         A–E 分级（纯函数：域名内置表 → 内容自证 → 兜底「弱」）
    ├─ web_search.rs           检索源模板 {query}/{limit} + 三种 JSON 形状 + 注入判定
    ├─ template_provider.rs    无模型时的报告模板（文本自带「未接模型」标注）

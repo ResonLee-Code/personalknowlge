@@ -202,10 +202,12 @@ V1.0 只做三件事：**记录、分类、搜索**，同时保证数据自主�
 
 ### 发布
 
-- [x] macOS 可构建（`pnpm tauri build` 产出 `.app` / `.dmg`）
-- [ ] macOS 在干净机器上的安装验证（需要真实设备）
-- [x] Windows 构建配置就绪（NSIS + `.ico`，路径与保留文件名兼容）
-- [ ] Windows 在真实设备上的安装验证
+- [x] macOS 可构建（`pnpm tauri build` 产出 `.app` / `.dmg`），且**必需 ad-hoc 签名**（V1.3.0 起写进 `tauri.conf.json`）
+- [x] macOS 首次打开放行流程已验证（ad-hoc 签名 → 「无法验证开发者」→ 系统设置「仍要打开」；
+      用**从 Release 真实下载**的 `.dmg` 实测，见 [ACCEPTANCE_V1.3.0.md](./ACCEPTANCE_V1.3.0.md)）
+- [x] Windows 构建配置就绪（NSIS + `.ico`），**V1.3.0 产物流水线已产出** `setup.exe` + `portable.zip`
+- [ ] Windows / Linux 在**真实设备**上的安装与运行验证（本机无 Windows/Linux；V1.3.0 只做了结构校验与哈希核对）
+- [x] 三平台产物与 `SHA256SUMS-*.txt` 已发布，且**用户可在下载目录直接 `shasum -c` 通过**
 
 ## 5. V1.0 明确不做（与设计文档 4.2 一致）
 

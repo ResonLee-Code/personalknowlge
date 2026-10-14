@@ -281,6 +281,7 @@ pnpm bench -- --only search                    # 只跑检索（或 --only graph
 
 ## 8. 相关文档
 
+- [GUIDE.md](./GUIDE.md) / [GUIDE.en.md](./GUIDE.en.md)：**完全指南**（面向使用者：安装、上手、AI、排错）
 - [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)：发版流程与 CI 流水线细节
 - [ARTIFACT_SIZES.md](./ARTIFACT_SIZES.md)：产物体积对照表（口径 / 逐形态 / 复现命令，E3）
 - [DEVELOPMENT_RULES.md](./DEVELOPMENT_RULES.md)：本地回归命令与文档同步规则

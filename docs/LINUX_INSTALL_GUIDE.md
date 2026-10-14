@@ -1,20 +1,20 @@
 # Linux 安装与使用说明
 
-适用于 Personal Knowledge OS **V1.2.0**（x86_64 / aarch64，glibc 发行版：Ubuntu 22.04+、
+适用于 Personal Knowledge OS **V1.3.0**（x86_64，glibc 发行版：Ubuntu 22.04+、
 Debian 12+、Fedora 38+、Arch 等，需 WebKitGTK 4.1）。
 
 ## 版本状态（重要）
 
 | 项目 | 现状 |
 | --- | --- |
-| 应用代码 | **V1.2.1 的内容**（与 macOS / Windows 同一份代码；数据库 schema 13） |
-| Linux 安装包 | ⏳ **尚未产出**：Tauri 不支持从 macOS 交叉编译到 Linux，必须在 Linux 上构建（本仓库已备好脚本与 CI） |
-| macOS 安装包 | ✅ V1.2.0（dmg sha256 79dbc9b0…） |
-| Windows 安装包 | ✅ V1.2.0（交叉编译未签名，待真机验收） |
+| 应用代码 | **V1.3.0**（与 macOS / Windows 同一份代码；数据库 schema 13） |
+| Linux 安装包 | ✅ **V1.3.0 已随 Release 发布**：`.deb` / `.rpm` / `.AppImage`（由 CI 的 ubuntu-22.04 job 产出；本机无法交叉编译 Linux） |
+| macOS 安装包 | ✅ V1.3.0 `.dmg`（ad-hoc 签名，首次打开需「仍要打开」放行一次） |
+| Windows 安装包 | ✅ V1.3.0（交叉编译、未签名，待真机验收） |
 
-> ⚠️ **安装包落后于代码**：V1.2.1 的功能（子文档层级、目录管理页、网页剪藏、AI 闸门与研究助手等）
-> 还没进任何安装包；打包按指令暂停。恢复打包时按
-> [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) 的 F 节执行。
+> 产物与代码已对齐（V1.3.0）。安装前建议先校验：`sha256sum -c SHA256SUMS-linux.txt`
+> （Release 里的校验值按**你下载到的文件名**写，在下载目录里直接跑即可）。
+> 三平台发布流程与发布后抽验清单见 [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)。
 
 ## 一、产出安装包（二选一）
 

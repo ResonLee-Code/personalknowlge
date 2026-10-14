@@ -128,6 +128,7 @@ hdiutil attach Personal.Knowledge.OS_1.3.0_aarch64.dmg
 
 ## E. 相关文档
 
+- [GUIDE.md](./GUIDE.md) / [GUIDE.en.md](./GUIDE.en.md)：完全指南（README 的推荐入口）
 - [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md)：上一版完整验收清单与已知限制
 - [PLAN_V1.3.0.md](./PLAN_V1.3.0.md)：本版计划、剩余任务与证据
 - [BUILD_COMMANDS.md](./BUILD_COMMANDS.md)：打包命令、签名要求、常见坑

@@ -1,17 +1,26 @@
 # Windows 安装与使用说明
 
-适用于 Personal Knowledge OS **V1.2.0**（Windows 10 1809 及以上 / Windows 11，x64）。
+适用于 Personal Knowledge OS **V1.3.0**（Windows 10 1809 及以上 / Windows 11，x64）。
 
 ## 版本状态（重要）
 
 | 项目 | 现状 |
 | --- | --- |
-| 应用代码 | **V1.2.1**（子文档层级、置顶与手排、命名版本、目录管理页、Word/CSV 导入、网页剪藏、AI 闸门与研究助手、待复核提醒；四处版本号已于 2026-10-11 升到 1.2.1） |
-| Windows 安装包 | ✅ 已构建 V1.2.0（2026-10-10，NSIS + 便携版）；⚠️ **由 macOS 交叉编译产出、未签名，尚未在真实 Windows 上验收** |
-| macOS 安装包 | ✅ V1.2.0 已构建（dmg sha256 79dbc9b0…，见 CHANGELOG「当前构建」） |
+| 应用代码 | **V1.3.0**（决策档与校准评测、证据充分性与查询扩展、向量检索、真机验收自动化…四处版本号 `1.3.0`） |
+| Windows 安装包 | ✅ **V1.3.0 已随 Release 发布**：`Personal.Knowledge.OS_1.3.0_x64-setup.exe`（NSIS）与 `…_x64-portable.zip`；⚠️ **未签名**，且**尚未在真实 Windows 上验收**（本机无 Windows；已做结构校验与哈希核对） |
+| macOS 安装包 | ✅ V1.3.0 `.dmg`（**ad-hoc 签名**：首次打开需在 系统设置 → 隐私与安全性 → 仍要打开 放行一次） |
+| Linux 安装包 | ✅ V1.3.0 `.deb` / `.rpm` / `.AppImage`（同样随 Release 发布） |
 
-> ⚠️ **安装包落后于代码**：V1.2.1 的功能还没进安装包（打包按指令暂停）。
-> 恢复打包后按 [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md) 的 F 节执行，再按下文清单做真机验收。
+下载与校验（**建议先校验再安装**）：
+
+```powershell
+# 从 Release 下载后，在下载目录里核对（PowerShell）
+Get-FileHash "Personal.Knowledge.OS_1.3.0_x64-setup.exe" -Algorithm SHA256
+# 与 Release 里 SHA256SUMS-windows.txt / SHA256SUMS-all.txt 的同名条目对比
+```
+
+> 便携版 zip 里那个 `Personal Knowledge OS.exe` 是**应用本体**（x86-64 GUI，可用
+> `python3 scripts/cross/verify-pe.py` 校验）；`setup.exe` 的 NSIS 外壳是 **32 位 stub，属正常**。
 
 本地（macOS）重新打包的命令：
 
