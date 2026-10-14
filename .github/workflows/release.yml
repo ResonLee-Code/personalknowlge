@@ -153,8 +153,13 @@ jobs:
           # 只写哈希行：以前这里还塞了一行 `du -k` 的体积输出，
           # 结果用户跑 `shasum -a 256 -c SHA256SUMS-macos.txt` 会报「1 line is improperly formatted」、
           # 并以非 0 退出——等于这份校验文件自己过不了自己的校验（2026-10-14 v1.3.0 发布后发现）。
-          shasum -a 256 dmg/*.dmg > "$GITHUB_WORKSPACE/SHA256SUMS-macos.txt"
-          # 体积不再写进校验文件；要记录体积请看 docs/ARTIFACT_SIZES.md（口径与复现命令都在那里）。
+          #
+          # 文件名按**用户下载到的资产名**写（空格 → 点、去掉目录层级）：
+          # GitHub 上传资产时会把空格换成点，写 `dmg/Personal Knowledge OS_x.dmg` 的话，
+          # 用户在下载目录里跑 `shasum -c` 只会得到「No such file or directory」。
+          for f in dmg/*.dmg; do
+            printf '%s  %s\n' "$(shasum -a 256 "$f" | cut -d' ' -f1)" "$(basename "$f" | tr ' ' '.')"
+          done > "$GITHUB_WORKSPACE/SHA256SUMS-macos.txt"
           cat "$GITHUB_WORKSPACE/SHA256SUMS-macos.txt"
 
       - name: 上传工件
@@ -214,8 +219,10 @@ jobs:
           Compress-Archive -Force -Path "$portableDir/Personal Knowledge OS.exe" `
             -DestinationPath "$portableDir/Personal Knowledge OS_${version}_x64-portable.zip"
           Remove-Item "$portableDir/Personal Knowledge OS.exe"
+          # 名字按用户下载到的资产名写（空格 → 点）：GitHub 上传资产时会做这个替换，
+          # 否则用户在下载目录里校验会对不上文件名。
           Get-ChildItem "$portableDir/*.exe", "$portableDir/*.zip" |
-            ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
+            ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name -replace ' ','.')" } |
             Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE/SHA256SUMS-windows.txt"
           Get-Content "$env:GITHUB_WORKSPACE/SHA256SUMS-windows.txt"
 
@@ -281,9 +288,11 @@ jobs:
       - name: 生成校验值
         run: |
           cd src-tauri/target/release/bundle
-          find . -maxdepth 2 -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
-            -exec sha256sum {} \; | sed 's#\./##' \
-            > "$GITHUB_WORKSPACE/SHA256SUMS-linux.txt"
+          # 同 macOS：文件名按用户下载到的资产名写（空格 → 点、去掉目录层级）
+          find . -maxdepth 2 -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -print \
+            | sort | while read -r f; do
+                printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$(basename "$f" | tr ' ' '.')"
+              done > "$GITHUB_WORKSPACE/SHA256SUMS-linux.txt"
           cat "$GITHUB_WORKSPACE/SHA256SUMS-linux.txt"
 
       - name: 上传工件
