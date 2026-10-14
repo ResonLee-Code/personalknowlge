@@ -561,6 +561,16 @@ pub fn apply_settings(settings: &mut AppSettings, input: &UpdateSettingsInput) {
     if let Some(value) = input.list_width {
         settings.list_width = value.clamp(220, 640);
     }
+    if let Some(value) = &input.outline_placement {
+        // 只接受已知取值，避免把脏数据写进设置（与 list_sort 同一口径）
+        const ALLOWED: [&str; 2] = ["list", "side"];
+        if ALLOWED.contains(&value.as_str()) {
+            settings.outline_placement = value.clone();
+        }
+    }
+    if let Some(value) = input.auto_outline_on_select {
+        settings.auto_outline_on_select = value;
+    }
     if let Some(value) = &input.list_sort {
         // 只接受已知排序，避免把脏数据写进设置
         const ALLOWED: [&str; 5] = ["updatedDesc", "updatedAsc", "createdDesc", "titleAsc", "manual"];

@@ -282,16 +282,28 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   );
   await page.screenshot({ path: path.join(SHOTS, '17-backlink-from-source.png') });
 
-  // 18. 编辑器大纲（V1.1 M2-1；V1.2.1 起默认常驻在正文右侧）：解析标题层级并支持点击跳转
+  // 18. 编辑器大纲（V1.1 M2-1；V1.3.0 起默认与笔记列表共用一栏）：解析标题层级并支持点击跳转
+  // 默认状态下这一栏是笔记列表，大纲没有占位（这是布局调整要解决的问题）
+  await expect(page.getByTestId('note-list-panel')).toBeVisible();
+  await expect(page.getByTestId('outline-panel')).toHaveCount(0);
+  // 打开大纲：它出现在同一栏位（列表让位），而不是再挤出一列
+  await page.getByRole('button', { name: '显示大纲' }).click();
+  await expect(page.getByTestId('list-pane-outline')).toBeVisible();
   await expect(page.getByTestId('outline-panel')).toBeVisible();
+  await expect(page.getByTestId('note-list-panel')).toHaveCount(0);
+  await expect(page.getByTestId('outline-note-title')).toContainText('SQLite 全文搜索学习笔记');
   await expect(page.getByTestId('outline-item').first()).toContainText('全文搜索');
   await page.getByTestId('outline-item').first().click();
   await page.screenshot({ path: path.join(SHOTS, '18-outline.png') });
-  // 工具栏可以隐藏大纲；隐藏后再打开，恢复后续步骤依赖的常驻状态
-  await page.getByRole('button', { name: '隐藏大纲' }).click();
+  // 「〈〈 返回列表」回到笔记列表；工具栏按钮是同一个开关
+  await page.getByTestId('outline-back').click();
+  await expect(page.getByTestId('note-list-panel')).toBeVisible();
   await expect(page.getByTestId('outline-panel')).toHaveCount(0);
+  // 隐藏后再打开，确认开关可反复
   await page.getByRole('button', { name: '显示大纲' }).click();
   await expect(page.getByTestId('outline-panel')).toBeVisible();
+  await page.getByRole('button', { name: '隐藏大纲' }).click();
+  await expect(page.getByTestId('outline-panel')).toHaveCount(0);
 
   // 19. ⌘/Ctrl + P 快速切换笔记（按标题模糊匹配）
   await page.keyboard.press('Meta+p');
@@ -355,15 +367,20 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.screenshot({ path: path.join(SHOTS, '23-context-menu.png') });
   await page.keyboard.press('Escape');
 
-  // 大纲常驻在正文右侧（对标语雀）：点开某篇即显示它的标题层级，点标题跳转
+  // 大纲与笔记列表共用一栏（V1.3.0 布局调整）：点开某篇后按开关把这一栏切到大纲，点标题跳转
   await parentRow.click();
+  await expect(page.getByTestId('note-list-panel')).toBeVisible();
+  await page.getByRole('button', { name: '显示大纲' }).click();
   await expect(page.getByTestId('outline-panel')).toBeVisible();
   await expect(page.getByTestId('outline-item').first()).toContainText('全文搜索');
-  await page.screenshot({ path: path.join(SHOTS, '24-outline-right.png') });
+  await page.screenshot({ path: path.join(SHOTS, '24-outline-in-list.png') });
   await page.getByTestId('outline-item').first().click();
   await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue(
     'SQLite 全文搜索学习笔记',
   );
+  // 回到列表，后面的层级操作（右键菜单）还在这一栏里做
+  await page.getByTestId('outline-back').click();
+  await expect(page.getByTestId('note-list-panel')).toBeVisible();
 
   // 子文档可升级为顶层文档
   await childRow.click({ button: 'right' });
@@ -483,12 +500,19 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByTestId('note-list-item').filter({ hasText: '副本' }).first()).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '30b-single-copy.png') });
 
-  // 27. 大纲「右侧常驻 / mini 态」与「另存为模板」入口（V1.2.1）
+  // 27. 大纲「栏位切换 / 右侧常驻 / mini 态」与「另存为模板」入口（V1.2.1；V1.3.0 起可在两处位置间挪）
   await page.goto('/#/notes');
   await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
   await expect(page.locator('.cm-content')).toBeVisible();
-  // 默认就固定在正文右侧，不需要任何开关
+  // 默认在「笔记列表那一栏」，不占正文宽度
+  await expect(page.getByTestId('note-list-panel')).toBeVisible();
+  await page.getByRole('button', { name: '显示大纲' }).click();
+  await expect(page.getByTestId('list-pane-outline')).toBeVisible();
+  // 挪到正文右侧（宽屏更顺手）：列表栏让回给列表，大纲变成正文右边独立一列
+  await page.getByTestId('outline-move-to-side').click();
+  await expect(page.getByTestId('note-list-panel')).toBeVisible();
   await expect(page.getByTestId('outline-panel')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '30c-outline-to-side.png') });
 
   // 收起为贴边 mini 态：面板消失、留下贴边条；鼠标移上去临时展开
   await page.getByTestId('outline-collapse').click();
@@ -502,6 +526,10 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.getByTestId('outline-pin').click();
   await expect(page.getByTestId('outline-panel')).toBeVisible();
   await expect(page.getByTestId('outline-mini')).toHaveCount(0);
+  // 也能从右侧列挪回列表栏（避免"挪走了找不回来"），最后恢复默认位置
+  await page.getByTestId('outline-move-to-list').click();
+  await expect(page.getByTestId('list-pane-outline')).toBeVisible();
+  await expect(page.getByTestId('note-list-panel')).toHaveCount(0);
 
   // 另存为模板入口（浏览器预览模式没有工作区目录，这里验证入口与提示）
   await page.getByRole('button', { name: '更多操作' }).click();

@@ -1,4 +1,4 @@
-import { ChevronsRight, ListTree, Pin } from 'lucide-react';
+import { ChevronsLeft, ChevronsRight, ListTree, PanelRight, Pin } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import type { OutlineHeading } from '@/lib/markdown';
@@ -14,6 +14,14 @@ interface OutlinePanelProps {
   onCollapse?: () => void;
   /** 钉住（对标语雀的「钉住大纲」） */
   onPin?: () => void;
+  /** 笔记标题：在列表栏里显示大纲时，让用户知道"这是哪一篇的大纲" */
+  title?: string;
+  /** 返回笔记列表（大纲与列表共用一栏时的「〈〈」） */
+  onBack?: () => void;
+  /** 把大纲挪回「笔记列表那一栏」（右侧列里显示时提供） */
+  onMoveToList?: () => void;
+  /** 把大纲钉到正文右侧（在列表栏里显示时提供） */
+  onMoveToSide?: () => void;
   className?: string;
 }
 
@@ -25,6 +33,10 @@ export function OutlinePanel({
   pinned = true,
   onCollapse,
   onPin,
+  title,
+  onBack,
+  onMoveToList,
+  onMoveToSide,
   className,
 }: OutlinePanelProps) {
   return (
@@ -36,10 +48,57 @@ export function OutlinePanel({
       )}
     >
       <header className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-[var(--ink)]">
+        {/* 大纲与列表共用一栏时：一个明确的「〈〈 返回列表」（点工具栏按钮也能回来） */}
+        {onBack ? (
+          <button
+            type="button"
+            data-testid="outline-back"
+            title="返回笔记列表"
+            aria-label="返回笔记列表"
+            onClick={onBack}
+            className="flex shrink-0 items-center gap-0.5 rounded px-0.5 py-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+          >
+            <ChevronsLeft className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
         <ListTree className="h-3.5 w-3.5 text-[var(--brand)]" />
         大纲
+        {title ? (
+          <span
+            data-testid="outline-note-title"
+            className="min-w-0 truncate font-normal text-[var(--ink-subtle)]"
+            title={title}
+          >
+            · {title}
+          </span>
+        ) : null}
         <span className="ml-auto text-[11px] text-[var(--ink-subtle)]">{headings.length}</span>
         {/* 对标语雀：隐藏大纲 → 贴边 mini 态；mini 态可「钉住大纲」固定 */}
+        {/* 换位置：列表栏 ⇄ 正文右侧（两个方向各有一个入口，避免"挪了就找不回来"） */}
+        {onMoveToSide ? (
+          <button
+            type="button"
+            data-testid="outline-move-to-side"
+            title="钉在正文右侧"
+            aria-label="钉在正文右侧"
+            onClick={onMoveToSide}
+            className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+          >
+            <PanelRight className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+        {onMoveToList ? (
+          <button
+            type="button"
+            data-testid="outline-move-to-list"
+            title="改到笔记列表那一栏（省横向空间）"
+            aria-label="改到笔记列表那一栏"
+            onClick={onMoveToList}
+            className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+          >
+            <ChevronsLeft className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
         {pinned
           ? onCollapse && (
               <button

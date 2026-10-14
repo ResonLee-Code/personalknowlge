@@ -22,6 +22,8 @@ const settings: AppSettings = {
   editorSplitRatio: 0.5,
   sidebarWidth: 280,
   listWidth: 320,
+  outlinePlacement: 'list',
+  autoOutlineOnSelect: false,
   listSort: 'updatedDesc',
   lastOpenedNoteId: null,
   lastCategoryId: null,

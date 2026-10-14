@@ -287,6 +287,10 @@ export interface AppSettings {
   editorSplitRatio: number;
   sidebarWidth: number;
   listWidth: number;
+  /** 大纲显示位置：`list`（默认，与笔记列表共用一栏）| `side`（正文右侧独立一列） */
+  outlinePlacement: string;
+  /** 选中笔记后是否自动把列表栏切到大纲（默认 false：浏览列表时不该被切走） */
+  autoOutlineOnSelect: boolean;
   /** 笔记列表排序（含 `manual` = 自定义顺序） */
   listSort: string;
   lastOpenedNoteId?: string | null;
@@ -304,6 +308,9 @@ export interface UpdateSettingsInput {
   editorSplitRatio?: number;
   sidebarWidth?: number;
   listWidth?: number;
+  /** `list` | `side` */
+  outlinePlacement?: string;
+  autoOutlineOnSelect?: boolean;
   /** 笔记列表排序（含 `manual` = 自定义顺序） */
   listSort?: string;
   lastOpenedNoteId?: string;

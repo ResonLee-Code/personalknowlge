@@ -254,6 +254,8 @@ export function persistLayoutPreferences(): void {
   void useWorkspaceStore.getState().updateSettings({
     sidebarWidth: Math.round(ui.sidebarWidth),
     listWidth: Math.round(ui.listWidth),
+    outlinePlacement: ui.outlinePlacement,
+    autoOutlineOnSelect: ui.autoOutlineOnSelect,
     editorSplitRatio: Math.round(ui.editorSplitRatio * 1000) / 1000,
     editorMode: ui.editorMode,
     fontSize: ui.fontSize,

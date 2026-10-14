@@ -29,6 +29,8 @@ export function SettingsPage() {
   const indexStatus = useWorkspaceStore((state) => state.indexStatus);
   const theme = useUiStore((state) => state.theme);
   const setTheme = useUiStore((state) => state.setTheme);
+  const setOutlinePlacement = useUiStore((state) => state.setOutlinePlacement);
+  const setAutoOutlineOnSelect = useUiStore((state) => state.setAutoOutlineOnSelect);
 
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   /** 备份列表读取失败的原因：失败不能显示成「暂无备份文件」（那会让人以为备份没了） */
@@ -203,6 +205,36 @@ export function SettingsPage() {
               <option value="inbox">Inbox</option>
               <option value="lastCategory">上次使用的分类</option>
             </select>
+          </Row>
+          <Row
+            label="大纲位置"
+            hint="与笔记列表共用一栏（省横向空间，默认）或钉在正文右侧；编辑器工具栏也能一键切换"
+          >
+            <select
+              aria-label="大纲位置"
+              value={settings.outlinePlacement}
+              onChange={(event) => {
+                const value = event.target.value as 'list' | 'side';
+                setOutlinePlacement(value);
+                void updateSettings({ outlinePlacement: value });
+              }}
+              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs"
+            >
+              <option value="list">与笔记列表共用一栏</option>
+              <option value="side">钉在正文右侧</option>
+            </select>
+          </Row>
+          <Row
+            label="选中笔记后自动显示大纲"
+            hint="默认关：浏览列表时连着点几篇不会被切走；打开后选中即看结构"
+          >
+            <Switch
+              checked={settings.autoOutlineOnSelect}
+              onCheckedChange={(checked) => {
+                setAutoOutlineOnSelect(checked);
+                void updateSettings({ autoOutlineOnSelect: checked });
+              }}
+            />
           </Row>
         </Section>
 

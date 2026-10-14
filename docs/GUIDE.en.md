@@ -104,8 +104,8 @@ That covers ~80% of daily use. Read on as needed.
 Top bar : global search (⌘K) · save status · theme · settings
 Sidebar : Dashboard / All notes / Inbox / Favorites / Graph / Research / Attachments /
           Manage / Categories / Tags / Trash / Settings
-Middle  : note list (title filter · sort · multi-select · item menu)
-Right   : editor / preview (toolbar · outline · relations panel · backlinks)
+Middle  : note list (title filter · sort · multi-select · item menu) ⇄ outline (toolbar toggle)
+Right   : editor / preview (toolbar · relations panel · backlinks)
 Status  : index status · stats · runtime mode
 ```
 
@@ -131,9 +131,22 @@ never open off-screen.
 ### 4.1 Three editor views
 
 The toolbar toggles **编辑 / 分屏 / 预览** (edit / split / preview) and remembers your choice; the split ratio is
-draggable (0.3–0.7). The **outline** panel has three states: pinned → "收起大纲" collapses it to a side rail
+draggable (0.3–0.7).
+
+**The outline is not on the right by default** (layout change in V1.3.0): it **shares the middle column with the
+note list** — that column normally shows the list; the toolbar's outline button swaps it to the outline (no extra
+column, so the text gets more width). "**〈〈 返回列表**" (back to list) in the outline header — or clicking the
+button again — brings the list back. "**钉在正文右侧**" in the header pins it to the right of the text instead
+(nicer on wide screens); from there "**改到笔记列表那一栏**" moves it back.
+Once pinned to the right it keeps the original three states: pinned → "收起大纲" collapses it to a side rail
 (hover to expand) → "钉住大纲" pins it again; the toolbar button hides it entirely. With no headings yet, the
 outline tells you to start with `#`.
+
+Two related switches live in **Settings → Editor**: "**大纲位置**" (share the list column / pin to the right of
+the text) and "**选中笔记后自动显示大纲**" (off by default: when on, selecting any note jumps straight to its
+outline — off by default because flipping the pane on every click interrupts browsing). The placement is
+remembered per workspace; which pane the column happens to show is only temporary and resets to the list when
+you switch notes or reload.
 
 ### 4.2 Wiki links and backlinks
 
@@ -344,7 +357,7 @@ falls back to pure BM25, so **search never breaks**.
 
 | Section | Contents | Do you need it? |
 | --- | --- | --- |
-| **编辑器** (Editor) | Autosave delay, font size, theme, default view (edit/split/preview), default location for new notes | Tune to taste |
+| **编辑器** (Editor) | Autosave delay, font size, theme, default view (edit/split/preview), default location for new notes, outline placement, auto-show outline on select | Tune to taste |
 | **索引与数据** (Index & data) | Index status, rebuild index, rescan workspace, open workspace folder | When indexing misbehaves |
 | **备份与导出** (Backup & export) | Back up now, backup list (verify / restore), export Markdown | Back up regularly |
 | **AI** | Master switch, self-check, network tier, fetch web pages, allow/deny lists, research budget, local presets, online model, vector retrieval, decision model, outbound proxy | Enable item by item as needed |

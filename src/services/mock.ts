@@ -128,6 +128,8 @@ const emptySettings: AppSettings = {
   editorSplitRatio: 0.5,
   sidebarWidth: 240,
   listWidth: 320,
+  outlinePlacement: 'list',
+  autoOutlineOnSelect: false,
   listSort: 'updatedDesc',
   lastOpenedNoteId: null,
   lastCategoryId: null,
@@ -166,6 +168,11 @@ function applyMockSettings(current: AppSettings, input: Record<string, unknown>)
   next.listSort =
     pick(input.listSort, ['updatedDesc', 'updatedAsc', 'createdDesc', 'titleAsc', 'manual']) ??
     next.listSort;
+  // 大纲位置只认 `list` / `side`（与后端同一口径：未知值保留上一个有效值）
+  next.outlinePlacement = pick(input.outlinePlacement, ['list', 'side']) ?? next.outlinePlacement;
+  if (typeof input.autoOutlineOnSelect === 'boolean') {
+    next.autoOutlineOnSelect = input.autoOutlineOnSelect;
+  }
   if (input.backupDir !== undefined) {
     next.backupDir = input.backupDir === null ? null : String(input.backupDir);
   }

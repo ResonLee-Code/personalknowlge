@@ -77,6 +77,7 @@ import { editorContentBelongsTo } from '@/components/notes/editorContentGuard';
 import { registerEditorFlush } from '@/stores/notesStore';
 
 import { LAYOUT_DEFAULTS, useUiStore } from '@/stores/uiStore';
+import { useOutlineStore } from '@/stores/outlineStore';
 import { persistLayoutPreferences, useWorkspaceStore } from '@/stores/workspaceStore';
 import type { LinkCounts, RelationView } from '@/types';
 import { EditorView } from '@codemirror/view';
@@ -156,6 +157,23 @@ export function NoteEditorPage() {
 
   const headings = useMemo(() => parseOutline(content), [content]);
   const activeNoteId = detail?.note.id ?? null;
+
+  /**
+   * 大纲放哪（2026-10-14 布局调整）：`list` = 与笔记列表共用一栏（默认，省一列横向空间）；
+   * `side` = 正文右侧独立一列（原来的形态，宽屏时更顺手）。
+   * 列表栏那一栏由 `NotesSection` 渲染，所以这里只负责**发布**大纲给 `outlineStore`。
+   */
+  const outlinePlacement = useUiStore((state) => state.outlinePlacement);
+  const setOutlinePlacement = useUiStore((state) => state.setOutlinePlacement);
+  const listPaneMode = useUiStore((state) => state.listPaneMode);
+  const setListPaneMode = useUiStore((state) => state.setListPaneMode);
+  const autoOutlineOnSelect = useUiStore((state) => state.autoOutlineOnSelect);
+  const publishOutline = useOutlineStore((state) => state.publish);
+  const clearOutline = useOutlineStore((state) => state.clear);
+
+  /** 稳定的跳转入口：订阅方拿到的是同一个引用，不会因为每次渲染而重渲染 */
+  const outlineJumpRef = useRef<(offset: number) => void>(() => {});
+  const publishJump = useCallback((offset: number) => outlineJumpRef.current(offset), []);
 
   /** 粘贴 / 拖入图片：落盘到 attachments/ 并把相对路径插进正文（V1.1 M2-1）。 */
   const handleAttachFiles = useCallback(
@@ -241,6 +259,43 @@ export function NoteEditorPage() {
     },
     [jumpToHeading],
   );
+
+  useEffect(() => {
+    if (!activeNoteId) return;
+    // 发布大纲给「笔记列表那一栏」（见 stores/outlineStore.ts 的说明）。
+    // 跳转函数放进 ref：订阅方拿到的是稳定引用，同时这里（effect 里）更新它也不算"渲染期写 ref"。
+    outlineJumpRef.current = (offset) =>
+      jumpFromOutline(offset, headings.findIndex((item) => item.offset === offset));
+    publishOutline({
+      noteId: activeNoteId,
+      title,
+      headings,
+      activeOffset: activeHeadingOffset,
+      jump: publishJump,
+    });
+  }, [
+    activeNoteId,
+    title,
+    headings,
+    activeHeadingOffset,
+    publishOutline,
+    publishJump,
+    jumpFromOutline,
+  ]);
+
+  useEffect(() => {
+    if (!activeNoteId) return;
+    return () => clearOutline(activeNoteId);
+  }, [activeNoteId, clearOutline]);
+
+  /**
+   * 可选：选中笔记后自动把列表栏切到大纲。
+   * 默认**关**——浏览列表时连着点几篇，每次都被切走会很烦；想要"选中即看结构"的人可以打开。
+   */
+  useEffect(() => {
+    if (!activeNoteId) return;
+    if (outlinePlacement === 'list' && autoOutlineOnSelect) setListPaneMode('outline');
+  }, [activeNoteId, outlinePlacement, autoOutlineOnSelect, setListPaneMode]);
 
   // ---------------------------------------------------- 双向链接（V1.1 M2-2）
   const [wikilinkTitles, setWikilinkTitles] = useState<string[]>([]);
@@ -587,10 +642,28 @@ export function NoteEditorPage() {
             <Button
               size="icon"
               variant="ghost"
-              title={outlineMode === 'hidden' ? '显示大纲' : '隐藏大纲'}
-              aria-pressed={outlineMode !== 'hidden'}
-              className={cn(outlineMode !== 'hidden' && 'text-[var(--brand)]')}
+              title={
+                outlinePlacement === 'list'
+                  ? listPaneMode === 'outline'
+                    ? '隐藏大纲'
+                    : '显示大纲'
+                  : outlineMode === 'hidden'
+                    ? '显示大纲'
+                    : '隐藏大纲'
+              }
+              aria-pressed={
+                outlinePlacement === 'list' ? listPaneMode === 'outline' : outlineMode !== 'hidden'
+              }
+              className={cn(
+                (outlinePlacement === 'list' ? listPaneMode === 'outline' : outlineMode !== 'hidden') &&
+                  'text-[var(--brand)]',
+              )}
               onClick={() => {
+                // 大纲在列表栏时：这个按钮就是「列表 ⇄ 大纲」的开关（同一栏切换，不占额外横向空间）
+                if (outlinePlacement === 'list') {
+                  setListPaneMode(listPaneMode === 'outline' ? 'list' : 'outline');
+                  return;
+                }
                 setOutlineHover(false);
                 setOutlineMode((value) => (value === 'hidden' ? 'pinned' : 'hidden'));
               }}
@@ -865,15 +938,21 @@ export function NoteEditorPage() {
           </div>
           ) : null}
         </div>
-        {outlineMode === 'pinned' ? (
+        {/* 右侧独立一列的大纲：只在「钉在右侧」这种位置下渲染（默认位置是与列表共用一栏） */}
+        {outlinePlacement === 'side' && outlineMode === 'pinned' ? (
           <OutlinePanel
             headings={headings}
             activeOffset={activeHeadingOffset}
             onJump={(offset) => jumpFromOutline(offset, headings.findIndex((item) => item.offset === offset))}
             onCollapse={() => setOutlineMode('mini')}
+            onMoveToList={() => {
+              setOutlinePlacement('list');
+              // 位置是**工作区级偏好**：用户从面板上改的也要落库，否则重启就丢
+              persistLayoutPreferences();
+            }}
           />
         ) : null}
-        {outlineMode === 'mini' ? (
+        {outlinePlacement === 'side' && outlineMode === 'mini' ? (
           <div
             data-testid="outline-mini"
             title="大纲（鼠标移上去展开）"
@@ -888,7 +967,7 @@ export function NoteEditorPage() {
           </div>
         ) : null}
         {/* mini 态：悬浮展开的大纲（绝对定位，不挤压正文） */}
-        {outlineMode === 'mini' && outlineHover ? (
+        {outlinePlacement === 'side' && outlineMode === 'mini' && outlineHover ? (
           <div
             data-testid="outline-overlay"
             className="absolute right-0 top-0 z-20 h-full shadow-2xl"

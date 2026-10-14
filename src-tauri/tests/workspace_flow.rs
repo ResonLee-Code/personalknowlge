@@ -1009,6 +1009,9 @@ fn layout_settings_round_trip_and_clamp() {
             editor_mode: Some("split".into()),
             list_sort: Some("manual".into()),
             theme: Some("dark".into()),
+            // 大纲位置 / 选中后自动显示大纲（V1.3.0 布局调整）也是工作区级偏好
+            outline_placement: Some("side".into()),
+            auto_outline_on_select: Some(true),
             ..Default::default()
         })
         .expect("更新设置");
@@ -1017,6 +1020,8 @@ fn layout_settings_round_trip_and_clamp() {
     assert!((updated.editor_split_ratio - 0.512).abs() < 1e-6);
     assert_eq!(updated.editor_mode, "split");
     assert_eq!(updated.list_sort, "manual", "「自定义顺序」应被记住");
+    assert_eq!(updated.outline_placement, "side", "大纲位置应被记住");
+    assert!(updated.auto_outline_on_select, "「选中后自动显示大纲」应被记住");
 
     // 未知的**枚举类**设置同样不落库：主题 / 新建位置 / 编辑器模式都只接受已知值。
     // 判据不是「看起来像不像」，而是「界面拿着它查表能不能查到」。
@@ -1025,12 +1030,14 @@ fn layout_settings_round_trip_and_clamp() {
             editor_theme: Some("solarized".into()),
             default_new_location: Some("somewhere".into()),
             editor_mode: Some("SPLIT".into()), // 大小写不同也算未知值
+            outline_placement: Some("top".into()), // 只认 list / side
             ..Default::default()
         })
         .expect("未知枚举值应被忽略而不是报错");
     assert_eq!(rejected_enums.editor_theme, "light", "主题保持上一个有效值");
     assert_eq!(rejected_enums.default_new_location, "inbox");
     assert_eq!(rejected_enums.editor_mode, "split", "编辑器模式保持上一个有效值");
+    assert_eq!(rejected_enums.outline_placement, "side", "大纲位置保持上一个有效值");
 
     // 未知排序值不落库（避免脏数据写进设置）
     let rejected = service
@@ -1059,6 +1066,8 @@ fn layout_settings_round_trip_and_clamp() {
     assert_eq!(reopened.settings.list_width, 432);
     assert_eq!(reopened.settings.editor_mode, "split");
     assert_eq!(reopened.settings.list_sort, "manual", "重开工作区后排序偏好保留");
+    assert_eq!(reopened.settings.outline_placement, "side", "重开工作区后大纲位置保留");
+    assert!(reopened.settings.auto_outline_on_select, "重开工作区后自动显示开关保留");
 }
 
 #[test]

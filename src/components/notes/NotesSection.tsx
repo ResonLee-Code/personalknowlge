@@ -8,6 +8,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { LAYOUT_DEFAULTS } from '@/stores/uiStore';
 import { persistLayoutPreferences } from '@/stores/workspaceStore';
 
+import { OutlinePane } from '@/components/editor/OutlinePane';
 import { ResizeHandle } from '@/components/layout/ResizeHandle';
 import { NoteEditorPage } from './NoteEditorPage';
 import { NoteListPanel } from './NoteListPanel';
@@ -24,6 +25,17 @@ export function NotesSection({ baseScope }: { baseScope: NoteScope }) {
   const detail = useNotesStore((state) => state.detail);
   const setListWidth = useUiStore((state) => state.setListWidth);
   const listWidth = useUiStore((state) => state.listWidth);
+  /**
+   * 大纲默认与**笔记列表共用一栏**（2026-10-14 布局调整）：
+   * 原来四列并排（侧边栏 + 列表 + 编辑/预览 + 大纲）在窄屏上把正文挤得很难用。
+   * 现在这一栏在「列表 ⇄ 大纲」之间切换，横向直接省掉一列；正文右侧独立一列仍可选。
+   */
+  const outlinePlacement = useUiStore((state) => state.outlinePlacement);
+  const setOutlinePlacement = useUiStore((state) => state.setOutlinePlacement);
+  const listPaneMode = useUiStore((state) => state.listPaneMode);
+  const setListPaneMode = useUiStore((state) => state.setListPaneMode);
+  // 没选中笔记时没有大纲可看 → 这一栏始终显示列表（避免出现一片空白）
+  const showOutlineInList = outlinePlacement === 'list' && listPaneMode === 'outline' && Boolean(id);
 
   const categoryId = params.get('categoryId');
   const tagId = params.get('tagId');
@@ -48,7 +60,19 @@ export function NotesSection({ baseScope }: { baseScope: NoteScope }) {
 
   return (
     <div className="flex min-h-0 flex-1">
-      <NoteListPanel />
+      {showOutlineInList ? (
+        <OutlinePane
+          width={listWidth}
+          onBack={() => setListPaneMode('list')}
+          onMoveToSide={() => {
+            setOutlinePlacement('side');
+            // 位置是工作区级偏好：从面板上改的也落库（与设置页改口径一致）
+            persistLayoutPreferences();
+          }}
+        />
+      ) : (
+        <NoteListPanel />
+      )}
       <ResizeHandle
         side="left"
         label="调整笔记列表宽度"

@@ -2,11 +2,18 @@ import { create } from 'zustand';
 
 export type EditorMode = 'edit' | 'split' | 'preview';
 export type ThemeName = 'light' | 'dark';
+/** 大纲放在哪：`list` = 与笔记列表共用一栏（默认，省一列横向空间）；`side` = 正文右侧独立一列 */
+export type OutlinePlacement = 'list' | 'side';
+/** 列表栏当前显示什么 */
+export type ListPaneMode = 'list' | 'outline';
 
 /** 与工作区设置对应的界面偏好（用于从磁盘恢复上次的布局）。 */
 export interface UiPreferences {
   sidebarWidth?: number;
   listWidth?: number;
+  /** 来自工作区设置（字符串），只接受已知取值 */
+  outlinePlacement?: string;
+  autoOutlineOnSelect?: boolean;
   /** 来自工作区设置（字符串），只接受已知取值 */
   editorMode?: string;
   fontSize?: number;
@@ -23,6 +30,12 @@ export const LAYOUT_DEFAULTS = {
 interface UiState {
   sidebarWidth: number;
   listWidth: number;
+  /** 大纲的位置（工作区级偏好） */
+  outlinePlacement: OutlinePlacement;
+  /** 列表栏当前是列表还是大纲（**只活在内存里**：这是"临时看一眼"，不是长期偏好） */
+  listPaneMode: ListPaneMode;
+  /** 选中笔记后是否自动切到大纲（工作区级偏好，默认关） */
+  autoOutlineOnSelect: boolean;
   /** 分屏模式下编辑器占比（0.3 ~ 0.7） */
   editorSplitRatio: number;
   sidebarCollapsed: boolean;
@@ -34,6 +47,9 @@ interface UiState {
   quickSwitcherOpen: boolean;
   setSidebarWidth: (width: number) => void;
   setListWidth: (width: number) => void;
+  setOutlinePlacement: (placement: OutlinePlacement) => void;
+  setListPaneMode: (mode: ListPaneMode) => void;
+  setAutoOutlineOnSelect: (value: boolean) => void;
   setEditorSplitRatio: (ratio: number) => void;
   toggleSidebar: () => void;
   setEditorMode: (mode: EditorMode) => void;
@@ -58,6 +74,9 @@ interface UiState {
 export const useUiStore = create<UiState>((set, get) => ({
   sidebarWidth: LAYOUT_DEFAULTS.sidebarWidth,
   listWidth: LAYOUT_DEFAULTS.listWidth,
+  outlinePlacement: 'list',
+  listPaneMode: 'list',
+  autoOutlineOnSelect: false,
   editorSplitRatio: LAYOUT_DEFAULTS.editorSplitRatio,
   sidebarCollapsed: false,
   editorMode: 'split',
@@ -75,6 +94,14 @@ export const useUiStore = create<UiState>((set, get) => ({
     const clamped = Math.round(Math.min(560, Math.max(240, listWidth)));
     set({ listWidth: clamped });
   },
+  setOutlinePlacement: (outlinePlacement) =>
+    // 换位置时同步这一栏显示什么：
+    // - 挪到「正文右侧」：列表栏还给列表（那边才是大纲的新家）；
+    // - 挪回「列表栏」：直接把这一栏切到大纲，否则用户点完按钮会觉得大纲凭空消失了，
+    //   还得再按一次工具栏开关才找得回来。
+    set({ outlinePlacement, listPaneMode: outlinePlacement === 'side' ? 'list' : 'outline' }),
+  setListPaneMode: (listPaneMode) => set({ listPaneMode }),
+  setAutoOutlineOnSelect: (autoOutlineOnSelect) => set({ autoOutlineOnSelect }),
   setEditorSplitRatio: (editorSplitRatio) => {
     // 保留三位小数，既够精细也避免浮点噪声
     const clamped = Math.min(0.7, Math.max(0.3, editorSplitRatio));
@@ -107,6 +134,15 @@ export const useUiStore = create<UiState>((set, get) => ({
     }
     if (typeof preferences.listWidth === 'number') {
       next.listWidth = Math.round(Math.min(560, Math.max(240, preferences.listWidth)));
+    }
+    if (
+      preferences.outlinePlacement === 'list' ||
+      preferences.outlinePlacement === 'side'
+    ) {
+      next.outlinePlacement = preferences.outlinePlacement;
+    }
+    if (typeof preferences.autoOutlineOnSelect === 'boolean') {
+      next.autoOutlineOnSelect = preferences.autoOutlineOnSelect;
     }
     if (
       preferences.editorMode === 'edit' ||

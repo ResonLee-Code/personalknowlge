@@ -67,6 +67,10 @@ pub struct AppSettings {
     pub editor_split_ratio: f32,
     pub sidebar_width: u32,
     pub list_width: u32,
+    /// 大纲显示位置：`list`（默认，与笔记列表共用一栏）| `side`（固定在正文右侧一列）
+    pub outline_placement: String,
+    /// 选中笔记后是否自动把「笔记列表」那一栏切到大纲（默认关；开了会少一次点击，但浏览列表时会被切走）
+    pub auto_outline_on_select: bool,
     /// 笔记列表排序：`updatedDesc` | `updatedAsc` | `createdDesc` | `titleAsc` | `manual`
     pub list_sort: String,
     /// 关闭前最后打开的笔记，便于恢复现场
@@ -90,6 +94,8 @@ impl Default for AppSettings {
             editor_split_ratio: 0.5,
             sidebar_width: 240,
             list_width: 320,
+            outline_placement: "list".to_string(),
+            auto_outline_on_select: false,
             list_sort: "updatedDesc".to_string(),
             last_opened_note_id: None,
             last_category_id: None,
@@ -150,6 +156,9 @@ pub struct UpdateSettingsInput {
     pub list_width: Option<u32>,
     /// 笔记列表排序（持久化「自定义顺序」等选择）
     pub list_sort: Option<String>,
+    /// 大纲显示位置：`list` | `side`（只接受已知取值）
+    pub outline_placement: Option<String>,
+    pub auto_outline_on_select: Option<bool>,
     pub last_opened_note_id: Option<String>,
     pub last_category_id: Option<String>,
     pub theme: Option<String>,
