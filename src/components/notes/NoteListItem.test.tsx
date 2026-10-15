@@ -28,6 +28,73 @@ const note: NoteSummary = {
 };
 
 describe('NoteListItem', () => {
+  /**
+   * 标题被截断时，右侧两个快捷按钮**不靠 hover** 也要显示。
+   *
+   * 背景：两个按钮一直占着位置（平时只是透明），所以标题一长就被截，而按钮看不见——
+   * 屏幕上表现为"标题没显示全、右边却空着一块"。jsdom 不做布局，这里直接把"内容比可见宽度宽"
+   * 的量测值喂给组件，验证它据此把按钮显出来。
+   */
+  it('标题被截断时两个快捷按钮常显（没被截断的条目仍保持 hover 才出现）', () => {
+    // 注意：jsdom 把 scrollWidth / clientWidth 定义在 Element.prototype 上，
+    // 所以这里在 HTMLElement.prototype 上加的是**新属性**；恢复时必须 delete 掉，
+    // 否则会一直污染后面的用例（第一版就踩了这个坑）。
+    const original = {
+      scrollWidth: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth'),
+      clientWidth: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth'),
+    };
+    const restore = (key: 'scrollWidth' | 'clientWidth') => {
+      const descriptor = original[key];
+      if (descriptor) Object.defineProperty(HTMLElement.prototype, key, descriptor);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+    };
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+      configurable: true,
+      get: () => 400,
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => 120,
+    });
+    try {
+      render(
+        <TooltipProvider delayDuration={0}>
+          <MemoryRouter>
+            <ul>
+              <NoteListItem
+                note={{ ...note, title: '一篇特别特别长的标题用来触发截断' }}
+                selected={false}
+                basePath="/notes"
+                onOpen={() => {}}
+              />
+            </ul>
+          </MemoryRouter>
+        </TooltipProvider>,
+      );
+      const buttons = screen.getByTestId('note-quick-child').parentElement;
+      expect(buttons).toHaveAttribute('data-truncated', 'true');
+      expect(buttons).toHaveClass('opacity-100');
+    } finally {
+      restore('scrollWidth');
+      restore('clientWidth');
+    }
+  });
+
+  it('标题没被截断时，快捷按钮仍保持"hover 才出现"的安静样子', () => {
+    render(
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter>
+          <ul>
+            <NoteListItem note={note} selected={false} basePath="/notes" onOpen={() => {}} />
+          </ul>
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+    const buttons = screen.getByTestId('note-quick-child').parentElement;
+    expect(buttons).not.toHaveAttribute('data-truncated');
+    expect(buttons).toHaveClass('opacity-0');
+  });
+
   it('语雀式单行条目：只显示标题，分类 / 标签 / 时间不在列表里重复', () => {
     render(
       <TooltipProvider delayDuration={0}>

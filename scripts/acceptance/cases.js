@@ -77,7 +77,8 @@ const CASES = [
     steps: [
       { op: 'app' },
       { op: 'keyCode', code: 53 },
-      { op: 'click', frame: { title: '设置' } },
+      // 设置入口只有右上角那一个（2026-10-15 起侧边栏不再重复放一个）
+      { op: 'click', frame: { role: 'AXButton', description: '设置' } },
       { op: 'shot', name: '02-export-dialog.png' },
       {
         op: 'manual',
@@ -93,7 +94,7 @@ const CASES = [
     steps: [
       { op: 'app' },
       { op: 'keyCode', code: 53 },
-      { op: 'click', frame: { title: '设置' } },
+      { op: 'click', frame: { role: 'AXButton', description: '设置' } },
       { op: 'click', frame: { role: 'AXButton', title: '立即备份' } },
       {
         op: 'check',
@@ -128,11 +129,12 @@ const CASES = [
        *    与其假定"它一定是默认值"，不如用设置页把它设回默认——顺带也真机验了设置页这一行。
        *    （"打开笔记时这一栏默认是列表"这条由浏览器预览的 E2E 从干净状态断言，见 `e2e/app.spec.ts` 步骤 18。）
        */
-      { op: 'click', frame: { role: 'AXLink', title: '设置' } },
+      { op: 'click', frame: { role: 'AXButton', description: '设置' } },
       {
         op: 'selectOption',
         popup: { role: 'AXPopUpButton', description: '大纲位置' },
         option: '与笔记列表共用一栏',
+        options: ['与笔记列表共用一栏', '钉在正文右侧'],
         label: '设置 → 编辑器 → 大纲位置',
       },
       { op: 'keys', combo: 'cmd+p' },
@@ -187,6 +189,16 @@ const CASES = [
         label: '此时正文右侧没有常驻大纲',
       },
       { op: 'shot', name: '04-outline-in-list.png' },
+      // 每段动作前**先确认前提**（ensure 是幂等的：已经在目标状态就什么都不做）——
+      // 2026-10-15 实测：跑验收时若有人动了电脑（前台被抢），这一栏的状态可能被重置，
+      // 后面那段的按钮就"找不到"了；重确认一次比后面整段失败划算。
+      {
+        op: 'ensure',
+        until: { role: 'AXButton', description: '返回笔记列表' },
+        press: { role: 'AXCheckBox', description: '大纲' },
+        pressLabel: '工具栏大纲开关',
+        label: '动作前再确认一次：大纲在列表栏里',
+      },
       // 3. 挪到正文右侧：列表栏还给列表，大纲变成正文右边独立一列
       {
         op: 'ensure',
@@ -203,6 +215,13 @@ const CASES = [
       { op: 'shot', name: '04-outline-side.png' },
       // 3.5 贴边 mini 态与悬停展开：**悬停不是 AX 动作**（以前这条只能标「待人工」），
       //     改用 `hover`（真实鼠标移动）驱动——实测能让 WebKit 派发 mouseover 并展开悬浮大纲。
+      {
+        op: 'ensure',
+        until: { role: 'AXButton', description: '收起大纲' },
+        press: { role: 'AXButton', description: '钉在正文右侧' },
+        pressLabel: '钉在正文右侧',
+        label: '动作前再确认一次：大纲常驻在正文右侧',
+      },
       { op: 'click', frame: { role: 'AXButton', description: '收起大纲' } },
       {
         op: 'expectAbsent',
@@ -216,11 +235,11 @@ const CASES = [
       },
       {
         op: 'expectElement',
-        query: { role: 'AXStaticText', value: '大纲' },
+        query: { role: 'AXButton', description: '鼠标移上去展开' },
         label: '贴边「大纲」条（竖排）',
       },
       { op: 'shot', name: '04-outline-mini.png' },
-      { op: 'hover', target: { role: 'AXStaticText', value: '大纲' } },
+      { op: 'hover', target: { role: 'AXButton', description: '鼠标移上去展开' } },
       {
         op: 'expectElement',
         query: { role: 'AXButton', description: '钉住大纲' },
@@ -348,7 +367,20 @@ const CASES = [
     steps: [
       { op: 'app' },
       { op: 'keyCode', code: 53 },
+      /**
+       * 前提：验收库里得有一篇**有效期已过**的笔记（`00_Inbox/…验收-待复核笔记.md`）。
+       *
+       * 为什么这条前提只能人工准备（2026-10-16 查清）：设有效期的控件是原生
+       * `<input type="date">`——它在无障碍树里**完全不可见**（只有它的标签文字是 AXStaticText，
+       * 输入框本身连个 role 都没有），AXPress 点不到、Tab 走过去再敲数字也写不进去（实测过两轮）。
+       * 手工准备的那篇笔记里写清了来龙去脉；后面两条断言仍然是机器判定的。
+       */
+      {
+        op: 'manual',
+        note: '前提：库里要有一篇有效期已过的笔记（人工准备，见用例注释与 docs/ACCEPTANCE_V1.3.0.md）。缺了它下面两条断言会失败——那是"前提没摆好"，不是卡片坏了',
+      },
       { op: 'click', frame: { title: '首页' } },
+      { op: 'pause', ms: 1200 },
       { op: 'expectElement', query: { title: '待复核' }, label: '首页的「待复核」卡片' },
       // 时效角标（「已过期 N 天」）也在界面上断言一次，不只是看截图
       { op: 'expectElement', query: { title: '已过期' }, label: '时效角标「已过期」' },
@@ -356,6 +388,155 @@ const CASES = [
       {
         op: 'manual',
         note: '角标文案与跳转后的详情行（⚠ 可能已过期 / ✓ 已索引）需人眼确认',
+      },
+    ],
+  },
+  {
+    id: 11,
+    title: '界面梳理：侧边栏开关归位、区块折叠、条目行不溢出列表栏',
+    expect:
+      '顶栏没有重复的侧边栏开关；收起后「展开侧边栏」与展开态「收起侧边栏」同一高度；分类 / 标签可折叠；长标题行的按钮仍在列表栏内',
+    steps: [
+      { op: 'app' },
+      { op: 'keyCode', code: 53 },
+      // 顶栏那个重复的「切换侧边栏」已删除
+      {
+        op: 'expectAbsent',
+        query: { role: 'AXButton', description: '切换侧边栏' },
+        label: '顶栏的「切换侧边栏」已删除',
+      },
+      // 侧边栏此刻是展开还是收起会影响后面每一步的坐标/元素：先摆成展开态
+      // （侧边栏收起状态是内存态，上一条用例或别的操作都可能把它留在收起上）
+      {
+        op: 'ensure',
+        until: { role: 'AXButton', description: '收起侧边栏' },
+        press: { role: 'AXButton', description: '展开侧边栏' },
+        pressLabel: '展开侧边栏',
+        label: '侧边栏先展开',
+      },
+      { op: 'click', frame: { role: 'AXLink', title: '全部笔记' } },
+      { op: 'pause', ms: 1200 },
+      // 侧边栏开关：收起后「展开」与展开态「收起」都在底栏同一行——
+      // 断言的是"展开按钮确实在底栏那个位置"（坐标证据见报告里的 click(x,y)：两次 y 相同）
+      { op: 'click', frame: { role: 'AXButton', description: '收起侧边栏' } },
+      {
+        op: 'expectElement',
+        query: { role: 'AXButton', description: '展开侧边栏' },
+        label: '收起后底部的「展开侧边栏」',
+      },
+      // 收起不等于失去导航：图标栏里导航项都在（点一个真的能跳过去）
+      {
+        op: 'expectElement',
+        query: { role: 'AXLink', description: '首页' },
+        label: '收起态图标栏里的「首页」',
+      },
+      {
+        op: 'expectElement',
+        query: { role: 'AXLink', description: '回收站' },
+        label: '收起态图标栏里的「回收站」',
+      },
+      { op: 'click', frame: { role: 'AXLink', description: '首页' } },
+      {
+        op: 'expectElement',
+        query: { title: '最近编辑' },
+        label: '点图标栏的「首页」真的到了首页',
+      },
+      { op: 'click', frame: { role: 'AXLink', description: '全部笔记' } },
+      // 这一栏得先是**列表**：前面那条用例可能把大纲留在了这一栏（列表条目就不会渲染，
+      // 后面"看条目行"的断言会找不到元素）。ensure 幂等：本来就在列表态就什么都不做。
+      {
+        op: 'ensure',
+        until: { role: 'AXButton', description: '多选' },
+        press: { role: 'AXButton', description: '返回笔记列表' },
+        pressLabel: '返回笔记列表',
+        label: '这一栏先显示笔记列表',
+      },
+      { op: 'shot', name: '11-sidebar-collapsed.png' },
+      { op: 'click', frame: { role: 'AXButton', description: '展开侧边栏' } },
+      {
+        op: 'expectElement',
+        query: { role: 'AXButton', description: '收起侧边栏' },
+        label: '展开回来了（开关还在原处）',
+      },
+      // 分类 / 标签区块可折叠（折叠后条目不在了，展开后回来）
+      { op: 'click', frame: { role: 'AXButton', description: '折叠分类' } },
+      {
+        op: 'expectAbsent',
+        query: { role: 'AXButton', description: '技术' },
+        label: '折叠后分类条目不在了',
+      },
+      { op: 'click', frame: { role: 'AXButton', description: '展开分类' } },
+      {
+        op: 'expectElement',
+        query: { role: 'AXButton', description: '技术' },
+        label: '展开后分类条目回来了',
+      },
+      { op: 'click', frame: { role: 'AXButton', description: '折叠标签' } },
+      {
+        op: 'expectAbsent',
+        query: { role: 'AXButton', description: '入门' },
+        label: '折叠后标签条目不在了',
+      },
+      { op: 'click', frame: { role: 'AXButton', description: '展开标签' } },
+      { op: 'shot', name: '11-sections.png' },
+      /**
+       * 长标题 + 窄列表：条目行**不能溢出**这一栏。
+       *
+       * 为什么用几何断言：AX 读不到透明度（"按钮是不是常显"它看不见），但读得到坐标；
+       * 而 Radix ScrollArea 的内容层是 `display: table`，会按内容撑宽——溢出时行会比面板宽，
+       * 行右侧的按钮就被裁到面板外（这正是用户报的现象）。外框取列表栏里的「按标题筛选」输入框
+       * （它与条目行同宽、右边缘基本对齐）。
+       */
+      // 先切到「最近修改」再新建：新建的笔记才会排在最上面、落在可视区里
+      // （排成「自定义顺序」时新笔记会排到最后，AX 树里根本看不到它）
+      { op: 'click', frame: { role: 'AXButton', title: '最近修改' } },
+      { op: 'pause', ms: 800 },
+      { op: 'click', frame: { role: 'AXButton', title: '新建笔记' } },
+      {
+        op: 'paste',
+        text: '一篇特别特别长的标题用来验证截断时右侧两个快捷按钮仍然可见（真机验收）',
+      },
+      { op: 'click', frame: { role: 'AXButton', title: '创建笔记' } },
+      { op: 'pause', ms: 1500 },
+      { op: 'drag', from: { role: 'AXSplitter', title: '调整笔记列表宽度' }, to: { dx: -80, dy: 0 } },
+      { op: 'pause', ms: 600 },
+      // 看条目行之前再确认一次这一栏是列表（列表条目只在列表态才渲染）
+      {
+        op: 'ensure',
+        until: { role: 'AXButton', description: '多选' },
+        press: { role: 'AXButton', description: '返回笔记列表' },
+        pressLabel: '返回笔记列表',
+        label: '看条目行前：这一栏是列表',
+      },
+      {
+        op: 'expectInside',
+        inner: { role: 'AXButton', description: '特别特别长' },
+        outer: { role: 'AXTextField', description: '按标题筛选' },
+        label: '长标题条目行仍在列表栏内（没有溢出）',
+      },
+      { op: 'shot', name: '11-long-title-row.png' },
+      // 栏头一行到底（2026-10-16）：标题再长，图标与「大纲」也不许被挤成两行——
+      // 栏头被挤成两行时高度会翻倍，所以直接量高度最省事
+      { op: 'click', frame: { role: 'AXCheckBox', description: '大纲' } },
+      { op: 'pause', ms: 900 },
+      {
+        op: 'expectElement',
+        query: { role: 'AXButton', description: '返回笔记列表' },
+        label: '长标题下大纲栏头仍在（有「返回笔记列表」）',
+      },
+      {
+        op: 'expectSize',
+        query: { role: 'AXButton', description: '返回笔记列表' },
+        minWidth: 12,
+        maxHeight: 24,
+        label: '栏头里那颗返回按钮还是一行高',
+      },
+      { op: 'shot', name: '11-outline-header-long-title.png' },
+      { op: 'click', frame: { role: 'AXButton', description: '返回笔记列表' } },
+      { op: 'pause', ms: 600 },
+      {
+        op: 'manual',
+        note: '截断时右侧那两个按钮「是不是常显、间距顺不顺眼」要看截图/上手看一眼（AX 读不到透明度）',
       },
     ],
   },

@@ -250,6 +250,14 @@ function ensureScene(appName, workspace) {
 
 function runCase(appName, workspace, outDir, item, dryRun) {
   const steps = [];
+  /**
+   * 每条用例开始时先把应用切前台（2026-10-15 实测教训）。
+   *
+   * 为什么：跑验收期间**别人的手会碰电脑**（这一次是我自己在旁边的窗口里打字/看图），
+   * 前台被抢走之后，界面上的元素查不到、点击也可能落空——报告会写成"功能失败"，
+   * 而其实只是**现场没保持住**。用例级切一次前台是最便宜的兜底（步骤级切太拖时间）。
+   */
+  if (!dryRun) mac.activate(appName);
   for (const step of item.steps) {
     const record = { op: step.op, status: 'skipped', detail: '', evidence: '' };
     if (dryRun) {
@@ -322,8 +330,13 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           record.detail = `scroll(${step.ticks || 3})`;
           break;
         }
-        /** 悬停到某个元素上（鼠标移上去才展开的控件）：见 lib/ax-agent.js 的 hover 说明。 */
+        /**
+         * 悬停到某个元素上（鼠标移上去才展开的控件）：见 lib/ax-agent.js 的 hover 说明。
+         * 悬停前先把应用切前台：不属于"键盘步骤"的那套自动前台处理，但后台窗口上的悬停
+         * 在实测里也不一定被 WebKit 当回事（2026-10-15）。
+         */
         case 'hover': {
+          mac.activate(appName);
           const point = resolvePoint(appName, step.target);
           if (!point.ok) {
             record.status = 'failed';
@@ -490,12 +503,21 @@ function runCase(appName, workspace, outDir, item, dryRun) {
          * 也会被排查脚本改掉——用例如果假定"它一定是默认值"，就会在别的机器/别的轮次上假失败。
          * 与其假定前提，不如**用界面把前提摆好**（顺带也真机验了设置页这一行）。
          *
-         * 实测（macOS 27）：`<select>` 在 AX 里是 `AXPopUpButton`，**`value` 就是当前值**；
-         * 按下它弹出一个 `AXMenu`，里面是 `AXMenuItem`（文字就是选项文案）。
-         * 步骤参数：`{ popup: {role,description}, option: '与笔记列表共用一栏' }`。
+         * ⚠️ **不能用"按菜单项"的方式改**（2026-10-15 踩了两小时的坑）：
+         * `AXPress` 点 `AXMenuItem` 确实会让 `<select>` 的 DOM `value` 变掉，**但 React 收不到 change 事件**——
+         * app 的状态没动，下一次渲染还会把值弹回去。更糟的是：当时那版验证只读了 DOM 的 `value`，
+         * 于是报告写着"已选 ✅"，而工作区里其实还是旧值（**假通过**，比失败更坏）。
+         *
+         * 现在的做法是**走键盘**（真人操作原生菜单的方式，WebKit 自己会派发 change）：
+         * 按下拉打开菜单 → 连按 ↑ 回到第一项 → 按 ↓ 走到目标项 → 回车；
+         * 然后**隔 2.5 秒再复核一次**（弹回去就是没生效，如实判失败）。
+         *
+         * 步骤参数：`{ popup: {role,description}, option, options: [按菜单顺序列出全部选项] }`。
          */
         case 'selectOption': {
           const popupQuery = step.popup || {};
+          const options = Array.isArray(step.options) ? step.options : [];
+          const index = options.indexOf(step.option);
           // 只看 value 匹配（findElement 里 title/description/value 三选一按子串匹配，
           // 所以这里刻意**不给** description，免得按 description 命中"名字对但值不同"的那个）
           const probe = { role: popupQuery.role || 'AXPopUpButton', value: step.option };
@@ -503,6 +525,11 @@ function runCase(appName, workspace, outDir, item, dryRun) {
             record.status = 'passed';
             record.detail = `本来就是「${step.option}」，未改动`;
             record.evidence = `✓ 「${step.label || step.option}」= ${step.option}`;
+            break;
+          }
+          if (index < 0) {
+            record.status = 'failed';
+            record.detail = 'selectOption 需要 options（按菜单顺序列出全部选项），且 option 必须在其内';
             break;
           }
           const opened = resolvePoint(appName, popupQuery);
@@ -513,22 +540,97 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           }
           mac.click(appName, opened.point, popupQuery);
           sleepMs(900);
-          const itemQuery = { role: 'AXMenuItem', title: step.option };
-          const item = resolvePoint(appName, itemQuery);
-          if (!item.ok) {
+          // ↑ 先退回第一项（到顶后再按也不会越过），再 ↓ 走到目标项 —— 不依赖"当前选的是哪一项"
+          for (let stepUp = 0; stepUp < options.length; stepUp += 1) mac.keyCode(126);
+          for (let stepDown = 0; stepDown < index; stepDown += 1) mac.keyCode(125);
+          sleepMs(300);
+          mac.keyCode(36);
+          sleepMs(1200);
+          // 复核两次：**改完要真的留住**（弹回去说明 React 没收到，等于没改）
+          const appliedNow = mac.frameOf(appName, probe).ok;
+          sleepMs(2500);
+          const appliedLater = mac.frameOf(appName, probe).ok;
+          record.status = appliedNow && appliedLater ? 'passed' : 'failed';
+          record.detail = appliedNow && appliedLater
+            ? `已选「${step.option}」，2.5 秒后复核仍是它`
+            : appliedNow
+              ? `选完之后被弹回去了（多半是 React 没收到 change 事件）：现在不是「${step.option}」`
+              : `选完之后下拉的值不是「${step.option}」`;
+          record.evidence =
+            appliedNow && appliedLater ? `✓ 「${step.label || step.option}」= ${step.option}` : '';
+          break;
+        }
+        /**
+         * 元素必须**落在**另一个元素的水平范围内（框套框）。
+         *
+         * 用途（2026-10-15）：确认条目行没有溢出列表栏。Radix `ScrollArea` 的内容层是
+         * `display: table`，会按内容撑宽——实测面板 320px 时行有 520px，行右侧的按钮因此
+         * 被面板裁掉。AX 读不到透明度（"按钮是不是常显"它看不见），但**读得到坐标**，
+         * 所以用几何断言把"行有没有溢出"这条兜住；两侧各留 `tolerance` px（默认 8）。
+         */
+        case 'expectInside': {
+          const inner = mac.frameOf(appName, step.inner);
+          const outer = mac.frameOf(appName, step.outer);
+          if (!inner.ok || !outer.ok) {
             record.status = 'failed';
-            record.detail = `下拉菜单里没有「${step.option}」：${item.error}`;
+            /**
+             * 顺手把"这一栏现在是什么态"带上（2026-10-16）：
+             * 上一次失败只写"没找到元素"，看不出是因为**这一栏当时显示的是大纲**（列表条目根本没渲染）。
+             * 三个探针查的都是轻量元素，代价可忽略，但省掉一整轮排查。
+             */
+            const paneState = mac.frameOf(appName, { role: 'AXButton', description: '返回笔记列表' }).ok
+              ? '列表栏=大纲'
+              : mac.frameOf(appName, { role: 'AXButton', description: '收起大纲' }).ok
+                ? '正文右侧=大纲'
+                : '列表栏=列表';
+            record.detail =
+              (!inner.ok
+                ? `找不到内框元素：${inner.error}（${JSON.stringify(step.inner)}）`
+                : `找不到外框元素：${outer.error}（${JSON.stringify(step.outer)}）`) +
+              `；当时${paneState}`;
             break;
           }
-          mac.click(appName, item.point, itemQuery);
-          sleepMs(900);
-          // 复核：**改完要看得见**（读 value），不能只看"点了两下都返回成功"
-          const applied = mac.frameOf(appName, probe).ok;
-          record.status = applied ? 'passed' : 'failed';
-          record.detail = applied
-            ? `已选「${step.option}」`
-            : `点完之后下拉的值仍不是「${step.option}」`;
-          record.evidence = applied ? `✓ 「${step.label || step.option}」= ${step.option}` : '';
+          const tolerance = Number(step.tolerance) || 8;
+          const innerRight = inner.frame.x + inner.frame.width;
+          const outerRight = outer.frame.x + outer.frame.width;
+          const ok = inner.frame.x >= outer.frame.x - tolerance && innerRight <= outerRight + tolerance;
+          record.status = ok ? 'passed' : 'failed';
+          record.detail =
+            `内框 x=${Math.round(inner.frame.x)}..${Math.round(innerRight)}，` +
+            `外框 x=${Math.round(outer.frame.x)}..${Math.round(outerRight)}` +
+            (ok ? '（在范围内）' : `（超出 ${Math.round(Math.max(0, innerRight - outerRight))}px）`);
+          record.evidence = ok ? `✓ ${step.label || '元素在范围内'}` : '';
+          break;
+        }
+        /**
+         * 元素的尺寸要在给定范围内（`maxHeight` / `minWidth` / `maxWidth`，都是可选）。
+         *
+         * 用途（2026-10-16）：钉住"大纲栏头不许变成两行"——标题一长，栏头被挤成
+         * 「大 / 纲」两行时高度会翻倍，这条断言当场就能抓住；报告里带上实测尺寸。
+         */
+        case 'expectSize': {
+          const found = mac.frameOf(appName, step.query);
+          if (!found.ok) {
+            record.status = 'failed';
+            record.detail = `找不到元素：${found.error}（${JSON.stringify(step.query)}）`;
+            break;
+          }
+          const { width, height } = found.frame;
+          const problems = [];
+          if (step.maxHeight !== undefined && height > step.maxHeight) {
+            problems.push(`高度 ${Math.round(height)} > ${step.maxHeight}`);
+          }
+          if (step.minWidth !== undefined && width < step.minWidth) {
+            problems.push(`宽度 ${Math.round(width)} < ${step.minWidth}`);
+          }
+          if (step.maxWidth !== undefined && width > step.maxWidth) {
+            problems.push(`宽度 ${Math.round(width)} > ${step.maxWidth}`);
+          }
+          record.status = problems.length === 0 ? 'passed' : 'failed';
+          record.detail =
+            `实测 ${Math.round(width)}×${Math.round(height)}` +
+            (problems.length === 0 ? '（在范围内）' : `：${problems.join('；')}`);
+          record.evidence = problems.length === 0 ? `✓ ${step.label || '尺寸符合预期'}` : '';
           break;
         }
         case 'manual':

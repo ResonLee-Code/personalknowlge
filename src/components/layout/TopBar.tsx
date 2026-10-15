@@ -1,4 +1,4 @@
-import { Moon, PanelLeft, Search, Settings, Sun } from 'lucide-react';
+import { Moon, Search, Settings, Sun } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
@@ -11,7 +11,6 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 export function TopBar() {
   const navigate = useNavigate();
   const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
-  const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const theme = useUiStore((state) => state.theme);
   const setTheme = useUiStore((state) => state.setTheme);
   const workspace = useWorkspaceStore((state) => state.workspace);
@@ -19,9 +18,8 @@ export function TopBar() {
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 px-3">
-      <Button variant="ghost" size="icon" onClick={toggleSidebar} title="切换侧边栏">
-        <PanelLeft className="h-4 w-4" />
-      </Button>
+      {/* 侧边栏开关放在侧边栏自己身上（收起后也在同一个位置，见 Sidebar.tsx）：
+          这里再来一个只会让人犹豫"两个是不是不一样" */}
       <div className="flex min-w-0 items-baseline gap-2">
         <span className="truncate text-sm font-semibold text-[var(--ink)]">
           {workspace?.name ?? 'Personal Knowledge OS'}

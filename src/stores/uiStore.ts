@@ -6,6 +6,8 @@ export type ThemeName = 'light' | 'dark';
 export type OutlinePlacement = 'list' | 'side';
 /** 列表栏当前显示什么 */
 export type ListPaneMode = 'list' | 'outline';
+/** 大纲钉在正文右侧时的形态：隐藏 / 常驻 / 贴边 mini（贴在右边，鼠标移上去展开） */
+export type SideOutlineMode = 'hidden' | 'pinned' | 'mini';
 
 /** 与工作区设置对应的界面偏好（用于从磁盘恢复上次的布局）。 */
 export interface UiPreferences {
@@ -36,9 +38,21 @@ interface UiState {
   listPaneMode: ListPaneMode;
   /** 选中笔记后是否自动切到大纲（工作区级偏好，默认关） */
   autoOutlineOnSelect: boolean;
+  /**
+   * 钉在正文右侧时的大纲形态（V1.3.0 第二轮界面调整）。
+   *
+   * 为什么从 `NoteEditorPage` 的局部 state 提到这里：大纲的开关现在放在**笔记列表栏的头部**
+   * （单一入口，见 `OutlineToggleButton`），列表栏也要能开关右侧那一列——两处读同一份状态，
+   * 就不能再让编辑器一个人拿着。仍然只活在内存里（与 `listPaneMode` 同口径）。
+   */
+  outlineMode: SideOutlineMode;
   /** 分屏模式下编辑器占比（0.3 ~ 0.7） */
   editorSplitRatio: number;
   sidebarCollapsed: boolean;
+  /** 侧边栏「分类」区块是否折叠（内存态，与 `sidebarCollapsed` 同口径） */
+  categoriesCollapsed: boolean;
+  /** 侧边栏「标签」区块是否折叠 */
+  tagsCollapsed: boolean;
   editorMode: EditorMode;
   theme: ThemeName;
   fontSize: number;
@@ -50,8 +64,11 @@ interface UiState {
   setOutlinePlacement: (placement: OutlinePlacement) => void;
   setListPaneMode: (mode: ListPaneMode) => void;
   setAutoOutlineOnSelect: (value: boolean) => void;
+  setOutlineMode: (mode: SideOutlineMode) => void;
   setEditorSplitRatio: (ratio: number) => void;
   toggleSidebar: () => void;
+  toggleCategoriesCollapsed: () => void;
+  toggleTagsCollapsed: () => void;
   setEditorMode: (mode: EditorMode) => void;
   setTheme: (theme: ThemeName) => void;
   setFontSize: (size: number) => void;
@@ -77,8 +94,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   outlinePlacement: 'list',
   listPaneMode: 'list',
   autoOutlineOnSelect: false,
+  outlineMode: 'pinned',
   editorSplitRatio: LAYOUT_DEFAULTS.editorSplitRatio,
   sidebarCollapsed: false,
+  categoriesCollapsed: false,
+  tagsCollapsed: false,
   editorMode: 'split',
   theme: 'light',
   fontSize: 15,
@@ -102,12 +122,16 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ outlinePlacement, listPaneMode: outlinePlacement === 'side' ? 'list' : 'outline' }),
   setListPaneMode: (listPaneMode) => set({ listPaneMode }),
   setAutoOutlineOnSelect: (autoOutlineOnSelect) => set({ autoOutlineOnSelect }),
+  setOutlineMode: (outlineMode) => set({ outlineMode }),
   setEditorSplitRatio: (editorSplitRatio) => {
     // 保留三位小数，既够精细也避免浮点噪声
     const clamped = Math.min(0.7, Math.max(0.3, editorSplitRatio));
     set({ editorSplitRatio: Math.round(clamped * 1000) / 1000 });
   },
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+  toggleCategoriesCollapsed: () =>
+    set((state) => ({ categoriesCollapsed: !state.categoriesCollapsed })),
+  toggleTagsCollapsed: () => set((state) => ({ tagsCollapsed: !state.tagsCollapsed })),
   setEditorMode: (editorMode) => set({ editorMode }),
   setTheme: (theme) => {
     set({ theme });

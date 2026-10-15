@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -295,14 +295,15 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByTestId('outline-item').first()).toContainText('全文搜索');
   await page.getByTestId('outline-item').first().click();
   await page.screenshot({ path: path.join(SHOTS, '18-outline.png') });
-  // 「〈〈 返回列表」回到笔记列表；工具栏按钮是同一个开关
+  // 「〈〈 返回列表」回到笔记列表；列表栏头部那个开关是同一个开关
   await page.getByTestId('outline-back').click();
   await expect(page.getByTestId('note-list-panel')).toBeVisible();
   await expect(page.getByTestId('outline-panel')).toHaveCount(0);
-  // 隐藏后再打开，确认开关可反复
+  // 再打开一次，确认开关可反复；收起走「〈〈 返回列表」——
+  // 这一栏显示大纲时栏头归大纲，开关本身也随列表栏一起让位
   await page.getByRole('button', { name: '显示大纲' }).click();
   await expect(page.getByTestId('outline-panel')).toBeVisible();
-  await page.getByRole('button', { name: '隐藏大纲' }).click();
+  await page.getByTestId('outline-back').click();
   await expect(page.getByTestId('outline-panel')).toHaveCount(0);
 
   // 19. ⌘/Ctrl + P 快速切换笔记（按标题模糊匹配）
@@ -538,7 +539,9 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByRole('dialog')).toContainText('浏览器预览模式');
   await page.screenshot({ path: path.join(SHOTS, '32-save-template.png') });
   await page.getByRole('button', { name: '取消' }).click();
-  await page.getByRole('button', { name: '隐藏大纲' }).click();
+  // 收尾：这一栏正显示大纲（栏头归大纲），用「〈〈 返回列表」回到列表
+  await page.getByTestId('outline-back').click();
+  await expect(page.getByTestId('note-list-panel')).toBeVisible();
 
   // 28. 历史版本：留档 → 对比 → 还原（V1.2.1 P2）
   await page.goto('/#/notes');
@@ -743,6 +746,87 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
 
   await page.goto('/#/trash');
   await expect(page.getByText('回收站是空的')).toBeVisible();
+
+  // 35. 界面梳理（2026-10-15）：侧边栏开关同高、大纲开关进列表栏头部、长标题行的快捷按钮、
+  //     分类 / 标签可折叠、侧边栏不再重复「设置」
+  await page.goto('/#/notes');
+  // 顶栏那个「切换侧边栏」删掉了：侧边栏自己有收起 / 展开，且两者停在**同一高度**
+  await expect(page.getByRole('button', { name: '切换侧边栏' })).toHaveCount(0);
+  const collapseBox = await page.getByRole('button', { name: '收起侧边栏' }).boundingBox();
+  await page.getByRole('button', { name: '收起侧边栏' }).click();
+  const expandBox = await page.getByRole('button', { name: '展开侧边栏' }).boundingBox();
+  expect(Math.abs(expandBox!.y - collapseBox!.y)).toBeLessThan(4);
+  // 收起后不是"空了"：导航项以图标栏形式留在那里（选中项高亮、悬停出名字）
+  const railLinks = page.locator('nav[aria-label="主导航"] a');
+  await expect(railLinks).toHaveCount(11);
+  const railBackground = async (locator: Locator) =>
+    locator.evaluate((element) => getComputedStyle(element).backgroundColor);
+  const activeRail = page.locator('nav[aria-label="主导航"] a[aria-current="page"]');
+  await expect(activeRail).toHaveCount(1);
+  const inactiveRail = page.locator('nav[aria-label="主导航"] a[aria-label="回收站"]');
+  expect(await railBackground(activeRail)).not.toBe(await railBackground(inactiveRail));
+  await inactiveRail.hover();
+  await expect(page.getByRole('tooltip')).toContainText('回收站');
+  await page.screenshot({ path: path.join(SHOTS, '45-sidebar-rail.png') });
+  await page.getByRole('button', { name: '展开侧边栏' }).click();
+  await expect(page.getByTestId('sidebar')).toBeVisible();
+
+  // 分类 / 标签区块可折叠（折叠后条目消失、aria-expanded 跟着变）
+  await page.getByTestId('categories-toggle').click();
+  await expect(page.getByTestId('categories-toggle')).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: /^技术/ })).toHaveCount(0);
+  await page.getByTestId('categories-toggle').click();
+  await expect(page.getByRole('button', { name: /^技术/ })).toBeVisible();
+  await page.getByTestId('tags-toggle').click();
+  await expect(page.getByTestId('tags-toggle')).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: /^入门/ })).toHaveCount(0);
+  await page.getByTestId('tags-toggle').click();
+  await page.screenshot({ path: path.join(SHOTS, '45-sections.png') });
+
+  // 侧边栏不再有「设置」；右上角那个是唯一入口
+  await expect(page.getByRole('link', { name: '设置' })).toHaveCount(0);
+  await page.getByRole('button', { name: '设置' }).click();
+  await expect(page.getByRole('heading', { name: '设置', level: 1 })).toBeVisible();
+  await page.goto('/#/notes');
+
+  // 列表栏头部：计数贴在标题右边、大纲开关在最右；没选中笔记时开关置灰（那会儿没有大纲可看）
+  const listHeading = await page
+    .getByTestId('note-list-panel')
+    .getByRole('heading', { level: 1 })
+    .boundingBox();
+  const countBox = await page.getByTestId('note-list-count').boundingBox();
+  const toggleBox = await page.getByTestId('outline-toggle').boundingBox();
+  expect(countBox!.x).toBeGreaterThan(listHeading!.x);
+  expect(Math.abs(countBox!.y - listHeading!.y)).toBeLessThan(6);
+  expect(toggleBox!.x).toBeGreaterThan(countBox!.x);
+  await expect(page.getByTestId('outline-toggle')).toBeDisabled();
+
+  // 长标题被截断时，右侧两个快捷按钮**不靠 hover** 也可见：
+  // 否则标题右边会留一块空白（按钮本来就占着位置只是透明），看着像坏了
+  await page.getByRole('button', { name: '新建笔记' }).first().click();
+  await page
+    .getByLabel('标题', { exact: true })
+    .fill('一篇标题特别特别长的笔记用来验证截断时右侧两个快捷按钮仍然可见');
+  await page.getByRole('button', { name: '创建笔记' }).click();
+  await expect(page.locator('.cm-content')).toBeVisible();
+  const longRow = page.getByTestId('note-list-item').filter({ hasText: '特别特别长' }).first();
+  await expect(longRow.locator('[data-truncated="true"]')).toHaveCSS('opacity', '1');
+  await expect(longRow.getByTestId('note-quick-child')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '46-long-title-row.png') });
+
+  // 选中笔记后开关可用：点它 = 这一栏换成大纲（不多占一列）
+  await expect(page.getByTestId('outline-toggle')).toBeEnabled();
+  await page.getByTestId('outline-toggle').click();
+  await expect(page.getByTestId('list-pane-outline')).toBeVisible();
+  // 标题很长时栏头也**只有一行**：图标与「大纲」不被挤成两行，由标题自己截断
+  const headerBox = await page.getByTestId('outline-panel').locator('header').boundingBox();
+  const labelBox = await page.getByTestId('outline-label').boundingBox();
+  expect(headerBox!.height).toBeLessThan(40);
+  expect(labelBox!.height).toBeLessThan(22);
+  await expect(page.getByTestId('outline-note-title')).toHaveCSS('text-overflow', 'ellipsis');
+  await page.screenshot({ path: path.join(SHOTS, '47-outline-header-long-title.png') });
+  await page.getByTestId('outline-back').click();
+  await expect(page.getByTestId('note-list-panel')).toBeVisible();
 
   expect(errors, `控制台错误：${errors.join('\n')}`).toHaveLength(0);
 });

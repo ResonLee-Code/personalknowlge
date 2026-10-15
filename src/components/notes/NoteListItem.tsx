@@ -17,7 +17,7 @@ import {
   Trash2,
   Undo2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -224,6 +224,15 @@ export function NoteListItem({
   const [copyOpen, setCopyOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  /**
+   * 标题是否被截断（V1.3.0 第二轮界面调整）。
+   *
+   * 为什么需要：右侧那两个快捷按钮**一直占着位置**（只是平时透明），所以标题一长就会被截，
+   * 而按钮却在 hover 之前看不见——现象是"标题没显示全，右边却空着一块"，看着像坏了。
+   * 既然截断是按钮占位造成的，那就在截断时把按钮显出来（非截断的条目仍保持 hover 才出现，列表更安静）。
+   */
+  const titleRef = useRef<HTMLSpanElement | null>(null);
+  const [titleTruncated, setTitleTruncated] = useState(false);
 
   /** 当前列表结果里的直接子文档（用于删除确认框与提示） */
   const children = useNotesStore((state) => state.items).filter(
@@ -235,6 +244,17 @@ export function NoteListItem({
 
   /** 失败时读 store 里的错误原因（写操作把错误收敛到 store，而不是抛出） */
   const notesError = () => useNotesStore.getState().error;
+
+  useEffect(() => {
+    const element = titleRef.current;
+    if (!element) return;
+    const check = () => setTitleTruncated(element.scrollWidth - element.clientWidth > 1);
+    check();
+    // 侧边栏 / 列表栏宽度、窗口大小一变，截断与否就变了
+    const observer = new ResizeObserver(check);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [note.title, keyword]);
 
   const handleFavorite = () => {
     const success = note.favorite ? '已取消收藏' : '已收藏';
@@ -446,6 +466,7 @@ export function NoteListItem({
                 <TooltipTrigger asChild>
                   <span
                     data-testid="note-list-item-title"
+                    ref={titleRef}
                     className="min-w-0 flex-1 truncate text-sm text-[var(--ink)]"
                   >
                     {titleSegments.map((segment, index) => (
@@ -483,7 +504,15 @@ export function NoteListItem({
                 </span>
               ) : null}
               {/* hover 才出现的快捷操作（对标语雀：⋮ 与 + 在建条目右侧） */}
-              <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+              <span
+                data-truncated={titleTruncated ? 'true' : undefined}
+                className={cn(
+                  'ml-auto flex shrink-0 items-center gap-0.5 transition-opacity',
+                  titleTruncated
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+                )}
+              >
                 <button
                   type="button"
                   data-testid="note-quick-child"

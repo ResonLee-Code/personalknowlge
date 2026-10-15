@@ -103,13 +103,17 @@ That covers ~80% of daily use. Read on as needed.
 ```text
 Top bar : global search (⌘K) · save status · theme · settings
 Sidebar : Dashboard / All notes / Inbox / Favorites / Graph / Research / Attachments /
-          Manage / Categories / Tags / Trash / Settings
-Middle  : note list (title filter · sort · multi-select · item menu) ⇄ outline (toolbar toggle)
+          Manage / Categories / Tags / Trash  (collapsible sections; settings lives top-right)
+Middle  : note list (title filter · sort · multi-select · item menu) ⇄ outline (header toggle)
 Right   : editor / preview (toolbar · relations panel · backlinks)
 Status  : index status · stats · runtime mode
 ```
 
-Sidebar width, list width and the editor split ratio are all **draggable** (double-click to reset, arrow keys to
+The sidebar's collapse / expand control sits in its **bottom row** — collapsed, it stays at the same height
+instead of jumping to the top bar. Collapsed, the sidebar becomes an **icon rail** (like the Codex desktop app):
+every navigation item is still there, the current one is highlighted, hovering shows its name, and clicking an
+icon switches pages without expanding first. The gear in the top-right is the only settings entry; the Categories
+and Tags sections fold when you click their headings. Sidebar width, list width and the editor split ratio are all **draggable** (double-click to reset, arrow keys to
 nudge) and are remembered per workspace. Window size and position are remembered too — if the saved position is
 no longer on any display (e.g. an external monitor was unplugged) only the size is restored, so the window can
 never open off-screen.
@@ -134,12 +138,13 @@ The toolbar toggles **编辑 / 分屏 / 预览** (edit / split / preview) and re
 draggable (0.3–0.7).
 
 **The outline is not on the right by default** (layout change in V1.3.0): it **shares the middle column with the
-note list** — that column normally shows the list; the toolbar's outline button swaps it to the outline (no extra
-column, so the text gets more width). "**〈〈 返回列表**" (back to list) in the outline header — or clicking the
-button again — brings the list back. "**钉在正文右侧**" in the header pins it to the right of the text instead
-(nicer on wide screens); from there "**改到笔记列表那一栏**" moves it back.
+note list** — that column normally shows the list; the outline toggle at the right of the column header (next to
+the note count) swaps it to the outline (no extra column, so the text gets more width). "**〈〈 返回列表**" (back
+to list) in the outline header brings the list back. The toggle is greyed out until you select a note (there is no
+outline to show yet). "**钉在正文右侧**" in the header pins it to the right of the text instead (nicer on wide
+screens); from there "**改到笔记列表那一栏**" moves it back.
 Once pinned to the right it keeps the original three states: pinned → "收起大纲" collapses it to a side rail
-(hover to expand) → "钉住大纲" pins it again; the toolbar button hides it entirely. With no headings yet, the
+(hover to expand) → "钉住大纲" pins it again; the header toggle hides it entirely. With no headings yet, the
 outline tells you to start with `#`.
 
 Two related switches live in **Settings → Editor**: "**大纲位置**" (share the list column / pin to the right of

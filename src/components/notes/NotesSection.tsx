@@ -71,7 +71,7 @@ export function NotesSection({ baseScope }: { baseScope: NoteScope }) {
           }}
         />
       ) : (
-        <NoteListPanel />
+        <NoteListPanel hasNote={Boolean(id)} />
       )}
       <ResizeHandle
         side="left"

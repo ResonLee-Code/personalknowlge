@@ -11,7 +11,6 @@ import {
   GitBranch,
   History,
   Link2,
-  ListTree,
   MoreHorizontal,
   Pencil,
   Save,
@@ -142,9 +141,10 @@ export function NoteEditorPage() {
   /**
    * 大纲形态（对标语雀）：hidden = 不显示；pinned = 固定在右侧；
    * mini = 贴边收起（鼠标移上去临时悬浮展开，可「钉住大纲」固定）。
+   * 状态放在 uiStore 里：开关现在在**笔记列表栏头部**，那边也要能开关右侧这一列。
    */
-  // 大纲默认固定在正文右侧（对标语雀：右栏常驻）；可「收起」为贴边 mini 态
-  const [outlineMode, setOutlineMode] = useState<'hidden' | 'pinned' | 'mini'>('pinned');
+  const outlineMode = useUiStore((state) => state.outlineMode);
+  const setOutlineMode = useUiStore((state) => state.setOutlineMode);
   /** mini 态下鼠标是否悬停在贴边条上（临时展开） */
   const [outlineHover, setOutlineHover] = useState(false);
   /** 当前光标所在标题的偏移，用于大纲高亮 */
@@ -165,7 +165,6 @@ export function NoteEditorPage() {
    */
   const outlinePlacement = useUiStore((state) => state.outlinePlacement);
   const setOutlinePlacement = useUiStore((state) => state.setOutlinePlacement);
-  const listPaneMode = useUiStore((state) => state.listPaneMode);
   const setListPaneMode = useUiStore((state) => state.setListPaneMode);
   const autoOutlineOnSelect = useUiStore((state) => state.autoOutlineOnSelect);
   const publishOutline = useOutlineStore((state) => state.publish);
@@ -638,39 +637,8 @@ export function NoteEditorPage() {
         <SaveStatusBadge status={saveStatus} detail={saveError} />
 
         <div className="ml-auto flex items-center gap-1">
-          {editorMode !== 'preview' ? (
-            <Button
-              size="icon"
-              variant="ghost"
-              title={
-                outlinePlacement === 'list'
-                  ? listPaneMode === 'outline'
-                    ? '隐藏大纲'
-                    : '显示大纲'
-                  : outlineMode === 'hidden'
-                    ? '显示大纲'
-                    : '隐藏大纲'
-              }
-              aria-pressed={
-                outlinePlacement === 'list' ? listPaneMode === 'outline' : outlineMode !== 'hidden'
-              }
-              className={cn(
-                (outlinePlacement === 'list' ? listPaneMode === 'outline' : outlineMode !== 'hidden') &&
-                  'text-[var(--brand)]',
-              )}
-              onClick={() => {
-                // 大纲在列表栏时：这个按钮就是「列表 ⇄ 大纲」的开关（同一栏切换，不占额外横向空间）
-                if (outlinePlacement === 'list') {
-                  setListPaneMode(listPaneMode === 'outline' ? 'list' : 'outline');
-                  return;
-                }
-                setOutlineHover(false);
-                setOutlineMode((value) => (value === 'hidden' ? 'pinned' : 'hidden'));
-              }}
-            >
-              <ListTree className="h-4 w-4" />
-            </Button>
-          ) : null}
+          {/* 大纲开关已经挪到「笔记列表栏」的头部（单一入口，见 OutlineToggleButton）：
+              列表栏一直在，不像这个工具栏只在打开笔记时才出现 */}
           <Button
             size="icon"
             variant="ghost"
@@ -815,6 +783,9 @@ export function NoteEditorPage() {
               type="button"
               className="flex items-center gap-1 hover:text-[var(--brand)]"
               title="点击编辑来源与时效"
+              // 无障碍名给个短的：这个按钮的内容是一串元信息（Inbox · 路径 · 更新时间…），
+              // 读屏会把整串念出来；顺带也让自动化能按名字点到它（真机验收里要改有效期）
+              aria-label="来源与时效"
               onClick={() => setSourceOpen(true)}
             >
               <BookMarked className="h-3 w-3" />
@@ -953,8 +924,15 @@ export function NoteEditorPage() {
           />
         ) : null}
         {outlinePlacement === 'side' && outlineMode === 'mini' ? (
-          <div
+          /*
+           * 贴边条用真正的 <button>（2026-10-15 界面梳理）：它本来就是可点的（点一下展开），
+           * 但以前是个 div——键盘用户到不了，无障碍树里也只有里面的文字、没有它自己的框
+           * （验收脚本想"把鼠标移到这一条上"时，取到的是文字的中心，正落在窗口边界上）。
+           */
+          <button
+            type="button"
             data-testid="outline-mini"
+            aria-label="大纲（鼠标移上去展开）"
             title="大纲（鼠标移上去展开）"
             className="flex w-3.5 shrink-0 cursor-pointer items-center justify-center border-l border-[var(--border-subtle)] bg-[var(--surface)]"
             onMouseEnter={() => setOutlineHover(true)}
@@ -964,7 +942,7 @@ export function NoteEditorPage() {
             <span className="select-none text-[10px] tracking-widest text-[var(--ink-subtle)] [writing-mode:vertical-rl]">
               大纲
             </span>
-          </div>
+          </button>
         ) : null}
         {/* mini 态：悬浮展开的大纲（绝对定位，不挤压正文） */}
         {outlinePlacement === 'side' && outlineMode === 'mini' && outlineHover ? (

@@ -1,17 +1,3 @@
-import {
-  FileText,
-  FolderTree,
-  HardDrive,
-  Inbox,
-  ListChecks,
-  LayoutDashboard,
-  Network,
-  FlaskConical,
-  Settings,
-  Star,
-  Tags,
-  Trash2,
-} from 'lucide-react';
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 
@@ -21,32 +7,14 @@ import { cn } from '@/lib/utils';
 import { useNotesStore } from '@/stores/notesStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
-interface NavItem {
-  to: string;
-  label: string;
-  icon: typeof FileText;
-  count?: number;
-}
+import { buildNavItems } from './navItems';
 
 export function NavigationMenu() {
   const stats = useWorkspaceStore((state) => state.stats);
   /** 拖拽悬停在 Inbox 上时高亮 */
   const [inboxDropActive, setInboxDropActive] = useState(false);
 
-  const items: NavItem[] = [
-    { to: ROUTES.dashboard, label: '首页', icon: LayoutDashboard },
-    { to: ROUTES.notes, label: '全部笔记', icon: FileText, count: stats.noteCount },
-    { to: ROUTES.inbox, label: 'Inbox', icon: Inbox, count: stats.inboxCount },
-    { to: ROUTES.favorites, label: '收藏', icon: Star },
-    { to: ROUTES.graph, label: '知识图谱', icon: Network },
-    { to: ROUTES.research, label: '研究助手', icon: FlaskConical },
-    { to: ROUTES.attachments, label: '附件', icon: HardDrive },
-    { to: ROUTES.manage, label: '目录管理', icon: ListChecks },
-    { to: ROUTES.categories, label: '分类', icon: FolderTree, count: stats.categoryCount },
-    { to: ROUTES.tags, label: '标签', icon: Tags, count: stats.tagCount },
-    { to: ROUTES.trash, label: '回收站', icon: Trash2, count: stats.trashCount },
-    { to: ROUTES.settings, label: '设置', icon: Settings },
-  ];
+  const items = buildNavItems(stats);
 
   return (
     <nav className="flex flex-col gap-0.5" aria-label="主导航">

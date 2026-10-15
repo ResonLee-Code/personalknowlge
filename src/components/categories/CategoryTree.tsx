@@ -1,4 +1,4 @@
-import { ChevronRight, FolderTree, MoreHorizontal, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderTree, MoreHorizontal, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -15,6 +15,7 @@ import { isNoteDrag, readNoteDragIds } from '@/lib/dragNotes';
 import { cn } from '@/lib/utils';
 import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
+import { useUiStore } from '@/stores/uiStore';
 import type { CategoryNode } from '@/types';
 
 import { CategoryDeleteDialog, CategoryFormDialog } from './CategoryDialogs';
@@ -28,6 +29,8 @@ type DialogState =
 export function CategoryTree() {
   const tree = useCategoriesStore((state) => state.tree);
   const navigate = useNavigate();
+  const categoriesCollapsed = useUiStore((state) => state.categoriesCollapsed);
+  const toggleCategoriesCollapsed = useUiStore((state) => state.toggleCategoriesCollapsed);
   const [params] = useSearchParams();
   const activeId = params.get('categoryId');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -147,9 +150,24 @@ export function CategoryTree() {
   return (
     <section className="space-y-1">
       <header className="flex items-center justify-between px-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-subtle)]">
+        {/* 区块可折叠：分类多了以后侧边栏会被顶得很长，折叠起来给别的东西腾地方 */}
+        <button
+          type="button"
+          data-testid="categories-toggle"
+          aria-expanded={!categoriesCollapsed}
+          // 无障碍名要说清"点它是折叠还是展开"：光有「分类」两个字，读屏听不出这是个开关
+          aria-label={categoriesCollapsed ? '展开分类' : '折叠分类'}
+          title={categoriesCollapsed ? '展开分类' : '折叠分类'}
+          className="flex min-w-0 items-center gap-0.5 rounded text-[11px] font-semibold uppercase tracking-wide text-[var(--ink-subtle)] transition-colors hover:text-[var(--ink)]"
+          onClick={toggleCategoriesCollapsed}
+        >
+          {categoriesCollapsed ? (
+            <ChevronRight className="h-3 w-3" />
+          ) : (
+            <ChevronDown className="h-3 w-3" />
+          )}
           分类
-        </h2>
+        </button>
         <Button
           variant="ghost"
           size="icon"
@@ -160,7 +178,7 @@ export function CategoryTree() {
           <Plus className="h-3.5 w-3.5" />
         </Button>
       </header>
-      {tree.length === 0 ? (
+      {categoriesCollapsed ? null : tree.length === 0 ? (
         <EmptyState
           icon={FolderTree}
           title="还没有分类"

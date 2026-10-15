@@ -242,12 +242,36 @@ function run(argv) {
        */
       case 'hover': {
         if (!request.point) return out({ ok: false, error: '缺少 point' });
-        postMouse($.kCGEventMouseMoved, request.point);
+        /**
+         * 先把点夹进窗口内（2026-10-15 实测）：贴边 mini 态的「大纲」条贴在窗口最右侧，
+         * 取它的**中心**正好落在窗口边界上——鼠标移过去（甚至出界）WebKit 不会派发 mouseover，
+         * 悬浮大纲就不展开（现象："悬停步骤 ✅ 通过，但面板没出来"）。
+         * 这里按窗口框内缩 2px 夹一下，保证光标真的落在那个控件身上。
+         */
+        let point = { x: request.point.x, y: request.point.y };
+        try {
+          const window = Application('System Events').processes.byName(request.app).windows[0];
+          const position = window.position();
+          const size = window.size();
+          if (position && size) {
+            const left = position[0] + 2;
+            const top = position[1] + 2;
+            const right = position[0] + size[0] - 2;
+            const bottom = position[1] + size[1] - 2;
+            point = {
+              x: Math.min(Math.max(point.x, left), right),
+              y: Math.min(Math.max(point.y, top), bottom),
+            };
+          }
+        } catch (error) {
+          // 拿不到窗口框就按原点走：最坏情况跟以前一样（可能不展开）
+        }
+        postMouse($.kCGEventMouseMoved, point);
         // 再补一次：WebKit 对"从没动过就停在原地"的移动不一定会派发 mouseover（实测）
         delay(0.15);
         postMouse($.kCGEventMouseMoved, {
-          x: request.point.x + (request.jitter || 2),
-          y: request.point.y + (request.jitter || 2),
+          x: point.x - (request.jitter || 2),
+          y: point.y - (request.jitter || 2),
         });
         return out({ ok: true });
       }

@@ -86,4 +86,27 @@ describe('uiStore 布局取值', () => {
     expect(useUiStore.getState().outlinePlacement).toBe('side');
     expect(useUiStore.getState().autoOutlineOnSelect).toBe(true);
   });
+
+  it('侧边栏「分类 / 标签」区块可折叠（内存态，与侧边栏折叠同口径）', () => {
+    expect(useUiStore.getState().categoriesCollapsed).toBe(false);
+    expect(useUiStore.getState().tagsCollapsed).toBe(false);
+
+    useUiStore.getState().toggleCategoriesCollapsed();
+    expect(useUiStore.getState().categoriesCollapsed).toBe(true);
+    expect(useUiStore.getState().tagsCollapsed).toBe(false); // 各折各的
+
+    useUiStore.getState().toggleTagsCollapsed();
+    expect(useUiStore.getState().tagsCollapsed).toBe(true);
+
+    useUiStore.getState().toggleCategoriesCollapsed();
+    expect(useUiStore.getState().categoriesCollapsed).toBe(false);
+  });
+
+  it('右侧大纲形态默认常驻，可切到隐藏（开关在列表栏头部，两处读同一份状态）', () => {
+    expect(useUiStore.getState().outlineMode).toBe('pinned');
+    useUiStore.getState().setOutlineMode('hidden');
+    expect(useUiStore.getState().outlineMode).toBe('hidden');
+    useUiStore.getState().setOutlineMode('mini');
+    expect(useUiStore.getState().outlineMode).toBe('mini');
+  });
 });

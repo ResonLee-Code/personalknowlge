@@ -37,6 +37,8 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { NoteSort } from '@/types';
 
+import { OutlineToggleButton } from '@/components/editor/OutlineToggleButton';
+
 import { BatchCopyDialog, BatchMoveDialog, BatchTagDialog } from './BatchActionDialogs';
 import { NoteListItem } from './NoteListItem';
 
@@ -47,7 +49,7 @@ const SORT_OPTIONS = [
   { value: 'manual', label: '自定义顺序' },
 ] as const;
 
-export function NoteListPanel() {
+export function NoteListPanel({ hasNote = false }: { hasNote?: boolean } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const width = useUiStore((state) => state.listWidth);
@@ -217,8 +219,17 @@ export function NoteListPanel() {
       >
       <div className="space-y-2 border-b border-[var(--border-subtle)] p-2.5">
         <div className="flex items-center justify-between">
-          <h1 className="text-sm font-semibold text-[var(--ink)]">{title}</h1>
-          <span className="text-[11px] text-[var(--ink-subtle)]">{total} 篇</span>
+          {/* 计数紧贴标题（一眼看出"这是哪个范围的几篇"），最右侧留给大纲开关 */}
+          <div className="flex min-w-0 items-baseline gap-1.5">
+            <h1 className="truncate text-sm font-semibold text-[var(--ink)]">{title}</h1>
+            <span
+              data-testid="note-list-count"
+              className="shrink-0 text-[11px] text-[var(--ink-subtle)]"
+            >
+              {total} 篇
+            </span>
+          </div>
+          <OutlineToggleButton hasNote={hasNote} />
         </div>
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink-subtle)]" />

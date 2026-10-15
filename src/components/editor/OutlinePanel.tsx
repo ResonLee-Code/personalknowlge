@@ -61,18 +61,28 @@ export function OutlinePanel({
             <ChevronsLeft className="h-3.5 w-3.5" />
           </button>
         ) : null}
-        <ListTree className="h-3.5 w-3.5 text-[var(--brand)]" />
-        大纲
+        {/*
+          栏头**永远是一行**（2026-10-16 修正）：标题长的时候以前会把「大纲」挤成竖排两行
+          （「大 / 纲」）、图标也被压扁——因为这一行里除了标题，其它都没有"不许收缩"的约束。
+          现在：图标与文字 `shrink-0`（谁说也不能缩）、标题吃剩余宽度并截断、
+          右侧计数与按钮 `shrink-0`。宽度不够时**只截标题**，不改栏头的样子。
+        */}
+        <ListTree className="h-3.5 w-3.5 shrink-0 text-[var(--brand)]" />
+        <span data-testid="outline-label" className="shrink-0 whitespace-nowrap">
+          大纲
+        </span>
         {title ? (
           <span
             data-testid="outline-note-title"
-            className="min-w-0 truncate font-normal text-[var(--ink-subtle)]"
+            className="min-w-0 flex-1 truncate font-normal text-[var(--ink-subtle)]"
             title={title}
           >
             · {title}
           </span>
         ) : null}
-        <span className="ml-auto text-[11px] text-[var(--ink-subtle)]">{headings.length}</span>
+        <span className="ml-auto shrink-0 text-[11px] text-[var(--ink-subtle)]">
+          {headings.length}
+        </span>
         {/* 对标语雀：隐藏大纲 → 贴边 mini 态；mini 态可「钉住大纲」固定 */}
         {/* 换位置：列表栏 ⇄ 正文右侧（两个方向各有一个入口，避免"挪了就找不回来"） */}
         {onMoveToSide ? (
@@ -82,7 +92,7 @@ export function OutlinePanel({
             title="钉在正文右侧"
             aria-label="钉在正文右侧"
             onClick={onMoveToSide}
-            className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+            className="shrink-0 rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
           >
             <PanelRight className="h-3.5 w-3.5" />
           </button>
@@ -94,7 +104,7 @@ export function OutlinePanel({
             title="改到笔记列表那一栏（省横向空间）"
             aria-label="改到笔记列表那一栏"
             onClick={onMoveToList}
-            className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+            className="shrink-0 rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
           >
             <ChevronsLeft className="h-3.5 w-3.5" />
           </button>
@@ -107,7 +117,7 @@ export function OutlinePanel({
                 title="收起大纲（贴边，鼠标移上去可临时展开）"
                 aria-label="收起大纲"
                 onClick={onCollapse}
-                className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+                className="shrink-0 rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
               >
                 <ChevronsRight className="h-3.5 w-3.5" />
               </button>
@@ -119,7 +129,7 @@ export function OutlinePanel({
                 title="钉住大纲（固定在右侧）"
                 aria-label="钉住大纲"
                 onClick={onPin}
-                className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+                className="shrink-0 rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
               >
                 <Pin className="h-3.5 w-3.5" />
               </button>
