@@ -9,6 +9,7 @@ SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeSc
 
 - 📦 **[下载与安装](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.0)**：三平台产物 + `SHA256SUMS-*.txt`
 - 📘 **[完全指南（中文）](./docs/GUIDE.md)** · **[Complete Guide (English)](./docs/GUIDE.en.md)**
+- 📗 **[使用说明手册（逐控件）](./docs/MANUAL.md)**：每个按钮 / 输入框 / 菜单项各是干什么的
 - 🧾 变更明细 [docs/CHANGELOG.md](./docs/CHANGELOG.md) · 验收实况 [docs/ACCEPTANCE_V1.3.0.md](./docs/ACCEPTANCE_V1.3.0.md)
 
 本仓库是 [Personal-Knowledge-OS-Engineering-Design-V1.0.md](./Personal-Knowledge-OS-Engineering-Design-V1.0.md)
@@ -158,7 +159,8 @@ MyKnowledge/
 
 ## 文档
 
-**先读这两份**：[完全指南（中文）](./docs/GUIDE.md) · [Complete Guide (English)](./docs/GUIDE.en.md)
+**先读这三份**：[完全指南（中文）](./docs/GUIDE.md) · [Complete Guide (English)](./docs/GUIDE.en.md) ·
+[使用说明手册（逐控件）](./docs/MANUAL.md)
 
 - [产品需求](./docs/PRODUCT_REQUIREMENTS.md) · [系统架构](./docs/ARCHITECTURE.md) · [数据库设计](./docs/DATABASE_SCHEMA.md)
 - [API 契约](./docs/API_CONTRACT.md) · [界面规范](./docs/UI_SPECIFICATION.md) · [开发规范](./docs/DEVELOPMENT_RULES.md)

@@ -164,7 +164,7 @@ pnpm bench                       # 发布前必跑：1 万检索 + 3 万图谱�
 | --- | --- |
 | 新增能力 / 行为调整 | `docs/CHANGELOG.md`（用户可见的变化）、受影响的设计文档 |
 | 新增或修改命令、DTO、错误码 | `docs/API_CONTRACT.md` |
-| 界面布局、交互、快捷键变化 | `docs/UI_SPECIFICATION.md`（必要时重跑 E2E 更新 `docs/screenshots/`） |
+| 界面布局、交互、快捷键变化 | `docs/UI_SPECIFICATION.md`；**控件的新增 / 改名 / 换位置要同步 `docs/MANUAL.md`（逐控件手册）**（必要时重跑 E2E 更新 `docs/screenshots/`） |
 | 模块划分、数据流、与设计文档的差异 | `docs/ARCHITECTURE.md` |
 | 新增 AI 能力 / 闸门 / 工具 / 研究对象 | `docs/AI_ARCHITECTURE_PLAN.md`（接口与边界）+ `docs/ARCHITECTURE.md` 的 AI 层 |
 | 表结构或迁移 | `docs/DATABASE_SCHEMA.md` + 新增迁移文件 |
