@@ -7,6 +7,7 @@
  *   node scripts/acceptance/run.js --list            # 看用例
  *   node scripts/acceptance/run.js --dry-run         # 只出结论表骨架（不碰界面）
  *   node scripts/acceptance/run.js --preflight       # 自检：工具 / 辅助功能权限 / 应用是否在跑
+ *   node scripts/acceptance/run.js --only 3,4        # 只跑指定用例（调某一条时用）
  *   node scripts/acceptance/run.js                   # 真跑（需要应用在运行 + 辅助功能权限）
  *
  * 纪律：
@@ -53,6 +54,7 @@ function parseArgs(argv) {
     app: APP_NAME,
     workspace: process.env.PKOS_ACCEPTANCE_WORKSPACE || '/private/tmp/pkos-acceptance',
     out: null,
+    only: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -62,6 +64,13 @@ function parseArgs(argv) {
     else if (arg === '--app') options.app = argv[++index];
     else if (arg === '--workspace') options.workspace = argv[++index];
     else if (arg === '--out') options.out = argv[++index];
+    // 只跑某几条用例（迭代某一条时不用把 9 条全跑一遍）：`--only 3,4`
+    else if (arg === '--only') {
+      options.only = String(argv[++index] || '')
+        .split(',')
+        .map((value) => Number(value.trim()))
+        .filter((value) => Number.isFinite(value));
+    }
     else if (arg === '--help' || arg === '-h') options.help = true;
   }
   return options;
@@ -389,6 +398,76 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           record.evidence = found.ok ? `✓ 界面存在「${step.label || ''}」` : '';
           break;
         }
+        /**
+         * 元素**不该**存在（例如"默认状态下大纲不占列表栏"）。
+         * 与 expectElement 成对：一处说"在"，一处说"不在"，才叫真的有断言。
+         *
+         * 复核两次（间隔 800ms）才判失败：无障碍树**总是慢一拍**，刚切完状态时
+         * 树里可能还留着已经不存在的元素；不复核就会把"树没刷新"写成"功能有问题"。
+         */
+        case 'expectAbsent': {
+          let found = mac.frameOf(appName, step.query);
+          for (let index = 0; found.ok && index < 2; index += 1) {
+            sleepMs(800);
+            found = mac.frameOf(appName, step.query);
+          }
+          record.status = found.ok ? 'failed' : 'passed';
+          record.detail = found.ok
+            ? `本来不该有，却在：${step.label || JSON.stringify(step.query)}`
+            : `界面上确实没有：${step.label || JSON.stringify(step.query)}`;
+          record.evidence = found.ok ? '' : `✓ 界面不存在「${step.label || ''}」`;
+          break;
+        }
+        /**
+         * 把界面**推到**目标状态（2026-10-15 实测教训）。
+         *
+         * 导航刚发生时，无障碍树里可能还留着**上一页**的同名元素（树的更新比界面慢一拍）。
+         * 这时候 AXPress 会返回成功，但 React 那边的节点已经卸载，点击被**静默丢弃**——
+         * 现象是"步骤 ✅ 通过，界面却没动"，而屏幕上什么都看不出来。
+         *
+         * 所以这里的语义是**以界面状态为准**：目标在就什么都不做；不在就按一次给定的控件再查。
+         * 按了几次**如实写进报告**（"按了 2 次"本身就是证据，不是被抹掉的抖动）。
+         * 要求 `press` 是"每次按都朝目标推进"的控件（开关类：只在目标缺失时才按）。
+         */
+        case 'ensure': {
+          if (!step.until || !step.press) {
+            record.status = 'failed';
+            record.detail = 'ensure 需要 until（目标元素）与 press（要按的控件）';
+            break;
+          }
+          const attempts = Math.max(1, Number(step.attempts) || 3);
+          let presses = 0;
+          let failedPress = '';
+          let satisfied = false;
+          for (let index = 0; index < attempts; index += 1) {
+            if (mac.frameOf(appName, step.until).ok) {
+              satisfied = true;
+              break;
+            }
+            const point = resolvePoint(appName, step.press);
+            if (!point.ok) {
+              failedPress = point.error;
+              break;
+            }
+            mac.click(appName, point.point, step.press);
+            presses += 1;
+            sleepMs(1200);
+          }
+          if (satisfied) {
+            record.status = 'passed';
+            record.detail =
+              presses === 0
+                ? `界面已在目标状态（${step.label || ''}），未按控件`
+                : `按了 ${presses} 次「${step.pressLabel || '控件'}」达到目标状态（${step.label || ''}）`;
+            record.evidence = `✓ 界面存在「${step.label || ''}」`;
+          } else {
+            record.status = 'failed';
+            record.detail = failedPress
+              ? `按不动「${step.pressLabel || '控件'}」：${failedPress}`
+              : `按了 ${presses} 次「${step.pressLabel || '控件'}」仍未达到：界面没有「${step.label || ''}」`;
+          }
+          break;
+        }
         case 'manual':
           record.status = 'manual';
           record.detail = step.note;
@@ -475,7 +554,18 @@ function main() {
     }
   }
 
-  const cases = CASES.map((item) =>
+  // `--only 3,4` 只跑指定用例（调某一条时用；结论表里也只列这几条，避免把"没跑"看成"没测过"）
+  const selected = options.only
+    ? CASES.filter((item) => options.only.includes(item.id))
+    : CASES;
+  if (options.only && selected.length === 0) {
+    console.error(`--only 没匹配到任何用例：${options.only.join(',')}`);
+    return 1;
+  }
+  if (options.only) {
+    console.log(`只跑用例：${selected.map((item) => item.id).join(', ')}（其余未执行）`);
+  }
+  const cases = selected.map((item) =>
     runCase(options.app, options.workspace, outDir, item, options.dryRun),
   );
   // 自动步骤的通过/失败数：用例级状态会被"含人工步骤"拉成 🖐，
