@@ -322,6 +322,21 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           record.detail = `scroll(${step.ticks || 3})`;
           break;
         }
+        /** 悬停到某个元素上（鼠标移上去才展开的控件）：见 lib/ax-agent.js 的 hover 说明。 */
+        case 'hover': {
+          const point = resolvePoint(appName, step.target);
+          if (!point.ok) {
+            record.status = 'failed';
+            record.detail = point.error;
+            break;
+          }
+          const hovered = mac.hover(point.point, step.jitter);
+          record.status = hovered.ok ? 'passed' : 'failed';
+          record.detail = hovered.ok
+            ? `hover(${Math.round(point.point.x)},${Math.round(point.point.y)})`
+            : hovered.error;
+          break;
+        }
         case 'keys': {
           const parts = String(step.combo).split('+');
           const key = parts.pop();
@@ -466,6 +481,54 @@ function runCase(appName, workspace, outDir, item, dryRun) {
               ? `按不动「${step.pressLabel || '控件'}」：${failedPress}`
               : `按了 ${presses} 次「${step.pressLabel || '控件'}」仍未达到：界面没有「${step.label || ''}」`;
           }
+          break;
+        }
+        /**
+         * 改一个**原生下拉**的值（设置页那些 `<select>`）。
+         *
+         * 为什么需要（2026-10-15 实测）：像「大纲位置」这种**工作区级偏好**会被上一轮跑残留、
+         * 也会被排查脚本改掉——用例如果假定"它一定是默认值"，就会在别的机器/别的轮次上假失败。
+         * 与其假定前提，不如**用界面把前提摆好**（顺带也真机验了设置页这一行）。
+         *
+         * 实测（macOS 27）：`<select>` 在 AX 里是 `AXPopUpButton`，**`value` 就是当前值**；
+         * 按下它弹出一个 `AXMenu`，里面是 `AXMenuItem`（文字就是选项文案）。
+         * 步骤参数：`{ popup: {role,description}, option: '与笔记列表共用一栏' }`。
+         */
+        case 'selectOption': {
+          const popupQuery = step.popup || {};
+          // 只看 value 匹配（findElement 里 title/description/value 三选一按子串匹配，
+          // 所以这里刻意**不给** description，免得按 description 命中"名字对但值不同"的那个）
+          const probe = { role: popupQuery.role || 'AXPopUpButton', value: step.option };
+          if (mac.frameOf(appName, probe).ok) {
+            record.status = 'passed';
+            record.detail = `本来就是「${step.option}」，未改动`;
+            record.evidence = `✓ 「${step.label || step.option}」= ${step.option}`;
+            break;
+          }
+          const opened = resolvePoint(appName, popupQuery);
+          if (!opened.ok) {
+            record.status = 'failed';
+            record.detail = `找不到下拉：${opened.error}`;
+            break;
+          }
+          mac.click(appName, opened.point, popupQuery);
+          sleepMs(900);
+          const itemQuery = { role: 'AXMenuItem', title: step.option };
+          const item = resolvePoint(appName, itemQuery);
+          if (!item.ok) {
+            record.status = 'failed';
+            record.detail = `下拉菜单里没有「${step.option}」：${item.error}`;
+            break;
+          }
+          mac.click(appName, item.point, itemQuery);
+          sleepMs(900);
+          // 复核：**改完要看得见**（读 value），不能只看"点了两下都返回成功"
+          const applied = mac.frameOf(appName, probe).ok;
+          record.status = applied ? 'passed' : 'failed';
+          record.detail = applied
+            ? `已选「${step.option}」`
+            : `点完之后下拉的值仍不是「${step.option}」`;
+          record.evidence = applied ? `✓ 「${step.label || step.option}」= ${step.option}` : '';
           break;
         }
         case 'manual':

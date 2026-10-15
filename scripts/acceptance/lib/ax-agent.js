@@ -232,6 +232,25 @@ function run(argv) {
         postMouse($.kCGEventLeftMouseUp, to, 1);
         return out({ ok: true });
       }
+      /**
+       * 悬停：只投递鼠标移动，不按任何键。
+       *
+       * 为什么需要（2026-10-15）：大纲「贴边 mini 态」是**悬停展开**的，
+       * 而悬停不是 AX 动作——只靠 AXPress 覆盖不到它，用例里只能标「待人工」。
+       * 实测鼠标移动事件能让 WebKit 认账（`drag` 的中间事件就是靠这个生效的），
+       * 所以这里补一个"纯移动"原语，把这条也变成机器证据。
+       */
+      case 'hover': {
+        if (!request.point) return out({ ok: false, error: '缺少 point' });
+        postMouse($.kCGEventMouseMoved, request.point);
+        // 再补一次：WebKit 对"从没动过就停在原地"的移动不一定会派发 mouseover（实测）
+        delay(0.15);
+        postMouse($.kCGEventMouseMoved, {
+          x: request.point.x + (request.jitter || 2),
+          y: request.point.y + (request.jitter || 2),
+        });
+        return out({ ok: true });
+      }
       case 'scroll': {
         if (!request.point) return out({ ok: false, error: '缺少 point' });
         const event = $.CGEventCreateScrollWheelEvent(

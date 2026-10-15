@@ -22,6 +22,8 @@
  * - `expectElement` / `expectAbsent`：**界面上真的有 / 真的没有**这个元素（成对用才叫断言）；
  * - `ensure`：**把界面推到目标状态**——目标在就什么都不做，不在就按一次给定控件再查，
  *   按了几次如实写进报告。为什么需要它见下面第 2 条实测教训。
+ * - `hover`：真实鼠标移动（不用 AX）——给"鼠标移上去才展开"的控件用（贴边 mini 态）；
+ * - `selectOption`：改**原生下拉**的值（设置页那些 `<select>`），改完读 `value` 复核。
  *
  * ⚠️ 两条"照记忆写用例"的实测教训（2026-10-15 第二轮真跑）：
  * 1. **role 要对**：带 `aria-pressed` 的按钮在 WebKit 里是 `AXCheckBox`（可读名字在
@@ -121,6 +123,18 @@ const CASES = [
     steps: [
       { op: 'app' },
       { op: 'keyCode', code: 53 },
+      /**
+       * 0. 先把**前提**摆好：`大纲位置` 是**工作区级偏好**，会被上一轮残留（甚至排查脚本）改掉。
+       *    与其假定"它一定是默认值"，不如用设置页把它设回默认——顺带也真机验了设置页这一行。
+       *    （"打开笔记时这一栏默认是列表"这条由浏览器预览的 E2E 从干净状态断言，见 `e2e/app.spec.ts` 步骤 18。）
+       */
+      { op: 'click', frame: { role: 'AXLink', title: '设置' } },
+      {
+        op: 'selectOption',
+        popup: { role: 'AXPopUpButton', description: '大纲位置' },
+        option: '与笔记列表共用一栏',
+        label: '设置 → 编辑器 → 大纲位置',
+      },
       { op: 'keys', combo: 'cmd+p' },
       { op: 'paste', text: '目标笔记' },
       { op: 'keyCode', code: 36 },
@@ -148,12 +162,6 @@ const CASES = [
         press: { role: 'AXButton', description: '返回笔记列表' },
         pressLabel: '返回笔记列表',
         label: '这一栏先显示笔记列表',
-      },
-      // 1. 默认：大纲不占列表栏
-      {
-        op: 'expectAbsent',
-        query: { role: 'AXButton', description: '返回笔记列表' },
-        label: '默认状态：大纲不在列表栏里',
       },
       // 2. 打开大纲：同一栏换成大纲（不是再挤出一列）
       {
@@ -193,6 +201,38 @@ const CASES = [
         label: '大纲已离开列表栏',
       },
       { op: 'shot', name: '04-outline-side.png' },
+      // 3.5 贴边 mini 态与悬停展开：**悬停不是 AX 动作**（以前这条只能标「待人工」），
+      //     改用 `hover`（真实鼠标移动）驱动——实测能让 WebKit 派发 mouseover 并展开悬浮大纲。
+      { op: 'click', frame: { role: 'AXButton', description: '收起大纲' } },
+      {
+        op: 'expectAbsent',
+        query: { role: 'AXButton', description: '收起大纲' },
+        label: '收起后正文右侧没有常驻面板',
+      },
+      {
+        op: 'expectAbsent',
+        query: { role: 'AXButton', description: '钉住大纲' },
+        label: '收起后也没有展开的悬浮大纲',
+      },
+      {
+        op: 'expectElement',
+        query: { role: 'AXStaticText', value: '大纲' },
+        label: '贴边「大纲」条（竖排）',
+      },
+      { op: 'shot', name: '04-outline-mini.png' },
+      { op: 'hover', target: { role: 'AXStaticText', value: '大纲' } },
+      {
+        op: 'expectElement',
+        query: { role: 'AXButton', description: '钉住大纲' },
+        label: '悬停后展开的悬浮大纲（有「钉住大纲」）',
+      },
+      { op: 'shot', name: '04-outline-hover.png' },
+      { op: 'click', frame: { role: 'AXButton', description: '钉住大纲' } },
+      {
+        op: 'expectElement',
+        query: { role: 'AXButton', description: '收起大纲' },
+        label: '钉住后回到常驻态',
+      },
       // 4. 再挪回列表栏（两个方向都有入口，不会"挪走找不回来"）
       {
         op: 'ensure',
@@ -215,7 +255,7 @@ const CASES = [
       { op: 'shot', name: '04-outline-split.png' },
       {
         op: 'manual',
-        note: 'mini 态与悬停展开（悬停无法用 AX 触发）、以及「拖拽跟不跟手」是主观手感，必须人手拖两下',
+        note: '只剩主观手感需要人眼：拖拽分栏跟不跟手、贴边条悬停展开的动效观感，必须人手拖两下 / 移两下',
       },
     ],
   },

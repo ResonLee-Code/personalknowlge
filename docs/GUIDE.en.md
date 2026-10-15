@@ -144,9 +144,9 @@ outline tells you to start with `#`.
 
 Two related switches live in **Settings → Editor**: "**大纲位置**" (share the list column / pin to the right of
 the text) and "**选中笔记后自动显示大纲**" (off by default: when on, selecting any note jumps straight to its
-outline — off by default because flipping the pane on every click interrupts browsing). The placement is
-remembered per workspace; which pane the column happens to show is only temporary and resets to the list when
-you switch notes or reload.
+outline — off by default because flipping the pane on every click interrupts browsing). The **placement** is
+remembered per workspace. Which pane the column happens to show is not persisted: it goes back to the list when
+you restart the app, and otherwise keeps your choice — including while you move from note to note.
 
 ### 4.2 Wiki links and backlinks
 

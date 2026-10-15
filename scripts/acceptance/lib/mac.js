@@ -91,6 +91,11 @@ function drag(from, to) {
   return agent({ op: 'drag', from, to });
 }
 
+/** 悬停（只移动鼠标，不按键）：给"鼠标移上去才展开"的控件用（见 ax-agent 的说明）。 */
+function hover(point, jitter) {
+  return agent({ op: 'hover', point, jitter });
+}
+
 function scroll(point, ticks) {
   return agent({ op: 'scroll', point, ticks });
 }
@@ -131,6 +136,7 @@ module.exports = {
   frameOf,
   click,
   drag,
+  hover,
   scroll,
   keystroke,
   paste,
