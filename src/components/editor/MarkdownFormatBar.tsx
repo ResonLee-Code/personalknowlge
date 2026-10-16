@@ -11,12 +11,20 @@ import {
   List,
   ListOrdered,
   Minus,
+  MoreHorizontal,
   Quote,
   SquareCheckBig,
   Strikethrough,
   Type,
 } from 'lucide-react';
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 /**
@@ -34,12 +42,19 @@ export function MarkdownFormatBar({
   onLinePrefix,
   onHeading,
   onIndent,
+  variant = 'row',
 }: {
   disabled?: boolean;
   onWrap: (before: string, after?: string, placeholder?: string) => void;
   onLinePrefix: (prefix: string) => void;
   onHeading: (level: 0 | 1 | 2 | 3) => void;
   onIndent: (delta: 1 | -1) => void;
+  /**
+   * `row`（默认）：整条铺开，独占一行；
+   * `compact`：并进编辑器工具栏那一行——常用几个直接显示，其余收进「…」菜单
+   * （宽度不够时也不至于把工具栏挤换行，见附图 4 的"更多"）。
+   */
+  variant?: 'row' | 'compact';
 }) {
   const button = (
     label: string,
@@ -64,23 +79,24 @@ export function MarkdownFormatBar({
     </button>
   );
 
-  return (
-    <div
-      data-testid="format-bar"
-      className="flex flex-wrap items-center gap-0.5 border-b border-[var(--border-subtle)] px-3 py-1"
-    >
-      {/* 段落级：标题 / 列表 / 引用（整行生效） */}
+  const headingButtons = (
+    <>
       {button('正文', <Type className="h-3.5 w-3.5" />, () => onHeading(0))}
       {button('标题 1', <Heading1 className="h-3.5 w-3.5" />, () => onHeading(1))}
       {button('标题 2', <Heading2 className="h-3.5 w-3.5" />, () => onHeading(2))}
       {button('标题 3', <Heading3 className="h-3.5 w-3.5" />, () => onHeading(3))}
-      <span className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
+    </>
+  );
+  const listButtons = (
+    <>
       {button('无序列表', <List className="h-3.5 w-3.5" />, () => onLinePrefix('- '))}
       {button('有序列表', <ListOrdered className="h-3.5 w-3.5" />, () => onLinePrefix('1. '))}
       {button('待办', <SquareCheckBig className="h-3.5 w-3.5" />, () => onLinePrefix('- [ ] '))}
       {button('引用', <Quote className="h-3.5 w-3.5" />, () => onLinePrefix('> '))}
-      <span className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
-      {/* 行内：加粗 / 斜体 / 删除线 / 行内代码 / 链接 */}
+    </>
+  );
+  const inlineButtons = (
+    <>
       {button('加粗', <Bold className="h-3.5 w-3.5" />, () => onWrap('**', '**', '加粗文字'))}
       {button('斜体', <Italic className="h-3.5 w-3.5" />, () => onWrap('*', '*', '斜体文字'))}
       {button('删除线', <Strikethrough className="h-3.5 w-3.5" />, () =>
@@ -88,11 +104,70 @@ export function MarkdownFormatBar({
       )}
       {button('行内代码', <Code className="h-3.5 w-3.5" />, () => onWrap('`', '`', '代码'))}
       {button('链接', <Link2 className="h-3.5 w-3.5" />, () => onWrap('[', '](https://)', '链接文字'))}
-      <span className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
-      {/* 块级：分割线 / 缩进 */}
+    </>
+  );
+  const tailButtons = (
+    <>
       {button('分割线', <Minus className="h-3.5 w-3.5" />, () => onLinePrefix('---'))}
       {button('减少缩进', <IndentDecrease className="h-3.5 w-3.5" />, () => onIndent(-1))}
       {button('增加缩进', <IndentIncrease className="h-3.5 w-3.5" />, () => onIndent(1))}
+    </>
+  );
+
+  if (variant === 'compact') {
+    return (
+      <div data-testid="format-bar" className="flex shrink-0 items-center gap-0.5">
+        {inlineButtons}
+        {listButtons}
+        {/* 其余收进「…」：宽度不够时不用把工具栏挤换行（附图 4 的"更多"） */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              data-testid="format-more"
+              disabled={disabled}
+              title="更多格式"
+              aria-label="更多格式"
+              className="flex h-6.5 w-6.5 items-center justify-center rounded text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>段落</DropdownMenuLabel>
+            <div className="flex items-center gap-0.5 px-2 py-1">
+              {headingButtons}
+              {tailButtons}
+            </div>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>行内</DropdownMenuLabel>
+            <div className="flex items-center gap-0.5 px-2 py-1">
+              {button('加粗', <Bold className="h-3.5 w-3.5" />, () => onWrap('**', '**', '加粗文字'))}
+              {button('斜体', <Italic className="h-3.5 w-3.5" />, () => onWrap('*', '*', '斜体文字'))}
+              {button('行内代码', <Code className="h-3.5 w-3.5" />, () => onWrap('`', '`', '代码'))}
+              {button('链接', <Link2 className="h-3.5 w-3.5" />, () => onWrap('[', '](https://)', '链接文字'))}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-testid="format-bar"
+      className="flex flex-wrap items-center gap-0.5 border-b border-[var(--border-subtle)] px-3 py-1"
+    >
+      {/* 段落级：标题 / 列表 / 引用（整行生效） */}
+      {headingButtons}
+      <span className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
+      {listButtons}
+      <span className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
+      {/* 行内：加粗 / 斜体 / 删除线 / 行内代码 / 链接 */}
+      {inlineButtons}
+      <span className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
+      {/* 块级：分割线 / 缩进 */}
+      {tailButtons}
     </div>
   );
 }

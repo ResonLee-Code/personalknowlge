@@ -1,24 +1,16 @@
 import {
   Check,
   Columns2,
-  Download,
   AlertTriangle,
   BookMarked,
   Eye,
   FileText,
-  FolderInput,
   FolderOpen,
   GitBranch,
-  History,
   Link2,
-  MoreHorizontal,
   Pencil,
   Save,
-  Star,
-  StarOff,
-  Trash2,
   Unlink2,
-  Undo2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -40,13 +32,6 @@ import { TagEditor } from '@/components/editor/TagEditor';
 import { ResizeHandle } from '@/components/layout/ResizeHandle';
 import { MoveNoteDialog } from '@/components/notes/MoveNoteDialog';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/badge';
@@ -101,12 +86,6 @@ export function NoteEditorPage() {
   const saveStatus = useNotesStore((state) => state.saveStatus);
   const save = useNotesStore((state) => state.save);
   const markDirty = useNotesStore((state) => state.markDirty);
-  const toggleFavorite = useNotesStore((state) => state.toggleFavorite);
-  const remove = useNotesStore((state) => state.remove);
-  const restore = useNotesStore((state) => state.restore);
-  const purge = useNotesStore((state) => state.purge);
-  const duplicate = useNotesStore((state) => state.duplicate);
-  const refreshScope = useNotesStore((state) => state.refresh);
 
   const settings = useWorkspaceStore((state) => state.settings);
   const theme = useUiStore((state) => state.theme);
@@ -121,12 +100,15 @@ export function NoteEditorPage() {
   const [content, setContent] = useState('');
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState<string[]>([]);
-  const [moveOpen, setMoveOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
-  const [sourceOpen, setSourceOpen] = useState(false);
-  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  /**
+   * 对话框的开关**直接由 store 里的动作请求派生**（2026-10-17）。
+   *
+   * 为什么不本地 useState + effect 里 setState：React 的 lint 规则不许在 effect 里同步
+   * setState（会级联渲染）。请求本身就是"要开哪个对话框"，派生出来最直接，也少一层状态。
+   */
+  const noteActionRequest = useUiStore((state) => state.noteActionRequest);
+  const clearNoteAction = useUiStore((state) => state.clearNoteAction);
+  const closeDialog = useCallback(() => clearNoteAction(), [clearNoteAction]);
   const [relations, setRelations] = useState<RelationView | null>(null);
   const [forceOverwrite, setForceOverwrite] = useState(false);
   /**
@@ -161,6 +143,86 @@ export function NoteEditorPage() {
   const editorViewRef = useRef<ReactCodeMirrorRef | null>(null);
 
   const signature = `${content}\u0000${title}\u0000${tags.join(',')}`;
+
+  /**
+   * 复制相对路径 / 在文件夹中显示（2026-10-17）。
+   *
+   * 从 store **现取**当前笔记，而不是用组件里的 `note`：这两个函数要放在 early return
+   * **之前**才能被下面的 effect 依赖（hooks 不能在条件分支后面调用）。
+   */
+  const showPath = useCallback(async () => {
+    const current = useNotesStore.getState().detail?.note;
+    if (!current) return;
+    try {
+      await navigator.clipboard.writeText(current.filePath);
+      toast.success('已复制相对路径');
+    } catch {
+      toast.error('复制失败');
+    }
+  }, []);
+
+  const reveal = useCallback(async () => {
+    const current = useNotesStore.getState().detail?.note;
+    if (!current) return;
+    if (!isTauriRuntime()) {
+      toast.info('浏览器预览模式不支持打开目录');
+      return;
+    }
+    const root = await useWorkspaceStore.getState().workspace?.rootPath;
+    if (!root) return;
+    await revealItemInDir(`${root}/${current.filePath}`);
+  }, []);
+
+  useEffect(() => {
+    // 打开对话框的请求由上面的派生值处理；这里只管**立即执行**的那些动作
+    if (
+      !noteActionRequest ||
+      ['move', 'rename', 'history', 'source', 'template', 'export'].includes(noteActionRequest)
+    ) {
+      return;
+    }
+    clearNoteAction();
+    const current = useNotesStore.getState().detail?.note;
+    if (!current) return;
+    const notes = useNotesStore.getState();
+    switch (noteActionRequest) {
+      case 'copyPath':
+        void showPath();
+        break;
+      case 'reveal':
+        void reveal();
+        break;
+      case 'duplicate':
+        void notes.duplicate(current.id).then((ok) =>
+          reportAction(ok, '已创建副本', useNotesStore.getState().error, '创建副本失败'),
+        );
+        break;
+      case 'delete':
+        void notes.remove(current.id).then((ok) => {
+          reportAction(ok, '已移入回收站', useNotesStore.getState().error, '移入回收站失败');
+          if (ok) navigate('/notes');
+        });
+        break;
+      case 'restore':
+        void notes.restore(current.id).then((ok) => {
+          reportAction(ok, '已恢复', useNotesStore.getState().error, '恢复失败');
+          if (ok) void useNotesStore.getState().refresh();
+        });
+        break;
+      case 'purge':
+        void notes.purge(current.id).then((ok) => {
+          reportAction(ok, '已永久删除', useNotesStore.getState().error, '永久删除失败');
+          if (ok) navigate('/trash');
+        });
+        break;
+    }
+  }, [
+    noteActionRequest,
+    clearNoteAction,
+    navigate,
+    showPath,
+    reveal,
+  ]);
 
   const bumpLinkRevision = useCallback(() => setLinkRevision((value) => value + 1), []);
 
@@ -242,6 +304,7 @@ export function NoteEditorPage() {
     attachKindRef.current = kind;
     attachInputRef.current?.click();
   }, []);
+
 
   const jumpToHeading = useCallback((offset: number) => {
     const view = editorViewRef.current?.view;
@@ -617,24 +680,6 @@ export function NoteEditorPage() {
   const note = detail.note;
   const readOnly = note.status === 'deleted';
 
-  const showPath = async () => {
-    try {
-      await navigator.clipboard.writeText(note.filePath);
-      toast.success('已复制相对路径');
-    } catch {
-      toast.error('复制失败');
-    }
-  };
-
-  const reveal = async () => {
-    if (!isTauriRuntime()) {
-      toast.info('浏览器预览模式不支持打开目录');
-      return;
-    }
-    const root = await useWorkspaceStore.getState().workspace?.rootPath;
-    if (!root) return;
-    await revealItemInDir(`${root}/${note.filePath}`);
-  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -683,139 +728,27 @@ export function NoteEditorPage() {
         {/* 保存状态只留顶栏那一个（2026-10-16 按用户反馈）：
             这里再显示一次「已同步」，同一件事在屏幕上出现两遍，纯属噪音 */}
 
-        <div className="ml-auto flex items-center gap-1">
-          {/* 大纲开关已经挪到「笔记列表栏」的头部（单一入口，见 OutlineToggleButton）：
-              列表栏一直在，不像这个工具栏只在打开笔记时才出现 */}
-          <Button
-            size="icon"
-            variant="ghost"
-            title={note.favorite ? '取消收藏' : '收藏'}
-            onClick={() => void toggleFavorite(note.id)}
-            data-testid="favorite-toggle"
-            aria-pressed={note.favorite}
-          >
-            {note.favorite ? (
-              // 收藏后**橙色实心**（2026-10-16 按用户反馈）：只描边太弱，一眼看不出状态
-              <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
-            ) : (
-              <StarOff className="h-4 w-4" />
-            )}
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            title="移动分类"
-            onClick={() => setMoveOpen(true)}
-            disabled={readOnly}
-          >
-            <FolderInput className="h-4 w-4" />
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="icon" variant="ghost" title="更多操作">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => setRenameOpen(true)} disabled={readOnly}>
-                重命名 / 重命名文件
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() =>
-                  void duplicate(note.id).then((ok) =>
-                    reportAction(ok, '已创建副本', useNotesStore.getState().error, '创建副本失败'),
-                  )
-                }
-              >
-                创建副本
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setHistoryOpen(true)} data-testid="note-menu-history">
-                <History className="h-3.5 w-3.5" /> 历史版本…
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setSourceOpen(true)}>
-                <BookMarked className="h-3.5 w-3.5" /> 来源与时效
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void showPath()}>复制相对路径</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void reveal()}>在文件夹中显示</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={() => setSaveTemplateOpen(true)}
-                disabled={readOnly}
-              >
-                <FileText className="h-3.5 w-3.5" /> 另存为模板…
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setExportOpen(true)}>
-                <Download className="h-3.5 w-3.5" /> 导出（Markdown / HTML / Word / PDF）
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {note.status === 'deleted' ? (
-                <>
-                  <DropdownMenuItem
-                    onSelect={() =>
-                      void restore(note.id).then((ok) => {
-                        reportAction(ok, '已恢复', useNotesStore.getState().error, '恢复失败');
-                        if (ok) void refreshScope();
-                      })
-                    }
-                  >
-                    <Undo2 className="h-3.5 w-3.5" /> 从回收站恢复
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    destructive
-                    onSelect={() =>
-                      void purge(note.id).then((ok) => {
-                        reportAction(ok, '已永久删除', useNotesStore.getState().error, '永久删除失败');
-                        if (ok) navigate('/trash');
-                      })
-                    }
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> 永久删除
-                  </DropdownMenuItem>
-                </>
-              ) : (
-                <DropdownMenuItem
-                  destructive
-                  onSelect={() =>
-                    void remove(note.id).then((ok) => {
-                      reportAction(ok, '已移入回收站', useNotesStore.getState().error, '移入回收站失败');
-                      if (ok) navigate('/notes');
-                    })
-                  }
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> 移到回收站
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+        {/*
+          文本格式条并进**同一行**、靠右侧（2026-10-17 按用户要求）：
+          以前它独占第二行、把编辑区往下推；现在它贴在工具栏右端，
+          宽度不够时由它自己的「…」菜单兜住（见 MarkdownFormatBar 的 compact 变体）。
+          收藏 / 移动分类 / 更多操作 三个按钮已搬到顶栏（NoteActions）。
+        */}
+        <div className="ml-auto flex min-w-0 items-center gap-1.5">
+          {editorMode !== 'preview' ? (
+            <MarkdownFormatBar
+              variant="compact"
+              disabled={readOnly}
+              onWrap={(before, after, placeholder) =>
+                applyEdit((state) => wrapSelection(state, before, after, placeholder))
+              }
+              onLinePrefix={(prefix) => applyEdit((state) => toggleLinePrefix(state, prefix))}
+              onHeading={(level) => applyEdit((state) => setHeading(state, level))}
+              onIndent={(delta) => applyEdit((state) => changeIndent(state, delta))}
+            />
+          ) : null}
         </div>
       </div>
-      {/* 文本编辑工具条（2026-10-16）：只在有编辑器的模式下出现（纯预览没有光标可操作） */}
-      {/* 插入菜单里「图片…/附件…」用的隐藏文件选择框：选完交给应用的附件流程，再插链接 */}
-      <input
-        ref={attachInputRef}
-        type="file"
-        multiple
-        className="hidden"
-        data-testid="insert-file-input"
-        onChange={(event) => {
-          const files = Array.from(event.target.files ?? []);
-          event.target.value = '';
-          void handleAttachFiles(files, attachKindRef.current).then((snippet) => {
-            if (snippet) applyEdit((state) => insertBlock(state, snippet));
-          });
-        }}
-      />
-      {editorMode !== 'preview' ? (
-        <MarkdownFormatBar
-          disabled={readOnly}
-          onWrap={(before, after, placeholder) =>
-            applyEdit((state) => wrapSelection(state, before, after, placeholder))
-          }
-          onLinePrefix={(prefix) => applyEdit((state) => toggleLinePrefix(state, prefix))}
-          onHeading={(level) => applyEdit((state) => setHeading(state, level))}
-          onIndent={(delta) => applyEdit((state) => changeIndent(state, delta))}
-        />
-      ) : null}
 
       <div className="space-y-2 border-b border-[var(--border-subtle)] px-4 py-3">
         <Input
@@ -863,7 +796,8 @@ export function NoteEditorPage() {
               // 无障碍名给个短的：这个按钮的内容是一串元信息（Inbox · 路径 · 更新时间…），
               // 读屏会把整串念出来；顺带也让自动化能按名字点到它（真机验收里要改有效期）
               aria-label="来源与时效"
-              onClick={() => setSourceOpen(true)}
+              // 元信息栏这个入口也走 store 请求（与顶栏「更多操作」同一套开关）
+              onClick={() => useUiStore.getState().requestNoteAction('source')}
             >
               <BookMarked className="h-3 w-3" />
               {sourceTypeLabel(note.sourceType) || '来源'}
@@ -1054,54 +988,50 @@ export function NoteEditorPage() {
       <BacklinkPanel noteId={note.id} refreshKey={linkRevision} />
 
       <ConflictDialog onKeepLocal={() => setForceOverwrite(true)} />
-      {moveOpen ? (
+      {noteActionRequest === 'move' ? (
         <MoveNoteDialog
           noteId={note.id}
           currentCategoryId={note.categoryId}
-          onClose={() => setMoveOpen(false)}
+          onClose={closeDialog}
         />
       ) : null}
-      {renameOpen ? (
+      {noteActionRequest === 'rename' ? (
         <RenameFileDialog
           noteId={note.id}
           initialTitle={note.title}
           onClose={() => {
-            setRenameOpen(false);
+            closeDialog();
             bumpLinkRevision();
           }}
         />
       ) : null}
-      {sourceOpen ? (
+      {noteActionRequest === 'source' ? (
         <SourceDialog
           note={note}
-          onClose={() => setSourceOpen(false)}
+          onClose={closeDialog}
           onSaved={() => {
-            setSourceOpen(false);
+            closeDialog();
             void useNotesStore.getState().openDetail(note.id);
           }}
         />
       ) : null}
-      {historyOpen ? (
+      {noteActionRequest === 'history' ? (
         <HistoryDialog
           noteId={note.id}
           currentContent={content}
-          onClose={() => setHistoryOpen(false)}
-          onRestored={() => setHistoryOpen(false)}
+          onClose={closeDialog}
+          onRestored={closeDialog}
         />
       ) : null}
-      {saveTemplateOpen ? (
+      {noteActionRequest === 'template' ? (
         <SaveTemplateDialog
           defaultName={note.title}
           content={content.replace(/^---[\s\S]*?---\n/, '')}
-          onClose={() => setSaveTemplateOpen(false)}
+          onClose={closeDialog}
         />
       ) : null}
-      {exportOpen ? (
-        <ExportNoteDialog
-          noteId={note.id}
-          title={note.title}
-          onClose={() => setExportOpen(false)}
-        />
+      {noteActionRequest === 'export' ? (
+        <ExportNoteDialog noteId={note.id} title={note.title} onClose={closeDialog} />
       ) : null}
     </div>
   );

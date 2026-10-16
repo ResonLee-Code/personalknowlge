@@ -8,6 +8,27 @@ export type OutlinePlacement = 'list' | 'side';
 export type ListPaneMode = 'list' | 'outline';
 /** 大纲钉在正文右侧时的形态：隐藏 / 常驻 / 贴边 mini（贴在右边，鼠标移上去展开） */
 export type SideOutlineMode = 'hidden' | 'pinned' | 'mini';
+/**
+ * 笔记级的动作请求（2026-10-17）。
+ *
+ * 为什么走 store 转一手：这三个入口（收藏 / 移动分类 / 更多操作）按用户要求挪到了**顶栏**，
+ * 而它们要打开的那些对话框（移动分类、重命名、历史版本、来源与时效、导出…）都挂在编辑器里
+ * （那里才知道 note 与各对话框的状态）。顶栏只负责"请求"，编辑器负责"接住并打开"。
+ */
+export type NoteActionKind =
+  | 'move'
+  | 'rename'
+  | 'duplicate'
+  | 'history'
+  | 'source'
+  | 'copyPath'
+  | 'reveal'
+  | 'template'
+  | 'export'
+  | 'delete'
+  /** 回收站里的笔记：这两个替代「移到回收站」 */
+  | 'restore'
+  | 'purge';
 
 /** 与工作区设置对应的界面偏好（用于从磁盘恢复上次的布局）。 */
 export interface UiPreferences {
@@ -65,6 +86,10 @@ interface UiState {
   setListPaneMode: (mode: ListPaneMode) => void;
   setAutoOutlineOnSelect: (value: boolean) => void;
   setOutlineMode: (mode: SideOutlineMode) => void;
+  /** 顶栏发出的笔记动作请求；编辑器消费后清空（见 NoteActionKind 的说明） */
+  noteActionRequest: NoteActionKind | null;
+  requestNoteAction: (kind: NoteActionKind) => void;
+  clearNoteAction: () => void;
   setEditorSplitRatio: (ratio: number) => void;
   toggleSidebar: () => void;
   toggleCategoriesCollapsed: () => void;
@@ -123,6 +148,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   setListPaneMode: (listPaneMode) => set({ listPaneMode }),
   setAutoOutlineOnSelect: (autoOutlineOnSelect) => set({ autoOutlineOnSelect }),
   setOutlineMode: (outlineMode) => set({ outlineMode }),
+  noteActionRequest: null,
+  requestNoteAction: (noteActionRequest) => set({ noteActionRequest }),
+  clearNoteAction: () => set({ noteActionRequest: null }),
   setEditorSplitRatio: (editorSplitRatio) => {
     // 保留三位小数，既够精细也避免浮点噪声
     const clamped = Math.min(0.7, Math.max(0.3, editorSplitRatio));

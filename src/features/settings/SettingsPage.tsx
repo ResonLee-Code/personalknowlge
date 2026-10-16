@@ -218,8 +218,9 @@ export function SettingsPage() {
           ))}
         </nav>
 
-        <div className="min-w-0 flex-1 overflow-auto px-6 py-5">
-          <div className="mx-auto w-full max-w-3xl">
+        <div data-testid="settings-content" className="min-w-0 flex-1 overflow-auto px-6 py-5">
+          {/* 右侧内容**铺满**（2026-10-17）：以前限宽 max-w-3xl，宽窗口下右边空一大片 */}
+          <div className="w-full">
 
         {/* 瀑布流（2026-10-16 重排）：卡片按高度紧挨着落进各列——
             以前是"两列网格 + items-start"，右边那列列高很多，左边底部就空出一大片，

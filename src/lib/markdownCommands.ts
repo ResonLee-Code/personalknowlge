@@ -134,6 +134,30 @@ export function changeIndent(state: EditState, delta: 1 | -1): EditResult {
  */
 export function insertBlock(state: EditState, block: string): EditResult {
   const { value, from, to } = state;
+  /**
+   * 光标落在 ``` 围栏**里面**时，插到围栏块之后（2026-10-16 实测）：
+   * 直接在光标处插会把围栏劈开——两段代码块粘成一块，mermaid 之类会直接报语法错。
+   * 判据：光标所在行上方有**奇数**个围栏行，说明还在一段没闭合的围栏里。
+   */
+  const fence = /^\s*(```|~~~)/;
+  const lines = value.split('\n');
+  const caretLine = value.slice(0, from).split('\n').length - 1;
+  const fencesAbove = lines.slice(0, caretLine).filter((line) => fence.test(line)).length;
+  if (fencesAbove % 2 === 1) {
+    for (let index = caretLine; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (line !== undefined && fence.test(line)) {
+        const at = lines.slice(0, index + 1).join('\n').length;
+        // 只补一个前导换行：围栏之后本来就有换行，再补尾随的会多出空行
+        const text = `\n${block}`;
+        return {
+          changes: [{ from: at, to: at, insert: text }],
+          selectionFrom: at + text.length,
+          selectionTo: at + text.length,
+        };
+      }
+    }
+  }
   const lineStart = value.lastIndexOf('\n', Math.max(0, from - 1)) + 1;
   const lineEndRaw = value.indexOf('\n', to);
   const lineEnd = lineEndRaw === -1 ? value.length : lineEndRaw;

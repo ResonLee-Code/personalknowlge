@@ -115,7 +115,8 @@ function findElement(process, query) {
  * `entireContents()` 每次约 1 秒，所以重试次数压到 3 次（最坏约 3 秒）。
  */
 function findElementWithRetry(process, query, attempts) {
-  const tries = attempts || 5;
+  // 5 → 3（2026-10-17）：单次 entireContents() 在大库上要十几秒，重试 5 次就是一分多钟
+  const tries = attempts || 3;
   for (let index = 0; index < tries; index += 1) {
     const element = findElement(process, query);
     if (element) return element;

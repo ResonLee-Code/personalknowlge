@@ -63,4 +63,13 @@ describe('markdownCommands（工具栏的编辑命令）', () => {
     const result = run(state, (s) => insertBlock(s, '| a | b |'));
     expect(result.value).toBe('正文\n| a | b |\n\n后面');
   });
+
+  it('插入块级内容：光标在 ``` 围栏里时插到围栏之后（不会把围栏劈开）', () => {
+    const value = '前文\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\n后文';
+    // 光标停在 flowchat 那一行里面
+    const caret = value.indexOf('A --> B');
+    const result = run({ value, from: caret, to: caret }, (s) => insertBlock(s, '| a |'));
+    // 插在围栏之后、紧挨着下一行开始（围栏本身闭合，新块自己起一行，不多留空行）
+    expect(result.value).toBe('前文\n\n```mermaid\nflowchart LR\n  A --> B\n```\n| a |\n\n后文');
+  });
 });

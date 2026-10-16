@@ -15,7 +15,13 @@ function agent(request) {
   try {
     raw = execFileSync('osascript', ['-l', 'JavaScript', AGENT, JSON.stringify(request)], {
       encoding: 'utf8',
-      timeout: 30_000,
+      /**
+       * 30 秒 → 90 秒（2026-10-17 实测）：验收库里笔记攒到 50+ 篇之后，
+       * WebKit 的整棵树 `entireContents()` 一次要 17 秒（空库只要 1~6 秒），
+       * 30 秒的超时会把"环境变慢"报成"功能失败"。这里给足余量，
+       * 真正的卡死仍会因为超时而暴露。
+       */
+      timeout: 90_000,
     });
   } catch (error) {
     return { ok: false, error: `调 osascript 失败：${error.message}` };

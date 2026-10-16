@@ -207,10 +207,13 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(nav.getByTestId('settings-nav-editor')).toHaveAttribute('aria-current', 'true');
   // 右侧内容在导航右边（两者不重叠），且宽度占得住
   const navBox = await nav.boundingBox();
-  const contentBox = await page.locator('main div.mx-auto').first().boundingBox();
+  // 右侧内容现在**铺满**（2026-10-17）：用 nav 的兄弟容器量，别再找 mx-auto
+  const contentBox = await page.getByTestId('settings-content').boundingBox();
   if (!navBox || !contentBox) throw new Error('未找到导航或内容容器');
   expect(contentBox.x).toBeGreaterThan(navBox.x + navBox.width - 1);
-  expect(contentBox.width).toBeGreaterThan(600);
+  // 右侧铺满（2026-10-17）：内容区宽度应占主区域减去导航后的绝大部分
+  const mainBox = await page.locator('main').boundingBox();
+  expect(contentBox.width).toBeGreaterThan((mainBox?.width ?? 0) - navBox.width - 40);
   // 分节切换：点「备份与导出」→ 出现备份相关行，编辑器行消失
   await nav.getByTestId('settings-nav-backup').click();
   await expect(page.getByText('创建备份')).toBeVisible();
@@ -834,6 +837,23 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
 
   // 36. 编辑器工具栏（2026-10-16）：插入菜单、文本格式条、收藏橙色、保存状态只留顶栏一处
   await expect(page.getByText('已同步')).toHaveCount(1); // 顶栏那一处；编辑器工具栏不再重复
+  // 顶栏（2026-10-17）：收藏 / 移动分类 / 更多操作 都在**顶栏**，且与「已同步」同一行
+  const topbar = page.locator('header');
+  await expect(topbar.getByTestId('favorite-toggle')).toBeVisible();
+  await expect(topbar.getByRole('button', { name: '移动分类' })).toBeVisible();
+  await expect(topbar.getByRole('button', { name: '更多操作' })).toBeVisible();
+  const synced = await topbar.getByText('已同步').boundingBox();
+  const searchBox = await topbar.getByRole('button', { name: /搜索笔记内容/ }).boundingBox();
+  if (!synced || !searchBox) throw new Error('未找到顶栏的搜索框或已同步');
+  expect(Math.abs(synced.y - searchBox.y)).toBeLessThan(12);   // 同一行
+  expect(synced.x).toBeGreaterThan(searchBox.x + searchBox.width - 4); // 已同步在搜索栏右侧
+  // 文本格式条并进同一行（第二行不再存在）
+  await expect(page.getByTestId('format-bar')).toHaveCount(1);
+  const toolbarRow = await page.getByTestId('insert-menu').boundingBox();
+  const formatBox = await page.getByTestId('format-bar').boundingBox();
+  if (!toolbarRow || !formatBox) throw new Error('未找到工具栏或格式条');
+  expect(Math.abs(toolbarRow.y - formatBox.y)).toBeLessThan(20); // 同一行
+  await expect(page.getByTestId('format-more')).toBeVisible();
   const editorToolbar = page.locator('main');
   await expect(page.getByTestId('insert-menu')).toBeVisible();
   await expect(page.getByTestId('format-bar')).toBeVisible();
@@ -896,6 +916,19 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.locator('[data-testid="mermaid-error"]')).toHaveCount(0);
   await page.screenshot({ path: path.join(SHOTS, '50-mermaid.png') });
   await page.getByRole('button', { name: '分屏' }).click();
+
+  // 38.「插入菜单 → 流程图」串起来：菜单里的模板插进去就能出图（需求 6 ↔ 需求 2）
+  // 新起一篇：这篇笔记里已经有别的块（表格 / 代码块 / 标题），在里面插容易把 fence 边界搞乱
+  await page.getByRole('button', { name: '新建笔记' }).first().click();
+  await page.getByLabel('标题', { exact: true }).fill('插入菜单出图');
+  await page.getByRole('button', { name: '创建笔记' }).click();
+  await page.locator('.cm-content').click();
+  await page.getByTestId('insert-menu').click();
+  await page.getByRole('menuitem', { name: '流程图' }).click();
+  await expect(page.locator('.cm-content')).toContainText('flowchart LR');
+  await expect(
+    page.locator('[data-testid="mermaid-diagram"]').last().locator('svg'),
+  ).toBeVisible();
   void editorToolbar;
 
   // 选中笔记后开关可用：点它 = 这一栏换成大纲（不多占一列）

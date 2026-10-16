@@ -40,6 +40,27 @@ const APP_NAME = 'Personal Knowledge OS';
 /** 验收用的固定标题：每次跑都会新建一篇，便于断言。 */
 const NOTE_TITLE = 'ACCEPT-NOTE-A';
 
+/**
+ * 把「大纲位置」摆回默认（与笔记列表共用一栏）。
+ *
+ * 为什么几条用例都要先跑它：`大纲位置` 是**工作区级偏好**，会被上一轮残留改掉；
+ * 位置在「正文右侧」时，列表栏头部那个开关切的是**右侧那一列的显隐**、不是栏位切换——
+ * 于是用例里"点开关 → 这一栏换成大纲"的断言会全错（2026-10-17 实测：一次失败把位置留在
+ * side，后面两条用例跟着假失败）。用设置页改，改完 selectOption 会隔 2.5 秒复核一次。
+ */
+const ENSURE_OUTLINE_PLACEMENT_LIST = [
+  { op: 'click', frame: { role: 'AXButton', description: '设置' } },
+  { op: 'pause', ms: 900 },
+  { op: 'click', frame: { role: 'AXButton', title: '编辑器' } },
+  {
+    op: 'selectOption',
+    popup: { role: 'AXPopUpButton', description: '大纲位置' },
+    option: '与笔记列表共用一栏',
+    options: ['与笔记列表共用一栏', '钉在正文右侧'],
+    label: '设置 → 编辑器 → 大纲位置',
+  },
+];
+
 const CASES = [
   {
     id: 1,
@@ -132,17 +153,7 @@ const CASES = [
        *    与其假定"它一定是默认值"，不如用设置页把它设回默认——顺带也真机验了设置页这一行。
        *    （"打开笔记时这一栏默认是列表"这条由浏览器预览的 E2E 从干净状态断言，见 `e2e/app.spec.ts` 步骤 18。）
        */
-      { op: 'click', frame: { role: 'AXButton', description: '设置' } },
-      // 设置页分节显示：「大纲位置」在「编辑器」这一节里
-      { op: 'pause', ms: 900 },
-      { op: 'click', frame: { role: 'AXButton', title: '编辑器' } },
-      {
-        op: 'selectOption',
-        popup: { role: 'AXPopUpButton', description: '大纲位置' },
-        option: '与笔记列表共用一栏',
-        options: ['与笔记列表共用一栏', '钉在正文右侧'],
-        label: '设置 → 编辑器 → 大纲位置',
-      },
+      ...ENSURE_OUTLINE_PLACEMENT_LIST,
       { op: 'keys', combo: 'cmd+p' },
       { op: 'paste', text: '目标笔记' },
       { op: 'keyCode', code: 36 },
@@ -208,9 +219,18 @@ const CASES = [
       // 3. 挪到正文右侧：列表栏还给列表，大纲变成正文右边独立一列
       {
         op: 'ensure',
+        until: { role: 'AXButton', description: '返回笔记列表' },
+        press: { role: 'AXCheckBox', description: '大纲' },
+        pressLabel: '工具栏大纲开关',
+        label: '挪到右侧前：这一栏确实显示着大纲',
+      },
+      // 普通点击挪位置（点不到就如实失败）：按钮在**列表栏里的大纲**栏头
+      { op: 'click', frame: { role: 'AXButton', description: '钉在正文右侧' } },
+      {
+        op: 'ensure',
         until: { role: 'AXButton', description: '收起大纲' },
-        press: { role: 'AXButton', description: '钉在正文右侧' },
-        pressLabel: '钉在正文右侧',
+        press: { role: 'AXCheckBox', description: '大纲' },
+        pressLabel: '工具栏大纲开关',
         label: '正文右侧的大纲（面板里有「收起大纲」）',
       },
       {
@@ -224,9 +244,11 @@ const CASES = [
       {
         op: 'ensure',
         until: { role: 'AXButton', description: '收起大纲' },
-        press: { role: 'AXButton', description: '钉在正文右侧' },
-        pressLabel: '钉在正文右侧',
-        label: '动作前再确认一次：大纲常驻在正文右侧',
+        // 用**列表栏头部那个开关**（不是「钉在正文右侧」）：面板若被藏起来（位置在右侧 +
+        // outlineMode=hidden），只有它能重新显示这一列；位置在列表栏时它什么都不用做
+        press: { role: 'AXCheckBox', description: '大纲' },
+        pressLabel: '工具栏大纲开关',
+        label: '动作前再确认一次：正文右侧有常驻大纲',
       },
       { op: 'click', frame: { role: 'AXButton', description: '收起大纲' } },
       {
@@ -259,6 +281,13 @@ const CASES = [
         label: '钉住后回到常驻态',
       },
       // 4. 再挪回列表栏（两个方向都有入口，不会"挪走找不回来"）
+      {
+        op: 'ensure',
+        until: { role: 'AXButton', description: '收起大纲' },
+        press: { role: 'AXCheckBox', description: '大纲' },
+        pressLabel: '工具栏大纲开关',
+        label: '挪回列表栏前：正文右侧有常驻大纲',
+      },
       {
         op: 'ensure',
         until: { role: 'AXButton', description: '返回笔记列表' },
@@ -405,6 +434,10 @@ const CASES = [
     steps: [
       { op: 'app' },
       { op: 'keyCode', code: 53 },
+      // 前提：「大纲位置」摆回默认——这条用例里"点开关切栏位"的前提靠它
+      ...ENSURE_OUTLINE_PLACEMENT_LIST,
+      { op: 'click', frame: { role: 'AXLink', title: '全部笔记' } },
+      { op: 'pause', ms: 1000 },
       // 顶栏那个重复的「切换侧边栏」已删除
       {
         op: 'expectAbsent',
@@ -554,6 +587,8 @@ const CASES = [
     steps: [
       { op: 'app' },
       { op: 'keyCode', code: 53 },
+      // 前提：大纲位置摆回默认（后面要靠"点开关 → 这一栏换成大纲"）
+      ...ENSURE_OUTLINE_PLACEMENT_LIST,
       { op: 'click', frame: { role: 'AXLink', title: '全部笔记' } },
       { op: 'pause', ms: 1000 },
       { op: 'click', frame: { role: 'AXButton', title: '新建笔记' } },
