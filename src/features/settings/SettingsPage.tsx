@@ -222,10 +222,12 @@ export function SettingsPage() {
           {/* 右侧内容**铺满**（2026-10-17）：以前限宽 max-w-3xl，宽窗口下右边空一大片 */}
           <div className="w-full">
 
-        {/* 瀑布流（2026-10-16 重排）：卡片按高度紧挨着落进各列——
-            以前是"两列网格 + items-start"，右边那列列高很多，左边底部就空出一大片，
-            整体看着松。列数随窗口宽窄自适应（窄屏 1 列、常规 2 列、很宽 3 列）。 */}
-        <div className="columns-1 gap-4 xl:columns-2 2xl:columns-3">
+        {/*
+          单列铺满（2026-10-17 修）：改成"一次只显示一节"之后，多列瀑布流已经没意义——
+          窗口跨过 xl/2xl 时它会分列，而当前这一节往往只有一张卡片，于是卡片被塞进半列、
+          右边空一片（现象就是**窗口越宽、设置内容反而越窄**）。现在一列到底、卡片占满右栏。
+        */}
+        <div className="space-y-5">
         {section === 'editor' || query ? (
         <Section title="编辑器" icon={Database}
           searchText="自动保存 延迟 默认视图 字号 界面主题 新建笔记位置 大纲位置 大纲 选中笔记后自动显示大纲"
@@ -539,7 +541,8 @@ function Section({
   // 搜索时：整节都不匹配就把这一节藏掉（否则会留下一个空卡片，看着像坏了）
   if (query && searchText && !matches(query, searchText)) return null;
   return (
-    <section data-testid={testId} className="mb-6 break-inside-avoid">
+    // 单列铺满：卡片就是整行宽（`break-inside-avoid` 那套只给多列瀑布流用，已经不需要了）
+    <section data-testid={testId} className="min-w-0">
       {/* 分节标题在卡片**外面**（2026-10-16 按 Codex 设置页的样式）：标题属于页面结构，
           卡片只装行；这样一眼能看出"哪几行是一组" */}
       <header className="mb-2 flex items-center gap-1.5">

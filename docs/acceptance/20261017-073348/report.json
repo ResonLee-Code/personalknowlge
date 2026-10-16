@@ -1,5 +1,5 @@
 {
-  "startedAt": "2026-10-16T17:00:23.986Z",
+  "startedAt": "2026-10-16T23:41:28.319Z",
   "mode": "real（真机执行）",
   "appName": "Personal Knowledge OS",
   "workspace": "/private/tmp/pkos-acceptance",
@@ -40,7 +40,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -95,7 +95,7 @@
           "op": "check",
           "status": "passed",
           "detail": "文件断言通过",
-          "evidence": "✓ 00_Inbox/20261017-005308-ACCEPT-NOTE-A.md（刚生成）"
+          "evidence": "✓ 00_Inbox/20261017-073356-ACCEPT-NOTE-A.md（刚生成）"
         },
         {
           "op": "manual",
@@ -114,7 +114,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -158,7 +158,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -188,14 +188,14 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(903,236) · AXPress",
+          "detail": "click(1374,236) · AXPress",
           "evidence": ""
         },
         {
           "op": "check",
           "status": "passed",
           "detail": "文件断言通过",
-          "evidence": "✓ .knowledge/backups/KnowledgeBackup_20261017-005329.zip（刚生成）"
+          "evidence": "✓ .knowledge/backups/KnowledgeBackup_20261017-073418.zip（刚生成）"
         },
         {
           "op": "click",
@@ -250,7 +250,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -358,7 +358,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(593,131) · AXPress",
+          "detail": "click(572,131) · AXPress",
           "evidence": ""
         },
         {
@@ -472,7 +472,7 @@
         {
           "op": "drag",
           "status": "passed",
-          "detail": "drag(619,489) → (679,489)",
+          "detail": "drag(598,489) → (658,489)",
           "evidence": ""
         },
         {
@@ -498,7 +498,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -560,7 +560,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -627,7 +627,7 @@
           "op": "check",
           "status": "passed",
           "detail": "文件断言通过",
-          "evidence": "✓ 00_Inbox/20261017-005644-Example-Domain.md（刚生成）"
+          "evidence": "✓ 00_Inbox/20261017-073743-Example-Domain.md（刚生成）"
         },
         {
           "op": "manual",
@@ -646,7 +646,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -708,7 +708,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -740,7 +740,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -802,7 +802,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -1024,7 +1024,7 @@
         {
           "op": "drag",
           "status": "passed",
-          "detail": "drag(679,489) → (599,489)",
+          "detail": "drag(658,489) → (578,489)",
           "evidence": ""
         },
         {
@@ -1042,7 +1042,7 @@
         {
           "op": "expectInside",
           "status": "passed",
-          "detail": "内框 x=253..587，外框 x=257..583（在范围内）",
+          "detail": "内框 x=253..566，外框 x=257..562（在范围内）",
           "evidence": "✓ 长标题条目行仍在列表栏内（没有溢出）"
         },
         {
@@ -1054,7 +1054,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(569,138) · AXPress",
+          "detail": "click(548,138) · AXPress",
           "evidence": ""
         },
         {
@@ -1110,7 +1110,7 @@
         {
           "op": "app",
           "status": "passed",
-          "detail": "app=Personal Knowledge OS pid=25772",
+          "detail": "app=Personal Knowledge OS pid=35256",
           "evidence": ""
         },
         {
@@ -1212,7 +1212,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(802,138) · AXPress",
+          "detail": "click(781,138) · AXPress",
           "evidence": ""
         },
         {
@@ -1236,7 +1236,7 @@
         {
           "op": "click",
           "status": "passed",
-          "detail": "click(742,138) · AXPress",
+          "detail": "click(721,138) · AXPress",
           "evidence": ""
         },
         {

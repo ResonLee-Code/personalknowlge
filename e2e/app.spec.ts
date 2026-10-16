@@ -853,7 +853,18 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   const formatBox = await page.getByTestId('format-bar').boundingBox();
   if (!toolbarRow || !formatBox) throw new Error('未找到工具栏或格式条');
   expect(Math.abs(toolbarRow.y - formatBox.y)).toBeLessThan(20); // 同一行
+  // 格式条**靠右**、能铺开就铺开（2026-10-17）：右边缘贴着编辑区右边
+  const viewport = page.viewportSize()!;
+  expect(viewport.width - (formatBox.x + formatBox.width)).toBeLessThan(24);
+  // 窗口变窄 → 能放的按钮变少（由实测宽度决定），放不下的进「…」
+  const wideButtons = await page.getByTestId('format-bar').locator('button').count();
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.waitForTimeout(500);
+  const narrowButtons = await page.getByTestId('format-bar').locator('button').count();
+  expect(narrowButtons).toBeLessThan(wideButtons);
   await expect(page.getByTestId('format-more')).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(500);
   const editorToolbar = page.locator('main');
   await expect(page.getByTestId('insert-menu')).toBeVisible();
   await expect(page.getByTestId('format-bar')).toBeVisible();

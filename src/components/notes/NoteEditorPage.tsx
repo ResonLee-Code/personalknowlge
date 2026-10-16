@@ -734,10 +734,11 @@ export function NoteEditorPage() {
           宽度不够时由它自己的「…」菜单兜住（见 MarkdownFormatBar 的 compact 变体）。
           收藏 / 移动分类 / 更多操作 三个按钮已搬到顶栏（NoteActions）。
         */}
-        <div className="ml-auto flex min-w-0 items-center gap-1.5">
+        {/* 保存与格式条之间**硬间隔**：留出两个「保存」按钮的宽度，格式条不会越过它 */}
+        <div className="min-w-[132px] shrink-0" aria-hidden />
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
           {editorMode !== 'preview' ? (
             <MarkdownFormatBar
-              variant="compact"
               disabled={readOnly}
               onWrap={(before, after, placeholder) =>
                 applyEdit((state) => wrapSelection(state, before, after, placeholder))
