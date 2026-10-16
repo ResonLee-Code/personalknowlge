@@ -113,16 +113,19 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="h-full w-full overflow-auto p-6">
-      <div className="mx-auto w-full max-w-6xl space-y-5">
-        <header>
+    <div className="h-full w-full overflow-auto px-6 py-5">
+      <div className="mx-auto w-full max-w-6xl">
+        <header className="mb-4">
           <h1 className="text-lg font-semibold text-[var(--ink)]">设置</h1>
-          <p className="mt-1 text-xs text-[var(--ink-subtle)]">
+          <p className="mt-0.5 text-xs text-[var(--ink-subtle)]">
             设置保存在工作区数据库的 <code>settings</code> 表中，切换工作区互不影响。
           </p>
         </header>
 
-        <div className="grid items-start gap-5 xl:grid-cols-2">
+        {/* 瀑布流（2026-10-16 重排）：卡片按高度紧挨着落进各列——
+            以前是"两列网格 + items-start"，右边那列列高很多，左边底部就空出一大片，
+            整体看着松。列数随窗口宽窄自适应（窄屏 1 列、常规 2 列、很宽 3 列）。 */}
+        <div className="columns-1 gap-4 xl:columns-2 2xl:columns-3">
         <Section title="编辑器" icon={Database}>
           <Row label="自动保存" hint="停止输入后自动写入文件（默认 1000ms）">
             <Switch
@@ -410,11 +413,12 @@ function Section({
   return (
     <section
       data-testid={testId}
-      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)]"
+      // break-inside-avoid：瀑布流里别把一张卡片劈到两列；mb-4 是列内卡片之间的间距
+      className="mb-4 break-inside-avoid rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)]"
     >
-      <header className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
-        <Icon className="h-4 w-4 text-[var(--brand)]" />
-        <h2 className="text-sm font-semibold text-[var(--ink)]">{title}</h2>
+      <header className="flex items-center gap-1.5 border-b border-[var(--border-subtle)] px-3 py-1.5">
+        <Icon className="h-3.5 w-3.5 text-[var(--brand)]" />
+        <h2 className="text-[13px] font-semibold text-[var(--ink)]">{title}</h2>
       </header>
       <div className="divide-y divide-[var(--border-subtle)]">{children}</div>
     </section>
@@ -431,11 +435,13 @@ function Row({
   children: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-3 py-2.5">
+    // 行高收紧：标签与说明都压到 leading-tight，内边距 py-2（原来 2.5 + 两条单倍行距 ≈ 62px，
+    // 现在 ≈ 44px）；说明仍然完整保留，只是不再撑出额外空白。
+    <div className="flex items-center justify-between gap-3 px-3 py-2">
       <div className="min-w-0">
-        <p className="text-sm text-[var(--ink)]">{label}</p>
+        <p className="text-[13px] leading-tight text-[var(--ink)]">{label}</p>
         {hint ? (
-          <p className="mt-0.5 truncate text-[11px] text-[var(--ink-subtle)]">{hint}</p>
+          <p className="mt-0.5 truncate text-[11px] leading-tight text-[var(--ink-subtle)]">{hint}</p>
         ) : null}
       </div>
       <div className="shrink-0">{children}</div>

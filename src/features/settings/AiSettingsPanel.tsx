@@ -214,7 +214,7 @@ export function AiSettingsPanel() {
 
   if (!policy && loadError) {
     return (
-      <div className="space-y-2 px-3 py-3 text-xs">
+      <div className="space-y-1.5 px-3 py-2 text-xs">
         <p className="text-rose-600 dark:text-rose-300">读取 AI 策略失败：{loadError}</p>
         <Button size="sm" variant="secondary" onClick={() => void load()}>
           重试
@@ -225,7 +225,7 @@ export function AiSettingsPanel() {
 
   if (!policy) {
     return (
-      <div className="flex items-center gap-2 px-3 py-3 text-xs text-[var(--ink-subtle)]">
+      <div className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--ink-subtle)]">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         正在读取 AI 策略…
       </div>
@@ -256,7 +256,7 @@ export function AiSettingsPanel() {
         </Button>
       </Row>
       {diagnosis ? (
-        <div className="space-y-1 px-3 pb-2.5 text-xs" data-testid="ai-diagnosis">
+        <div className="space-y-1 px-3 pb-2 text-xs" data-testid="ai-diagnosis">
           <p className="text-[var(--ink)]">
             当前档位：
             <span data-testid="ai-diagnosis-tier" className="font-medium">
@@ -306,7 +306,7 @@ export function AiSettingsPanel() {
         />
       </Row>
 
-      <div className="space-y-2 px-3 py-2.5">
+      <div className="space-y-1.5 px-3 py-2">
         <div className="space-y-1">
           <Label htmlFor="ai-search-endpoint">检索源地址（联网检索用，必须含 {'{query}'}）</Label>
           <Input
@@ -355,7 +355,7 @@ export function AiSettingsPanel() {
       </div>
 
       {/* 向量检索（D3/N7）：可选增强，永远只是"多一路召回" —— 不可用也不影响检索 */}
-      <div className="space-y-2 px-3 py-2.5">
+      <div className="space-y-1.5 px-3 py-2">
         <div className="flex items-center justify-between">
           <Label>向量检索（可选增强，默认关闭）</Label>
           <Switch
@@ -422,7 +422,7 @@ export function AiSettingsPanel() {
         </p>
       </div>
 
-      <div className="space-y-2 px-3 py-2.5">
+      <div className="space-y-1.5 px-3 py-2">
         <Label>本地模型（Ollama HTTP，可选；默认关闭）</Label>
         <div className="space-y-1">
           <Input
@@ -499,7 +499,7 @@ export function AiSettingsPanel() {
       </div>
 
       {/* 在线模型：给「跑不动本地模型」的机器留的一档（本地软件、跨平台部署是常态） */}
-      <div className="space-y-2 px-3 py-2.5">
+      <div className="space-y-1.5 px-3 py-2">
         <div className="flex items-center justify-between">
           <Label>在线模型（OpenAI 兼容端点，可选；默认关闭）</Label>
           <span
@@ -626,7 +626,7 @@ export function AiSettingsPanel() {
       </div>
 
       {/* 决策模型（D4）：规则档（默认，离线）/ System One（Jev 或 Perplexity Decisions，同协议） */}
-      <div className="space-y-2 px-3 py-2.5">
+      <div className="space-y-1.5 px-3 py-2">
         <Label>决策模型（打分 / 判断用哪一档）</Label>
         <select
           aria-label="决策模型档位"
@@ -817,7 +817,7 @@ export function AiSettingsPanel() {
       </div>
 
       {/* 出站代理（D4-④）：默认跟随系统代理；"只有浏览器能上外网"时在这里兜底 */}
-      <div className="space-y-2 px-3 py-2.5">
+      <div className="space-y-1.5 px-3 py-2">
         <Label>出站代理（留空 = 跟随系统代理）</Label>
         <Input
           aria-label="出站代理"
@@ -837,7 +837,7 @@ export function AiSettingsPanel() {
         </p>
       </div>
 
-      <div className="space-y-2 px-3 py-2.5">
+      <div className="space-y-1.5 px-3 py-2">
         <Label>研究预算（超出即停并汇报进度）</Label>
         <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--ink-muted)]">
           <label className="flex items-center gap-1.5">
@@ -889,7 +889,7 @@ export function AiSettingsPanel() {
         </div>
       </div>
 
-      <div className="space-y-1.5 px-3 py-2.5">
+      <div className="space-y-1.5 px-3 py-2">
         <div className="flex items-center justify-between">
           <Label>最近行为（审计不含正文）</Label>
           <Button
@@ -1146,10 +1146,12 @@ function Row({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-3 py-2.5">
+    <div className="flex items-center justify-between gap-3 px-3 py-2">
       <div className="min-w-0">
-        <p className="text-sm text-[var(--ink)]">{label}</p>
-        {hint ? <p className="mt-0.5 text-[11px] text-[var(--ink-subtle)]">{hint}</p> : null}
+        <p className="text-[13px] leading-tight text-[var(--ink)]">{label}</p>
+        {hint ? (
+          <p className="mt-0.5 text-[11px] leading-tight text-[var(--ink-subtle)]">{hint}</p>
+        ) : null}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
