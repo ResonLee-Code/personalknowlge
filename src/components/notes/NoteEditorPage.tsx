@@ -36,7 +36,6 @@ import { SaveTemplateDialog } from '@/components/editor/SaveTemplateDialog';
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { SourceDialog } from '@/components/editor/SourceDialog';
 import { reportAction, reportFailure } from '@/lib/actionFeedback';
-import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
 import { TagEditor } from '@/components/editor/TagEditor';
 import { ResizeHandle } from '@/components/layout/ResizeHandle';
 import { MoveNoteDialog } from '@/components/notes/MoveNoteDialog';
@@ -76,6 +75,17 @@ import { editorContentBelongsTo } from '@/components/notes/editorContentGuard';
 import { registerEditorFlush } from '@/stores/notesStore';
 
 import { LAYOUT_DEFAULTS, useUiStore } from '@/stores/uiStore';
+import { InsertBlockMenu } from '@/components/editor/InsertBlockMenu';
+import { MarkdownFormatBar } from '@/components/editor/MarkdownFormatBar';
+import {
+  changeIndent,
+  insertBlock,
+  setHeading,
+  toggleLinePrefix,
+  wrapSelection,
+  type EditResult,
+  type EditState,
+} from '@/lib/markdownCommands';
 import { useOutlineStore } from '@/stores/outlineStore';
 import { persistLayoutPreferences, useWorkspaceStore } from '@/stores/workspaceStore';
 import type { LinkCounts, RelationView } from '@/types';
@@ -89,7 +99,6 @@ export function NoteEditorPage() {
   const detail = useNotesStore((state) => state.detail);
   const detailLoading = useNotesStore((state) => state.detailLoading);
   const saveStatus = useNotesStore((state) => state.saveStatus);
-  const saveError = useNotesStore((state) => state.saveError);
   const save = useNotesStore((state) => state.save);
   const markDirty = useNotesStore((state) => state.markDirty);
   const toggleFavorite = useNotesStore((state) => state.toggleFavorite);
@@ -176,7 +185,7 @@ export function NoteEditorPage() {
 
   /** 粘贴 / 拖入图片：落盘到 attachments/ 并把相对路径插进正文（V1.1 M2-1）。 */
   const handleAttachFiles = useCallback(
-    async (files: File[]): Promise<string | null> => {
+    async (files: File[], kind: 'image' | 'file' = 'image'): Promise<string | null> => {
       const snippets: string[] = [];
       for (const file of files) {
         try {
@@ -187,21 +196,52 @@ export function NoteEditorPage() {
             mimeType: mimeFromDataUrl(dataUrl) ?? file.type ?? null,
             dataBase64: dataUrl,
           });
-          snippets.push(buildImageMarkdown(saved.linkPath, attachmentAltText(file.name)));
+          snippets.push(
+            kind === 'image'
+              ? buildImageMarkdown(saved.linkPath, attachmentAltText(file.name))
+              : // 「附件」插的是普通链接（不是内联图）：图片以外的东西内联显示没有意义
+                `[${file.name || saved.linkPath}](${saved.linkPath})`,
+          );
         } catch (error) {
-          reportFailure('粘贴图片失败', errorMessage(error));
+          reportFailure(kind === 'image' ? '保存图片失败' : '保存附件失败', errorMessage(error));
         }
       }
       if (snippets.length === 0) return null;
       toast.success(
-        snippets.length === 1
-          ? '图片已保存到 attachments/'
-          : `已保存 ${snippets.length} 张图片到 attachments/`,
+        kind === 'file'
+          ? `附件已保存到 attachments/（${snippets.length} 个）`
+          : snippets.length === 1
+            ? '图片已保存到 attachments/'
+            : `已保存 ${snippets.length} 张图片到 attachments/`,
       );
       return snippets.join('\n');
     },
     [activeNoteId],
   );
+
+  /**
+   * 编辑命令的统一落点（2026-10-16）：工具栏 / 插入菜单都算好 `changes`，
+   * 这里把它们 dispatch 进 CodeMirror。**view 是唯一事实来源**——光标在哪、选了什么都问它。
+   */
+  const applyEdit = useCallback((compute: (state: EditState) => EditResult) => {
+    const view = editorViewRef.current?.view;
+    if (!view) return;
+    const { from, to } = view.state.selection.main;
+    const result = compute({ value: view.state.doc.toString(), from, to });
+    view.dispatch({
+      changes: result.changes,
+      selection: { anchor: result.selectionFrom, head: result.selectionTo },
+    });
+    view.focus();
+  }, []);
+
+  /** 插入菜单里的「图片…」「附件…」：走隐藏的文件选择框 + 应用自己的附件流程 */
+  const attachInputRef = useRef<HTMLInputElement | null>(null);
+  const attachKindRef = useRef<'image' | 'file'>('image');
+  const pickAttachment = useCallback((kind: 'image' | 'file') => {
+    attachKindRef.current = kind;
+    attachInputRef.current?.click();
+  }, []);
 
   const jumpToHeading = useCallback((offset: number) => {
     const view = editorViewRef.current?.view;
@@ -599,6 +639,12 @@ export function NoteEditorPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
+        {/* 插入菜单（2026-10-16）：放在编辑 / 分屏 / 预览**左边**，只在有编辑器的模式下可用 */}
+        <InsertBlockMenu
+          disabled={readOnly || editorMode === 'preview'}
+          onInsert={(block) => applyEdit((state) => insertBlock(state, block))}
+          onAttach={pickAttachment}
+        />
         <div className="flex items-center gap-0.5 rounded-md border border-[var(--border-subtle)] p-0.5">
           {(
             [
@@ -634,7 +680,8 @@ export function NoteEditorPage() {
           <Save className="h-3.5 w-3.5" />
           保存
         </Button>
-        <SaveStatusBadge status={saveStatus} detail={saveError} />
+        {/* 保存状态只留顶栏那一个（2026-10-16 按用户反馈）：
+            这里再显示一次「已同步」，同一件事在屏幕上出现两遍，纯属噪音 */}
 
         <div className="ml-auto flex items-center gap-1">
           {/* 大纲开关已经挪到「笔记列表栏」的头部（单一入口，见 OutlineToggleButton）：
@@ -644,9 +691,12 @@ export function NoteEditorPage() {
             variant="ghost"
             title={note.favorite ? '取消收藏' : '收藏'}
             onClick={() => void toggleFavorite(note.id)}
+            data-testid="favorite-toggle"
+            aria-pressed={note.favorite}
           >
             {note.favorite ? (
-              <Star className="h-4 w-4 text-amber-500" />
+              // 收藏后**橙色实心**（2026-10-16 按用户反馈）：只描边太弱，一眼看不出状态
+              <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
             ) : (
               <StarOff className="h-4 w-4" />
             )}
@@ -739,6 +789,33 @@ export function NoteEditorPage() {
           </DropdownMenu>
         </div>
       </div>
+      {/* 文本编辑工具条（2026-10-16）：只在有编辑器的模式下出现（纯预览没有光标可操作） */}
+      {/* 插入菜单里「图片…/附件…」用的隐藏文件选择框：选完交给应用的附件流程，再插链接 */}
+      <input
+        ref={attachInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        data-testid="insert-file-input"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = '';
+          void handleAttachFiles(files, attachKindRef.current).then((snippet) => {
+            if (snippet) applyEdit((state) => insertBlock(state, snippet));
+          });
+        }}
+      />
+      {editorMode !== 'preview' ? (
+        <MarkdownFormatBar
+          disabled={readOnly}
+          onWrap={(before, after, placeholder) =>
+            applyEdit((state) => wrapSelection(state, before, after, placeholder))
+          }
+          onLinePrefix={(prefix) => applyEdit((state) => toggleLinePrefix(state, prefix))}
+          onHeading={(level) => applyEdit((state) => setHeading(state, level))}
+          onIndent={(delta) => applyEdit((state) => changeIndent(state, delta))}
+        />
+      ) : null}
 
       <div className="space-y-2 border-b border-[var(--border-subtle)] px-4 py-3">
         <Input
@@ -912,6 +989,7 @@ export function NoteEditorPage() {
         {/* 右侧独立一列的大纲：只在「钉在右侧」这种位置下渲染（默认位置是与列表共用一栏） */}
         {outlinePlacement === 'side' && outlineMode === 'pinned' ? (
           <OutlinePanel
+            key={note.id}
             headings={headings}
             activeOffset={activeHeadingOffset}
             onJump={(offset) => jumpFromOutline(offset, headings.findIndex((item) => item.offset === offset))}
@@ -953,6 +1031,7 @@ export function NoteEditorPage() {
             onMouseLeave={() => setOutlineHover(false)}
           >
             <OutlinePanel
+              key={`mini-${note.id}`}
               headings={headings}
               activeOffset={activeHeadingOffset}
               onJump={(offset) => jumpFromOutline(offset, headings.findIndex((item) => item.offset === offset))}

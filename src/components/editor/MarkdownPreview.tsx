@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 
+import { MermaidDiagram } from '@/components/editor/MermaidDiagram';
 import { EmptyState } from '@/components/ui/empty-state';
 import { cn } from '@/lib/utils';
 import { parseWikilinkHref, preprocessWikilinks } from '@/lib/wikilink';
@@ -155,6 +156,20 @@ export function MarkdownPreview({
               <table {...props}>{children}</table>
             </div>
           ),
+          /**
+           * ```mermaid 代码块 → 渲染成图（2026-10-16）。
+           * 其它语言的代码块原样交给 rehype-highlight 的 code 渲染（这里只拦 mermaid）。
+           */
+          code: ({ className, children, ...props }) => {
+            if (typeof className === 'string' && /language-mermaid/.test(className)) {
+              return <MermaidDiagram source={String(children).replace(/\n$/, '')} />;
+            }
+            return (
+              <code className={className} {...props}>
+                {children}
+              </code>
+            );
+          },
         }}
       >
         {preprocessWikilinks(content)}

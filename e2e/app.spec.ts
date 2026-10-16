@@ -199,16 +199,28 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.screenshot({ path: path.join(SHOTS, '13-export-dialog.png') });
   await page.getByRole('button', { name: '完成' }).click();
 
-  // 14. 设置页布局：内容占满并居中（回归：右侧曾出现大片空白）
+  // 14. 设置页布局（2026-10-16 改版）：左侧分组导航 + 搜索，右侧只显示当前分节
   await page.goto('/#/settings');
   await expect(page.getByRole('heading', { name: '设置', level: 1 })).toBeVisible();
-  const mainBox = await page.locator('main').boundingBox();
+  const nav = page.getByRole('navigation', { name: '设置导航' });
+  await expect(nav).toBeVisible();
+  await expect(nav.getByTestId('settings-nav-editor')).toHaveAttribute('aria-current', 'true');
+  // 右侧内容在导航右边（两者不重叠），且宽度占得住
+  const navBox = await nav.boundingBox();
   const contentBox = await page.locator('main div.mx-auto').first().boundingBox();
-  if (!mainBox || !contentBox) throw new Error('未找到主区域或内容容器');
-  expect(contentBox.width).toBeGreaterThan(mainBox.width * 0.5);
-  const leftGap = contentBox.x - mainBox.x;
-  const rightGap = mainBox.x + mainBox.width - (contentBox.x + contentBox.width);
-  expect(Math.abs(leftGap - rightGap)).toBeLessThan(8);
+  if (!navBox || !contentBox) throw new Error('未找到导航或内容容器');
+  expect(contentBox.x).toBeGreaterThan(navBox.x + navBox.width - 1);
+  expect(contentBox.width).toBeGreaterThan(600);
+  // 分节切换：点「备份与导出」→ 出现备份相关行，编辑器行消失
+  await nav.getByTestId('settings-nav-backup').click();
+  await expect(page.getByText('创建备份')).toBeVisible();
+  await expect(page.getByText('自动保存延迟')).toHaveCount(0);
+  // 搜索：输入「字号」→ 只剩命中的行（跨分节都能找到）
+  await page.getByLabel('搜索设置').fill('字号');
+  await expect(page.getByText('字号', { exact: true })).toBeVisible();
+  await expect(page.getByText('创建备份')).toHaveCount(0);
+  await page.getByLabel('搜索设置').fill('');
+  await nav.getByTestId('settings-nav-editor').click();
   await page.screenshot({ path: path.join(SHOTS, '14-settings-layout.png') });
 
   // 15. 分屏比例拖拽：编辑栏宽度应跟随指针（回归：首次进入时比例换算错误导致跳变）
@@ -642,6 +654,8 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
 
   // 32. 设置 → AI（D1）：默认最保守口径；联网档位需先确认说明
   await page.goto('/#/settings');
+  // 设置页现在是分节显示（2026-10-16）：AI 相关行在「AI 能力」这一节里
+  await page.getByTestId('settings-nav-ai').click();
   await expect(page.getByTestId('settings-ai-section')).toBeVisible();
   await expect(page.getByTestId('ai-network')).toHaveValue('localOnly');
   await expect(page.getByTestId('ai-enabled')).not.toBeChecked();
@@ -810,9 +824,79 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.getByRole('button', { name: '创建笔记' }).click();
   await expect(page.locator('.cm-content')).toBeVisible();
   const longRow = page.getByTestId('note-list-item').filter({ hasText: '特别特别长' }).first();
-  await expect(longRow.locator('[data-truncated="true"]')).toHaveCSS('opacity', '1');
+  const quickActions = longRow.getByTestId('note-quick-child').locator('..');
+  // 长标题也一样：默认隐藏，鼠标移到条目上才出现（2026-10-16 用户口径）
+  await expect(quickActions).toHaveCSS('opacity', '0');
+  await longRow.hover();
+  await expect(quickActions).toHaveCSS('opacity', '1');
   await expect(longRow.getByTestId('note-quick-child')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '46-long-title-row.png') });
+
+  // 36. 编辑器工具栏（2026-10-16）：插入菜单、文本格式条、收藏橙色、保存状态只留顶栏一处
+  await expect(page.getByText('已同步')).toHaveCount(1); // 顶栏那一处；编辑器工具栏不再重复
+  const editorToolbar = page.locator('main');
+  await expect(page.getByTestId('insert-menu')).toBeVisible();
+  await expect(page.getByTestId('format-bar')).toBeVisible();
+  // 收藏：点一下变橙色实心，再点回到未收藏
+  const favorite = page.getByTestId('favorite-toggle');
+  await favorite.click();
+  await expect(favorite).toHaveAttribute('aria-pressed', 'true');
+  // Tailwind 4 的颜色是 oklch，computed style 会报成 lab(...)：这里断言"真的填了色"而不是某个具体色值
+  await expect(favorite.locator('svg')).toHaveClass(/fill-amber-400/);
+  expect(
+    await favorite.locator('svg').evaluate((element) => getComputedStyle(element).fill),
+  ).not.toBe('none');
+  await favorite.click();
+  await expect(favorite).toHaveAttribute('aria-pressed', 'false');
+  // 插入菜单：插一个表格（插在光标所在行之后，另起一块）
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.getByTestId('insert-menu').click();
+  await page.getByRole('menuitem', { name: '表格' }).click();
+  await expect(page.locator('.cm-content')).toContainText('| 列 1 |');
+  // 格式条：选中一段文字后点「加粗」
+  await page.locator('.cm-content').press('Home');
+  for (let index = 0; index < 4; index += 1) await page.keyboard.press('Shift+ArrowRight');
+  await page.getByRole('button', { name: '加粗' }).click();
+  await expect(page.locator('.cm-content')).toContainText('**');
+  await page.screenshot({ path: path.join(SHOTS, '48-insert-and-format.png') });
+  // 纯预览模式下插入按钮禁用（没有光标可插）
+  await page.getByRole('button', { name: '预览' }).click();
+  await expect(page.getByTestId('insert-menu')).toBeDisabled();
+  await expect(page.getByTestId('format-bar')).toHaveCount(0);
+  await page.getByRole('button', { name: '分屏' }).click();
+
+  // 大纲折叠（2026-10-16）：先写一段带层级的标题，再看这一栏的大纲
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('# 一级标题\n## 子标题一\n## 子标题二\n# 另一个一级');
+  await page.getByRole('button', { name: '显示大纲' }).first().click();
+  await expect(page.getByTestId('list-pane-outline')).toBeVisible();
+  const outlineCount = () => page.getByTestId('outline-item').count();
+  await expect.poll(outlineCount).toBe(4);
+  await page.getByTestId('outline-fold').first().click();
+  // 「一级标题」收起来后，它的两个子标题被藏起来（4 → 2）
+  await expect.poll(outlineCount).toBe(2);
+  await page.getByTestId('outline-fold').first().click();
+  await expect.poll(outlineCount).toBe(4);
+  await page.screenshot({ path: path.join(SHOTS, '49-outline-fold.png') });
+  await page.getByTestId('outline-back').click();
+
+  // 37. 可视化图形（2026-10-16）：```mermaid 真的渲染成图（流程图 + 时序图）
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(
+    '\n```mermaid\nflowchart LR\n  A[开始] --> B{判断}\n  B -->|是| C[结束]\n```\n',
+  );
+  await page.getByRole('button', { name: '预览' }).click();
+  await expect(page.locator('[data-testid="mermaid-diagram"]').first()).toBeVisible();
+  await expect(page.locator('[data-testid="mermaid-diagram"]').first().locator('svg')).toBeVisible();
+  await expect(page.locator('[data-testid="mermaid-diagram"]').first()).toContainText('判断');
+  await expect(page.locator('[data-testid="mermaid-error"]')).toHaveCount(0);
+  await page.screenshot({ path: path.join(SHOTS, '50-mermaid.png') });
+  await page.getByRole('button', { name: '分屏' }).click();
+  void editorToolbar;
 
   // 选中笔记后开关可用：点它 = 这一栏换成大纲（不多占一列）
   await expect(page.getByTestId('outline-toggle')).toBeEnabled();

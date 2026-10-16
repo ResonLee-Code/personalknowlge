@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -50,6 +51,8 @@ describe('SettingsPage · 备份列表', () => {
         <SettingsPage />
       </MemoryRouter>,
     );
+    // 设置页现在分节显示（左侧导航，2026-10-16）：备份相关的行在「备份与导出」那一节里
+    await userEvent.click(screen.getByTestId('settings-nav-backup'));
 
     expect(await screen.findByTestId('backup-list-error')).toHaveTextContent('备份目录不可读');
     expect(screen.queryByText('暂无备份文件。')).not.toBeInTheDocument();
@@ -63,6 +66,8 @@ describe('SettingsPage · 备份列表', () => {
         <SettingsPage />
       </MemoryRouter>,
     );
+    // 设置页现在分节显示（左侧导航，2026-10-16）：备份相关的行在「备份与导出」那一节里
+    await userEvent.click(screen.getByTestId('settings-nav-backup'));
 
     // 空态文案现在是「暂无备份文件。点上方『立即备份』创建后…」（B2 加了入口说明），
     // 这条测试只关心「确实显示了空态、且不是错误态」。
@@ -84,6 +89,8 @@ describe('SettingsPage · 备份列表', () => {
         <SettingsPage />
       </MemoryRouter>,
     );
+    // 设置页现在分节显示（左侧导航，2026-10-16）：备份相关的行在「备份与导出」那一节里
+    await userEvent.click(screen.getByTestId('settings-nav-backup'));
 
     const empty = await screen.findByTestId('backup-empty');
     expect(empty).toHaveTextContent('暂无备份文件');

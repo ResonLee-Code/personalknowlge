@@ -1,4 +1,13 @@
-import { ChevronsLeft, ChevronsRight, ListTree, PanelRight, Pin } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  ListTree,
+  PanelRight,
+  Pin,
+} from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 import { cn } from '@/lib/utils';
 import type { OutlineHeading } from '@/lib/markdown';
@@ -39,6 +48,46 @@ export function OutlinePanel({
   onMoveToSide,
   className,
 }: OutlinePanelProps) {
+  /**
+   * 标题折叠（2026-10-16 新增）：有子级的标题前面给一个 ▾/▸，点它收起 / 展开这一节。
+   *
+   * 规则与文档目录一致：一个标题的"子级"是它后面**层级更深**的连续标题；
+   * 折叠一层就把它的整棵子树藏起来（子级自己的折叠状态保留，展开后照旧）。
+   * 折叠状态是内存态；调用方用 `key={noteId}` 挂载，换笔记会重置（不会把上一篇的折叠带到下一篇）。
+   */
+  const [folded, setFolded] = useState<Set<number>>(new Set());
+  const rows = useMemo(() => {
+    const result: Array<{
+      heading: OutlineHeading;
+      hasChildren: boolean;
+      collapsed: boolean;
+      hidden: boolean;
+    }> = [];
+    const ancestors: Array<{ level: number; collapsed: boolean }> = [];
+    headings.forEach((heading, index) => {
+      const next = headings[index + 1];
+      const hasChildren = Boolean(next && next.level > heading.level);
+      for (let depth = ancestors.length - 1; depth >= 0; depth -= 1) {
+        if ((ancestors[depth]?.level ?? 0) < heading.level) break;
+        ancestors.pop();
+      }
+      const hidden = ancestors.some((ancestor) => ancestor.collapsed);
+      const collapsed = hasChildren && folded.has(heading.offset);
+      ancestors.push({ level: heading.level, collapsed });
+      result.push({ heading, hasChildren, collapsed, hidden });
+    });
+    return result;
+  }, [headings, folded]);
+
+  const toggleFold = (offset: number) => {
+    setFolded((previous) => {
+      const next = new Set(previous);
+      if (next.has(offset)) next.delete(offset);
+      else next.add(offset);
+      return next;
+    });
+  };
+
   return (
     <aside
       data-testid="outline-panel"
@@ -142,26 +191,53 @@ export function OutlinePanel({
           </p>
         ) : (
           <ul className="space-y-0.5">
-            {headings.map((heading, index) => {
+            {rows.map(({ heading, hasChildren, collapsed, hidden }, index) => {
+              if (hidden) return null;
               const active = activeOffset === heading.offset;
               return (
                 <li key={`${heading.offset}-${index}`}>
-                  <button
-                    type="button"
-                    data-testid="outline-item"
-                    title={heading.text}
-                    onClick={() => onJump(heading.offset)}
+                  <div
                     className={cn(
-                      'block w-full truncate rounded px-1.5 py-1 text-left text-xs transition-colors',
+                      'flex items-center rounded transition-colors',
                       active
                         ? 'bg-[var(--brand-soft)] text-[var(--brand)]'
                         : 'text-[var(--ink-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]',
                     )}
                     // 按层级缩进：H1 无缩进，H6 缩进 25px
-                    style={{ paddingLeft: `${(heading.level - 1) * 10 + 6}px` }}
+                    style={{ paddingLeft: `${(heading.level - 1) * 10 + 2}px` }}
                   >
-                    {heading.text}
-                  </button>
+                    {hasChildren ? (
+                      <button
+                        type="button"
+                        data-testid="outline-fold"
+                        aria-expanded={!collapsed}
+                        aria-label={`${collapsed ? '展开' : '折叠'} ${heading.text}`}
+                        title={collapsed ? '展开这一节' : '折叠这一节'}
+                        onClick={() => toggleFold(heading.offset)}
+                        className="shrink-0 rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+                      >
+                        {collapsed ? (
+                          <ChevronRight className="h-3 w-3" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    ) : (
+                      // 叶子节点留出同样宽度的占位，标题才对得齐
+                      <span className="shrink-0 p-0.5">
+                        <span className="block h-3 w-3" />
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      data-testid="outline-item"
+                      title={heading.text}
+                      onClick={() => onJump(heading.offset)}
+                      className="min-w-0 flex-1 truncate px-0.5 py-1 text-left text-xs"
+                    >
+                      {heading.text}
+                    </button>
+                  </div>
                 </li>
               );
             })}

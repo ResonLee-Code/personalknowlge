@@ -95,6 +95,9 @@ const CASES = [
       { op: 'app' },
       { op: 'keyCode', code: 53 },
       { op: 'click', frame: { role: 'AXButton', description: '设置' } },
+      // 设置页自 2026-10-16 起分节显示（左侧导航）：备份相关的行在「备份与导出」这一节里
+      { op: 'pause', ms: 900 },
+      { op: 'click', frame: { role: 'AXButton', title: '备份与导出' } },
       { op: 'click', frame: { role: 'AXButton', title: '立即备份' } },
       {
         op: 'check',
@@ -130,6 +133,9 @@ const CASES = [
        *    （"打开笔记时这一栏默认是列表"这条由浏览器预览的 E2E 从干净状态断言，见 `e2e/app.spec.ts` 步骤 18。）
        */
       { op: 'click', frame: { role: 'AXButton', description: '设置' } },
+      // 设置页分节显示：「大纲位置」在「编辑器」这一节里
+      { op: 'pause', ms: 900 },
+      { op: 'click', frame: { role: 'AXButton', title: '编辑器' } },
       {
         op: 'selectOption',
         popup: { role: 'AXPopUpButton', description: '大纲位置' },
@@ -537,6 +543,81 @@ const CASES = [
       {
         op: 'manual',
         note: '截断时右侧那两个按钮「是不是常显、间距顺不顺眼」要看截图/上手看一眼（AX 读不到透明度）',
+      },
+    ],
+  },
+  {
+    id: 12,
+    title: '编辑器新能力：图形渲染、插入菜单、大纲折叠',
+    expect:
+      '插入菜单在编辑 / 分屏可用；```mermaid 流程图在预览里真的渲染出图（WebKit 上验）；大纲能按节折叠',
+    steps: [
+      { op: 'app' },
+      { op: 'keyCode', code: 53 },
+      { op: 'click', frame: { role: 'AXLink', title: '全部笔记' } },
+      { op: 'pause', ms: 1000 },
+      { op: 'click', frame: { role: 'AXButton', title: '新建笔记' } },
+      { op: 'paste', text: '图形与折叠（真机验收）' },
+      { op: 'click', frame: { role: 'AXButton', title: '创建笔记' } },
+      { op: 'pause', ms: 1800 },
+      // 插入菜单在编辑模式下可用（纯预览时置灰；那条断言在 E2E 里）
+      // 注意 role：它是个 Radix 下拉，WebKit 暴露成 **AXPopUpButton**（不是 AXButton）
+      {
+        op: 'expectElement',
+        query: { role: 'AXPopUpButton', description: '插入内容' },
+        label: '编辑器工具栏最左边的「＋ 插入内容」',
+      },
+      // 正文：一段带层级的标题 + 一张 mermaid 流程图
+      { op: 'keys', combo: 'cmd+e' },
+      {
+        op: 'paste',
+        text: '# 一级标题\n\n## 子标题一\n\n## 子标题二\n\n```mermaid\nflowchart LR\n  A[开始] --> B{判断}\n  B -->|是| C[结束]\n```\n',
+      },
+      { op: 'keys', combo: 'cmd+s' },
+      { op: 'pause', ms: 1200 },
+      // 切到纯预览：编辑器不再显示源码，「判断」这两个字只可能来自**渲染出来的图**
+      { op: 'click', frame: { role: 'AXButton', title: '预览' } },
+      { op: 'pause', ms: 2500 },
+      {
+        op: 'expectElement',
+        query: { title: '判断' },
+        label: '预览里的流程图（节点文字「判断」）',
+      },
+      { op: 'shot', name: '12-mermaid-preview.png' },
+      { op: 'click', frame: { role: 'AXButton', title: '分屏' } },
+      { op: 'pause', ms: 800 },
+      // 大纲折叠：这一栏切到大纲，收起「一级标题」那一节 → 两个子标题的条目消失
+      // 用 ensure（幂等）：这一栏可能**已经是**大纲（比如上一轮跑完就停在那个状态），
+      // 直接 click 会"没找到元素"——目标状态已满足时它什么都不做
+      {
+        op: 'ensure',
+        until: { role: 'AXButton', description: '返回笔记列表' },
+        press: { role: 'AXCheckBox', description: '大纲' },
+        pressLabel: '工具栏大纲开关',
+        label: '这一栏显示大纲',
+      },
+      { op: 'pause', ms: 900 },
+      {
+        op: 'expectElement',
+        query: { role: 'AXButton', description: '子标题一' },
+        label: '大纲里有「子标题一」',
+      },
+      { op: 'click', frame: { role: 'AXButton', description: '折叠 一级标题' } },
+      {
+        op: 'expectAbsent',
+        query: { role: 'AXButton', description: '子标题一' },
+        label: '收起后子标题不再显示',
+      },
+      { op: 'shot', name: '12-outline-fold.png' },
+      { op: 'click', frame: { role: 'AXButton', description: '展开 一级标题' } },
+      {
+        op: 'expectElement',
+        query: { role: 'AXButton', description: '子标题二' },
+        label: '展开后子标题回来了',
+      },
+      {
+        op: 'manual',
+        note: '图形的**观感**（连线是否清楚、深色主题下配色是否舒服）需要人眼看一下截图',
       },
     ],
   },

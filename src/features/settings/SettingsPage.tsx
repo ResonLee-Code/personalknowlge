@@ -1,5 +1,14 @@
-import { Database, FolderOpen, HardDrive, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import {
+  Database,
+  FolderOpen,
+  HardDrive,
+  PenLine,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -9,6 +18,7 @@ import { Switch } from '@/components/ui/switch';
 import { AiSettingsPanel } from '@/features/settings/AiSettingsPanel';
 import { reportAction, reportFailure } from '@/lib/actionFeedback';
 import { AUTOSAVE_DELAY_OPTIONS, FONT_SIZE_OPTIONS, ROUTES, THEME_OPTIONS } from '@/lib/constants';
+import { cn } from '@/lib/utils';
 import { logAppFailure } from '@/lib/appLog';
 import { errorMessage, formatBytes, formatDateTime } from '@/lib/format';
 import { formatWarningsToast } from '@/lib/warnings';
@@ -18,6 +28,41 @@ import { isTauriRuntime } from '@/services/api';
 import { useUiStore } from '@/stores/uiStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { BackupInfo, BackupValidation } from '@/types';
+
+/**
+ * 设置页的分节与左侧导航（2026-10-16）。
+ *
+ * 结构照 Codex 的设置页来：左边是"标题 + 搜索 + 分组导航"，右边只显示**当前分节**；
+ * 搜索时右边把所有分节都摆出来，只留命中的行（分节整体不命中就整节藏掉）。
+ * `keywords` 是这一节行的关键词集合，供搜索判断"这一节还有没有命中"。
+ */
+type SettingsSectionId = 'editor' | 'index' | 'backup' | 'ai' | 'about';
+
+const SETTINGS_GROUPS: Array<{
+  label: string;
+  items: Array<{ id: SettingsSectionId; label: string; icon: typeof Database; keywords: string }>;
+}> = [
+  {
+    label: '个人',
+    items: [
+      {
+        id: 'editor',
+        label: '编辑器',
+        icon: PenLine,
+        keywords: '自动保存 延迟 默认视图 字号 主题 新建位置 大纲位置 大纲 自动显示大纲',
+      },
+      { id: 'ai', label: 'AI 能力', icon: Sparkles, keywords: 'AI 联网 模型 本地 在线 向量 决策 代理 审计' },
+    ],
+  },
+  {
+    label: '数据',
+    items: [
+      { id: 'index', label: '索引与数据', icon: Database, keywords: '索引 重建 扫描 工作区目录' },
+      { id: 'backup', label: '备份与导出', icon: HardDrive, keywords: '备份 校验 恢复 导出 Markdown' },
+    ],
+  },
+  { label: '关于', items: [{ id: 'about', label: '关于本应用', icon: ShieldCheck, keywords: '版本 数据 日志 运行模式 工作区 ID' }] },
+];
 
 /** 设置页面（设计文档 16.7）。 */
 export function SettingsPage() {
@@ -32,6 +77,9 @@ export function SettingsPage() {
   const setOutlinePlacement = useUiStore((state) => state.setOutlinePlacement);
   const setAutoOutlineOnSelect = useUiStore((state) => state.setAutoOutlineOnSelect);
 
+  /** 当前选中的设置分节（左侧导航）与搜索词 */
+  const [section, setSection] = useState<SettingsSectionId>('editor');
+  const [query, setQuery] = useState('');
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   /** 备份列表读取失败的原因：失败不能显示成「暂无备份文件」（那会让人以为备份没了） */
   const [backupListError, setBackupListError] = useState<string | null>(null);
@@ -113,20 +161,74 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="h-full w-full overflow-auto px-6 py-5">
-      <div className="mx-auto w-full max-w-6xl">
-        <header className="mb-4">
-          <h1 className="text-lg font-semibold text-[var(--ink)]">设置</h1>
-          <p className="mt-0.5 text-xs text-[var(--ink-subtle)]">
-            设置保存在工作区数据库的 <code>settings</code> 表中，切换工作区互不影响。
-          </p>
-        </header>
+    <SettingsSearchContext.Provider value={query}>
+      <div className="flex h-full min-h-0">
+        {/* 左侧导航（2026-10-16，按 Codex 设置页的样式）：标题 + 搜索 + 分组导航 */}
+        <nav
+          aria-label="设置导航"
+          className="flex w-56 shrink-0 flex-col gap-3 overflow-auto border-r border-[var(--border-subtle)] px-3 py-4"
+        >
+          <div className="px-2">
+            <h1 className="text-base font-semibold text-[var(--ink)]">设置</h1>
+            <p className="mt-0.5 text-[11px] leading-snug text-[var(--ink-subtle)]">
+              保存在工作区数据库的 <code>settings</code> 表，切换工作区互不影响
+            </p>
+          </div>
+          <div className="relative px-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ink-subtle)]" />
+            <Input
+              aria-label="搜索设置"
+              placeholder="搜索"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-8 pl-8 text-xs"
+            />
+          </div>
+          {SETTINGS_GROUPS.map((group) => (
+            <div key={group.label} className="space-y-0.5">
+              <p className="px-2 text-[11px] font-medium text-[var(--ink-subtle)]">{group.label}</p>
+              {group.items.map((item) => {
+                const isActive = item.id === section;
+                const dimmed = Boolean(query) && !matches(query, item.label, item.keywords);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    data-testid={`settings-nav-${item.id}`}
+                    aria-current={isActive ? 'true' : undefined}
+                    disabled={dimmed}
+                    onClick={() => {
+                      setSection(item.id);
+                      setQuery('');
+                    }}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
+                      isActive
+                        ? 'bg-[var(--surface-muted)] font-medium text-[var(--ink)]'
+                        : 'text-[var(--ink-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]',
+                      dimmed && 'opacity-40',
+                    )}
+                  >
+                    <item.icon className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+
+        <div className="min-w-0 flex-1 overflow-auto px-6 py-5">
+          <div className="mx-auto w-full max-w-3xl">
 
         {/* 瀑布流（2026-10-16 重排）：卡片按高度紧挨着落进各列——
             以前是"两列网格 + items-start"，右边那列列高很多，左边底部就空出一大片，
             整体看着松。列数随窗口宽窄自适应（窄屏 1 列、常规 2 列、很宽 3 列）。 */}
         <div className="columns-1 gap-4 xl:columns-2 2xl:columns-3">
-        <Section title="编辑器" icon={Database}>
+        {section === 'editor' || query ? (
+        <Section title="编辑器" icon={Database}
+          searchText="自动保存 延迟 默认视图 字号 界面主题 新建笔记位置 大纲位置 大纲 选中笔记后自动显示大纲"
+        >
           <Row label="自动保存" hint="停止输入后自动写入文件（默认 1000ms）">
             <Switch
               checked={settings.autosaveEnabled}
@@ -240,8 +342,12 @@ export function SettingsPage() {
             />
           </Row>
         </Section>
+        ) : null}
 
-        <Section title="索引与数据" icon={ShieldCheck}>
+        {section === 'index' || query ? (
+        <Section title="索引与数据" icon={ShieldCheck}
+          searchText="索引状态 重建索引 重新扫描工作区 工作区目录"
+        >
           <Row label="索引状态" hint={`${indexStatus?.indexedNotes ?? 0} / ${indexStatus?.totalNotes ?? 0} 篇已索引`}>
             <span className="text-xs text-[var(--ink-muted)]">{indexStatus?.state ?? 'ready'}</span>
           </Row>
@@ -298,8 +404,12 @@ export function SettingsPage() {
             </Button>
           </Row>
         </Section>
+        ) : null}
 
-        <Section title="备份与导出" icon={HardDrive}>
+        {section === 'backup' || query ? (
+        <Section title="备份与导出" icon={HardDrive}
+          searchText="备份目录 创建备份 备份列表 校验 恢复 导出 Markdown"
+        >
           <Row label="备份目录" hint={settings.backupDir ?? '默认：.knowledge/backups'}>
             <Button
               size="sm"
@@ -373,12 +483,20 @@ export function SettingsPage() {
             )}
           </div>
         </Section>
+        ) : null}
 
-        <Section title="AI（第二代预留）" icon={Sparkles} testId="settings-ai-section">
+        {section === 'ai' || query ? (
+        <Section title="AI（第二代预留）" icon={Sparkles} testId="settings-ai-section"
+          searchText="AI 总开关 模型自检 联网检索 抓取正文 域名白名单 黑名单 检索源 研究预算 本地模型 在线模型 向量检索 决策模型 出站代理 最近行为"
+        >
           <AiSettingsPanel />
         </Section>
+        ) : null}
 
-        <Section title="关于" icon={ShieldCheck}>
+        {section === 'about' || query ? (
+        <Section title="关于" icon={ShieldCheck}
+          searchText="版本与运行信息 工作区 ID 目录"
+        >
           <Row label="版本与运行信息" hint="包含应用版本、数据库版本与日志位置">
             <Button asChild size="sm" variant="secondary">
               <Link to={ROUTES.about}>查看</Link>
@@ -392,35 +510,44 @@ export function SettingsPage() {
               aria-label="当前知识库目录" readOnly value={workspace?.rootPath ?? ''} className="mt-1 h-8 text-xs" />
           </div>
         </Section>
+        ) : null}
+        </div>
+          </div>
         </div>
       </div>
-    </div>
+    </SettingsSearchContext.Provider>
   );
 }
 
 function Section({
   title,
   icon: Icon,
+  searchText,
   children,
   testId,
 }: {
   title: string;
   icon: typeof Database;
+  /** 供设置页搜索用的关键词（这一节所有行标题 + 说明的集合） */
+  searchText?: string;
   children: ReactNode;
   /** 供组件测试 / E2E 定位该区块 */
   testId?: string;
 }) {
+  const query = useSettingsSearch();
+  // 搜索时：整节都不匹配就把这一节藏掉（否则会留下一个空卡片，看着像坏了）
+  if (query && searchText && !matches(query, searchText)) return null;
   return (
-    <section
-      data-testid={testId}
-      // break-inside-avoid：瀑布流里别把一张卡片劈到两列；mb-4 是列内卡片之间的间距
-      className="mb-4 break-inside-avoid rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)]"
-    >
-      <header className="flex items-center gap-1.5 border-b border-[var(--border-subtle)] px-3 py-1.5">
+    <section data-testid={testId} className="mb-6 break-inside-avoid">
+      {/* 分节标题在卡片**外面**（2026-10-16 按 Codex 设置页的样式）：标题属于页面结构，
+          卡片只装行；这样一眼能看出"哪几行是一组" */}
+      <header className="mb-2 flex items-center gap-1.5">
         <Icon className="h-3.5 w-3.5 text-[var(--brand)]" />
         <h2 className="text-[13px] font-semibold text-[var(--ink)]">{title}</h2>
       </header>
-      <div className="divide-y divide-[var(--border-subtle)]">{children}</div>
+      <div className="divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)]">
+        {children}
+      </div>
     </section>
   );
 }
@@ -434,6 +561,9 @@ function Row({
   hint?: string;
   children: ReactNode;
 }) {
+  const query = useSettingsSearch();
+  // 搜索时只显示命中的行（标题与说明都参与匹配）
+  if (query && !matches(query, label, hint)) return null;
   return (
     // 行高收紧：标签与说明都压到 leading-tight，内边距 py-2（原来 2.5 + 两条单倍行距 ≈ 62px，
     // 现在 ≈ 44px）；说明仍然完整保留，只是不再撑出额外空白。
@@ -447,4 +577,15 @@ function Row({
       <div className="shrink-0">{children}</div>
     </div>
   );
+}
+
+/** 设置页的搜索词（空串 = 不过滤）；放在 context 里，行与分节各自按它决定显不显示。 */
+const SettingsSearchContext = createContext('');
+const useSettingsSearch = () => useContext(SettingsSearchContext);
+
+/** 关键词包含匹配（大小写不敏感；中文直接子串）。 */
+function matches(query: string, ...texts: Array<string | undefined>): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return texts.some((text) => (text ?? '').toLowerCase().includes(needle));
 }

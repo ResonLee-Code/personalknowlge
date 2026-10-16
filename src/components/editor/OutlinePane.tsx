@@ -20,6 +20,7 @@ export function OutlinePane({ width, onBack, onMoveToSide }: OutlinePaneProps) {
   const activeOffset = useOutlineStore((state) => state.activeOffset);
   const title = useOutlineStore((state) => state.title);
   const jump = useOutlineStore((state) => state.jump);
+  const noteId = useOutlineStore((state) => state.noteId);
 
   return (
     <div
@@ -28,6 +29,8 @@ export function OutlinePane({ width, onBack, onMoveToSide }: OutlinePaneProps) {
       style={{ width }}
     >
       <OutlinePanel
+        // 换笔记就重置折叠状态（折叠是按标题偏移记的，不该带到下一篇）
+        key={noteId ?? 'none'}
         headings={headings}
         activeOffset={activeOffset}
         onJump={(offset) => jump?.(offset)}
