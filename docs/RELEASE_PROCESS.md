@@ -95,7 +95,8 @@ python3 scripts/cross/verify-pe.py "<解包出来的>/Personal Knowledge OS.exe"
 
 每个平台各自的 `SHA256SUMS-<platform>.txt` 会一并附在 Release 上，另有汇总的
 `SHA256SUMS-all.txt`。验收清单见：
-[当前版本（V1.3.1）](./ACCEPTANCE_V1.3.1.md) ·
+[当前版本（V1.3.2）](./ACCEPTANCE_V1.3.2.md) ·
+[上一版（V1.3.1）](./ACCEPTANCE_V1.3.1.md) ·
 [上一版（V1.3.0）](./ACCEPTANCE_V1.3.0.md) ·
 [上一版（V1.2.1）](./ACCEPTANCE_V1.2.1.md) ·
 [上一版产物（V1.2.0）](./ACCEPTANCE_V1.2.0.md) ·

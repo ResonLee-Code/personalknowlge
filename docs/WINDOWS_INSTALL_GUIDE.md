@@ -1,21 +1,21 @@
 # Windows 安装与使用说明
 
-适用于 Personal Knowledge OS **V1.3.1**（Windows 10 1809 及以上 / Windows 11，x64）。
+适用于 Personal Knowledge OS **V1.3.2**（Windows 10 1809 及以上 / Windows 11，x64）。
 
 ## 版本状态（重要）
 
 | 项目 | 现状 |
 | --- | --- |
-| 应用代码 | **V1.3.1**（决策档与校准评测、证据充分性与查询扩展、向量检索、真机验收自动化…四处版本号 `1.3.1`） |
-| Windows 安装包 | ✅ **V1.3.1 已随 Release 发布**：`Personal.Knowledge.OS_1.3.1_x64-setup.exe`（NSIS）与 `…_x64-portable.zip`；⚠️ **未签名**，且**尚未在真实 Windows 上验收**（本机无 Windows；已做结构校验与哈希核对） |
-| macOS 安装包 | ✅ V1.3.1 `.dmg`（**ad-hoc 签名**：首次打开需在 系统设置 → 隐私与安全性 → 仍要打开 放行一次） |
-| Linux 安装包 | ✅ V1.3.1 `.deb` / `.rpm` / `.AppImage`（同样随 Release 发布） |
+| 应用代码 | **V1.3.2**（非全屏纵向布局修复；四处版本号 `1.3.2`） |
+| Windows 安装包 | ✅ **V1.3.2 已随 Release 发布**：`Personal.Knowledge.OS_1.3.2_x64-setup.exe`（NSIS）与 `…_x64-portable.zip`；⚠️ **未签名**，且**尚未在真实 Windows 上验收**（本机无 Windows；已做结构校验与哈希核对） |
+| macOS 安装包 | ✅ V1.3.2 `.dmg`（**ad-hoc 签名**：首次打开需在 系统设置 → 隐私与安全性 → 仍要打开 放行一次） |
+| Linux 安装包 | ✅ V1.3.2 `.deb` / `.rpm` / `.AppImage`（同样随 Release 发布） |
 
 下载与校验（**建议先校验再安装**）：
 
 ```powershell
 # 从 Release 下载后，在下载目录里核对（PowerShell）
-Get-FileHash "Personal.Knowledge.OS_1.3.1_x64-setup.exe" -Algorithm SHA256
+Get-FileHash "Personal.Knowledge.OS_1.3.2_x64-setup.exe" -Algorithm SHA256
 # 与 Release 里 SHA256SUMS-windows.txt / SHA256SUMS-all.txt 的同名条目对比
 ```
 

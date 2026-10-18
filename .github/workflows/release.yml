@@ -221,9 +221,18 @@ jobs:
           Remove-Item "$portableDir/Personal Knowledge OS.exe"
           # 名字按用户下载到的资产名写（空格 → 点）：GitHub 上传资产时会做这个替换，
           # 否则用户在下载目录里校验会对不上文件名。
-          Get-ChildItem "$portableDir/*.exe", "$portableDir/*.zip" |
-            ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name -replace ' ','.')" } |
-            Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE/SHA256SUMS-windows.txt"
+          #
+          # 行尾必须写 **LF**：PowerShell 的 Out-File / Set-Content 默认写 CRLF，
+          # 在 macOS / Linux 上 `shasum -c` / `sha256sum -c` 会把文件名末尾的 \r 当成文件名的一部分，
+          # 于是报「No such file or directory」。这里直接拼字符串、显式写 LF + 无 BOM。
+          $lines = Get-ChildItem "$portableDir/*.exe", "$portableDir/*.zip" |
+            ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name -replace ' ','.')" }
+          $checksumPath = Join-Path $env:GITHUB_WORKSPACE 'SHA256SUMS-windows.txt'
+          [System.IO.File]::WriteAllText(
+            $checksumPath,
+            (($lines -join "`n") + "`n"),
+            (New-Object System.Text.UTF8Encoding($false))
+          )
           Get-Content "$env:GITHUB_WORKSPACE/SHA256SUMS-windows.txt"
 
       - name: 上传工件
@@ -321,7 +330,9 @@ jobs:
       - name: 汇总产物清单
         run: |
           find dist -type f | sort
-          cat dist/*/SHA256SUMS-*.txt > dist/SHA256SUMS-all.txt || true
+          # 统一成 LF：即使某个平台的校验文件带 CRLF，汇总文件也必须能在
+          # macOS / Linux 上用 `shasum -c` / `sha256sum -c` 直接通过。
+          cat dist/*/SHA256SUMS-*.txt 2>/dev/null | tr -d '\r' > dist/SHA256SUMS-all.txt || true
           cat dist/SHA256SUMS-all.txt
 
       - name: 创建 Release
@@ -340,8 +351,11 @@ jobs:
             | Windows（x64） | `*_x64-setup.exe` / `*_x64-portable.zip` | 未签名；SmartScreen 提示后放行 |
             | Linux（x64） | `*.deb` / `*.rpm` / `*.AppImage` | 需要 WebKitGTK 4.1；AppImage 需 `chmod +x` |
 
-            校验值见 `SHA256SUMS-*.txt`。安装与验收清单：
-            [macOS（当前版本）](./docs/ACCEPTANCE_V1.3.0.md) · [Windows](./docs/WINDOWS_INSTALL_GUIDE.md) · [Linux](./docs/LINUX_INSTALL_GUIDE.md)
+            校验值见 `SHA256SUMS-*.txt`。下载后在**同一个目录**里执行
+            `shasum -a 256 -c SHA256SUMS-all.txt`（Linux 用 `sha256sum -c`）应全部 OK。
+            安装与验收文档：
+            [验收记录](./docs/acceptance/) · [Windows 安装](./docs/WINDOWS_INSTALL_GUIDE.md) ·
+            [Linux 安装](./docs/LINUX_INSTALL_GUIDE.md) · [完全指南](./docs/GUIDE.md)
           files: |
             dist/**/*.dmg
             dist/**/*.exe

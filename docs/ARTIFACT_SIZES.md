@@ -29,33 +29,52 @@ scripts/size-report.sh --json   # 机器可读
 
 | 构建配置 | 命令 | 体积 |
 | --- | --- | ---: |
-| release（strip + LTO + `codegen-units=1`） | `pnpm tauri build --no-bundle` | **10,570,208 B（10.08 MiB）** |
-| debug（未 strip、带调试信息） | `pnpm tauri build --debug --no-bundle` | **90,607,688 B（86.41 MiB）** |
+| release（strip + LTO + `codegen-units=1`，V1.3.0 当时） | `pnpm tauri build --no-bundle` | **10,570,208 B（10.08 MiB）** |
+| debug（未 strip、带调试信息，V1.3.0 当时） | `pnpm tauri build --debug --no-bundle` | **90,607,688 B（86.41 MiB）** |
 
 两者差 **8.6 倍**。所以任何"体积多少"的说法，不写清楚是哪个配置，等于没说。
 
-## 2. 当前产物（自动生成，2026-10-14，V1.3.0 出包演练）
+## 2. 本机当前产物（自动生成，2026-10-19，V1.3.2 出包演练）
 
 机器：**macOS 27.0.1 / arm64**。生成命令：`scripts/size-report.sh`。
 
 | 产物形态 | 平台 | 体积 | MiB | 路径（相对仓库根） |
 | --- | --- | ---: | ---: | --- |
-| 前端构建产物（未压缩） | 当前平台 | 1,895,823 B | 1.81 | `dist` |
-| release 可执行文件（strip + LTO） | macOS arm64 | **10,570,208 B** | 10.08 | `src-tauri/target/release/personal-knowledge-os` |
-| debug 可执行文件（未 strip） | macOS arm64 | 90,607,688 B | 86.41 | `src-tauri/target/debug/personal-knowledge-os` |
-| macOS 应用包（`.app`） | macOS arm64 | 10,668,262 B | 10.17 | `src-tauri/target/release/bundle/macos/Personal Knowledge OS.app` |
-| macOS 磁盘镜像（`.dmg`） | macOS arm64 | **5,431,245 B** | 5.18 | `src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.3.0_aarch64.dmg` |
+| 前端构建产物（未压缩） | 当前平台 | 7,020,603 B | 6.70 | `dist` |
+| release 可执行文件（strip + LTO） | macOS arm64 | **11,940,704 B** | 11.39 | `src-tauri/target/release/personal-knowledge-os` |
+| debug 可执行文件（未 strip） | macOS arm64 | 90,621,336 B | 86.42 | `src-tauri/target/debug/personal-knowledge-os` |
+| macOS 应用包（`.app`） | macOS arm64 | 12,030,790 B | 11.47 | `src-tauri/target/release/bundle/macos/Personal Knowledge OS.app` |
+| macOS 磁盘镜像（`.dmg`，**旧版残留**） | macOS arm64 | 5,431,245 B | 5.18 | `src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.3.0_aarch64.dmg` |
 | macOS 签名（`.app` / `.dmg` 里的那份） | macOS arm64 | ad-hoc，`Identifier=com.personalknowledge.os` | — | `codesign --verify --deep --strict …` 通过；**不签就会在下载副本上报"已损坏"**，见 [BUILD_COMMANDS.md](./BUILD_COMMANDS.md) |
 | Windows 可执行文件（交叉编译） | Windows x64 | 8,495,616 B | 8.10 | `src-tauri/target/x86_64-pc-windows-gnu/release/personal-knowledge-os.exe` |
 | Windows 安装包（NSIS，V1.2.0 产物） | Windows x64 | 3,259,700 B | 3.11 | `dist-windows/Personal Knowledge OS_1.2.0_x64-setup.exe` |
 | Windows 便携版（zip，V1.2.0 产物） | Windows x64 | 3,973,990 B | 3.79 | `dist-windows/Personal Knowledge OS_1.2.0_x64-portable.zip` |
 
-`.app` 内的 `Info.plist` 显示 `CFBundleShortVersionString = 1.3.0`（与四处版本号一致，已核对）。
+`.app` 内的 `Info.plist` 显示 `CFBundleShortVersionString = 1.3.2`（与四处版本号一致，已核对）。
 
-`.app` 的构成（2026-10-14 带 ad-hoc 签名后的实测）：`MacOS/personal-knowledge-os` 10,508,896 B +
+`.app` 的构成（2026-10-19 带 ad-hoc 签名后的实测）：`MacOS/personal-knowledge-os` 11,871,424 B +
 `Resources/icon.icns` 155,840 B + `_CodeSignature/CodeResources` 2,440 B + `Info.plist` 1,086 B。
-注意：**包内那个二进制（10,508,896 B）与独立构建出来的（10,570,208 B）不是一个数**——
+注意：**包内那个二进制（11,871,424 B）与独立构建出来的（11,940,704 B）不是一个数**——
 打包时 tauri 会用 `codesign` 重新签一遍（带上 hardened runtime 标记），签名数据不同，别混着比。
+
+### 2.1 已发布版本：V1.3.1 Release 资产（CI 实测，精确字节）
+
+这一节按**用户下载到的资产**记账（`Content-Length` / 下载后 `stat -f%z` 一致）。
+机器是 GitHub Actions：macOS 为 `macos-14`（arm64），Windows 为 `windows-latest`（x64），
+Linux 为 `ubuntu-22.04`（x64）。**不可与本机 arm64 构建的数字混着比**。
+
+| 资产 | 平台 | 字节 | MiB |
+| --- | --- | ---: | ---: |
+| `Personal.Knowledge.OS_1.3.1_aarch64.dmg` | macOS arm64 | 6,971,535 | 6.65 |
+| `Personal.Knowledge.OS_1.3.1_x64-setup.exe` | Windows x64（NSIS） | 5,822,259 | 5.55 |
+| `Personal.Knowledge.OS_1.3.1_x64-portable.zip` | Windows x64（便携） | 7,019,895 | 6.69 |
+| `Personal.Knowledge.OS_1.3.1_amd64.deb` | Linux x64 | 7,740,832 | 7.38 |
+| `Personal.Knowledge.OS-1.3.1-1.x86_64.rpm` | Linux x64 | 7,741,952 | 7.38 |
+| `Personal.Knowledge.OS_1.3.1_amd64.AppImage` | Linux x64 | 85,723,640 | 81.75 |
+
+> 对照 V1.3.0（同为 CI macOS arm64）：`.dmg` 5,431,245 → 6,971,535 B（**+1,540,290 B**）。
+> 增量主要来自 V1.3.1 新增的图形渲染链路（mermaid / elk / cytoscape 等前端依赖，
+> 前端 `dist` 从 1.9 MB 涨到 6.7 MB，构建后内嵌进二进制）。
 
 ## 3. 每个形态"包含什么、能不能独立运行"
 
@@ -79,8 +98,11 @@ scripts/size-report.sh --json   # 机器可读
 | V1.2.0 | 7,787,328 B（7.43 MiB） | **记录值**（该版构建时实测，产物已不在本机、仓库也无 tag，**无法复测**） |
 | V1.2.1 | 9,842,176 B（9.39 MiB） | **记录值**（2026-10-11 实测，同上不可复测） |
 | **V1.3.0** | **10,570,208 B（10.08 MiB）** | 本次实测（2026-10-14，`pnpm tauri build --bundle app` 的 release 二进制） |
+| **V1.3.1** | **11,940,704 B（11.39 MiB）** | 实测（2026-10-19，本机 release 二进制；相对 V1.3.0 主要是图形渲染依赖） |
+| **V1.3.2** | **11,940,704 B（11.39 MiB）** | 实测（2026-10-19，纯布局修复；版本号等长，二进制字节数与 V1.3.1 相同） |
 
-差值：V1.2.0 → V1.2.1 **+2,054,848 B**；V1.2.1 → V1.3.0 **+728,032 B**。
+差值：V1.2.0 → V1.2.1 **+2,054,848 B**；V1.2.1 → V1.3.0 **+728,032 B**；
+V1.3.0 → V1.3.1 **+1,370,496 B**；V1.3.1 → V1.3.2 **0 B**。
 
 **这些差值归因到功能时要小心**：仓库**没有任何 tag**，V1.2.0 / V1.2.1 的源码状态无法重建，
 上面的旧值只能引用当时的记录，**不能**现在重新量一遍。能确证的只有两件事：
@@ -103,14 +125,14 @@ macOS 侧同理留 `dist-macos/`，这样下一个版本能拿**同一台机器�
 > 决策模型、向量嵌入、联网检索、网页剪藏——不配置就不联网、不调用、不产生费用，
 > 但**它们的代码始终在二进制里**，关掉不会让包变小。想让包变小，只有改代码/删依赖一条路。
 
-已实测的构成（本机，2026-10-14）：
+已实测的构成（本机，2026-10-19）：
 
 | 层 | 体积 | 说明 |
 | --- | ---: | --- |
-| release 二进制 | 10,570,208 B | 后端 + 宿主窗口；**前端资源已内嵌** |
-| `.app` 包 | 10,668,262 B | = 包内二进制 10,508,896 B + `icon.icns` 155,840 B + `CodeResources` 2,440 B + `Info.plist` 1,086 B |
-| 前端 `dist`（未压缩源） | 1,895,823 B | 构建期输入；发布时被内嵌进二进制，**不是**额外增量 |
-| debug 二进制 | 90,607,688 B | 同码不同配置，见 §1 |
+| release 二进制 | 11,940,704 B | 后端 + 宿主窗口；**前端资源已内嵌** |
+| `.app` 包 | 12,030,790 B | = 包内二进制 11,871,424 B + `icon.icns` 155,840 B + `CodeResources` 2,440 B + `Info.plist` 1,086 B |
+| 前端 `dist`（未压缩源） | 7,020,603 B | 构建期输入；发布时被内嵌进二进制，**不是**额外增量 |
+| debug 二进制 | 90,621,336 B | 同码不同配置，见 §1 |
 
 **已知的体积代价（历史记录值，不是本次实测）**：
 
