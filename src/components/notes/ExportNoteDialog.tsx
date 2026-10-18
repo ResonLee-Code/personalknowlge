@@ -166,6 +166,16 @@ export function ExportNoteDialog({
           ))}
         </div>
 
+        {/*
+          导出口径说明（2026-10-19）：导出器（Rust）只做 Markdown → HTML/OOXML 转换，
+          **不执行脚本**，所以正文里的 Mermaid 图在导出文件里是**源码**（代码块）。
+          与其让人导完才发现图没了，不如在这里说清楚（需要图片形式就用截图）。
+        */}
+        <p className="text-[11px] leading-relaxed text-[var(--ink-subtle)]">
+          正文里的 Mermaid 图（流程图 / 时序图等）在导出文件里保留为**源码**——导出器不执行脚本。
+          需要图片形式的话，请在应用内预览里截图。
+        </p>
+
         {result ? (
           <p className="flex items-center gap-1.5 rounded-md bg-[var(--surface-muted)] px-3 py-2 text-[11px] text-[var(--ink-muted)]">
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />

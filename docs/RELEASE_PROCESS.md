@@ -39,7 +39,7 @@ preflight（ubuntu-22.04）
 | `develop` | 日常开发 / 集成 | 所有功能与修复先落这里；本地自检（test / lint / build / e2e / 真机验收）在它上面跑 |
 | `main` | **已发布 / 待打标签**的状态 | 只在发版时从 `develop` 快进合并（`git merge --ff-only develop`）；标签**只打在 `main` 上** |
 
-发版时两边随后保持同步：打完标签、Release 产出并抽验通过后，`main` 与 `develop` 指向同一个提交。
+发版那一刻两边一致（标签打在同一个提交上）；发布后 `develop` 继续往前走，下一次发版再快进合并。
 **不要**把功能提交直接推到 `main`，也**不要**在 `develop` 上打 `v*` 标签。
 
 ```bash
