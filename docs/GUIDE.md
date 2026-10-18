@@ -1,6 +1,6 @@
 # Personal Knowledge OS 完全指南
 
-> 适用版本：**V1.3.0**（2026-10-14） · English: [Complete Guide](./GUIDE.en.md)
+> 适用版本：**V1.3.1**（2026-10-19） · English: [Complete Guide](./GUIDE.en.md)
 >
 > 面向**使用者**：从装好、用好，到出问题怎么查。开发者向的构建/发版细节在
 > [BUILD_COMMANDS.md](./BUILD_COMMANDS.md) 与 [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)。

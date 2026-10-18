@@ -4,12 +4,15 @@
 
 ## 当前状态
 
-- **已发布版本：V1.3.0**（2026-10-14）——三平台产物 + 校验值已在
-  [GitHub Release](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.0) 上线；
-  发布产物逐项抽验过（哈希 / 签名 / 结构），验收实况见 [ACCEPTANCE_V1.3.0.md](./ACCEPTANCE_V1.3.0.md)
+- **已发布版本：V1.3.1**（2026-10-19）——三平台产物 + 校验值已在
+  [GitHub Release](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.1) 上线；
+  发布产物逐项抽验过（哈希 / 签名 / 结构），验收实况见 [ACCEPTANCE_V1.3.1.md](./ACCEPTANCE_V1.3.1.md)；
+  上一版 V1.3.0 的记录见 [ACCEPTANCE_V1.3.0.md](./ACCEPTANCE_V1.3.0.md)
 - **已完成阶段**：Phase 0–6 的构建与发布配置；V1.1 / V1.2 系列功能、以及 **V1.3.0 的全部十项剩余任务**
   （决策档与校准评测、证据充分性与查询扩展、真机验收自动化、性能守护、体积对照、失败详情、附件引用口径…）均已交付
-- **工作区当前状态**：即 V1.3.0（代码与发布物一致；四处版本号 `1.3.0`）
+- **工作区当前状态**：即 V1.3.1（代码与发布物一致；四处版本号 `1.3.1`）
+- **分支约定**（2026-10-19 起）：`develop` 集成日常改动，`main` 只放**已发布 / 待打标签**的状态；
+  发版时在 `develop` 上改版本号与 CHANGELOG，快进合并到 `main`，**在 `main` 上打标签**，两边随后保持同步（详见 [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)）
 - **上一阶段**：~~[PLAN_V1.2.1.md](./PLAN_V1.2.1.md)~~ 已收口（真机验收 10 条 9 通过 + 1 不适用）
 - **本阶段**：[PLAN_V1.3.0.md](./PLAN_V1.3.0.md)（AI 增强 + 语义检索；**十项任务全部完成并逐项验证**，
   收口结论见该文件 §7）

@@ -286,6 +286,7 @@ pnpm bench -- --only search                    # 只跑检索（或 --only graph
 - [ARTIFACT_SIZES.md](./ARTIFACT_SIZES.md)：产物体积对照表（口径 / 逐形态 / 复现命令，E3）
 - [DEVELOPMENT_RULES.md](./DEVELOPMENT_RULES.md)：本地回归命令与文档同步规则
 - [WINDOWS_INSTALL_GUIDE.md](./WINDOWS_INSTALL_GUIDE.md) / [LINUX_INSTALL_GUIDE.md](./LINUX_INSTALL_GUIDE.md)：安装与放行说明
-- [ACCEPTANCE_V1.3.0.md](./ACCEPTANCE_V1.3.0.md)：**当前版本**（V1.3.0）的验收记录（发布前守护 / 产物与签名 / 安装卸载 / 待干净机器项）
+- [ACCEPTANCE_V1.3.1.md](./ACCEPTANCE_V1.3.1.md)：**当前版本**（V1.3.1）的验收记录（发布前守护 / 产物与签名 / 发布后抽验）
+- [ACCEPTANCE_V1.3.0.md](./ACCEPTANCE_V1.3.0.md)：上一版（V1.3.0）的验收记录
 - [ACCEPTANCE_V1.2.1.md](./ACCEPTANCE_V1.2.1.md)：上一版的验收清单（回归矩阵 / 性能实测 / 已知限制）
 - [ACCEPTANCE_V1.2.0.md](./ACCEPTANCE_V1.2.0.md)：上一版产物完整性（安装包仍对应该版本）

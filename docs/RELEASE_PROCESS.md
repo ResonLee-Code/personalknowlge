@@ -30,6 +30,26 @@ preflight（ubuntu-22.04）
 
 ## 3. 发版步骤
 
+### 分支约定（2026-10-19 起）
+
+仓库有两个长期分支，职责不同，别混用：
+
+| 分支 | 放什么 | 规则 |
+| --- | --- | --- |
+| `develop` | 日常开发 / 集成 | 所有功能与修复先落这里；本地自检（test / lint / build / e2e / 真机验收）在它上面跑 |
+| `main` | **已发布 / 待打标签**的状态 | 只在发版时从 `develop` 快进合并（`git merge --ff-only develop`）；标签**只打在 `main` 上** |
+
+发版时两边随后保持同步：打完标签、Release 产出并抽验通过后，`main` 与 `develop` 指向同一个提交。
+**不要**把功能提交直接推到 `main`，也**不要**在 `develop` 上打 `v*` 标签。
+
+```bash
+# 发版（在 develop 上改完版本号与 CHANGELOG、自检全绿之后）
+git switch main && git merge --ff-only develop
+git tag -a vX.Y.Z -m "Personal Knowledge OS vX.Y.Z"
+git push origin main vX.Y.Z
+git switch develop            # 之后继续在 develop 上开发
+```
+
 ```bash
 # 1) 统一版本号（四处：package.json / Cargo.toml / Cargo.lock / tauri.conf.json）
 #    并同步 docs/CHANGELOG.md 的版本段与「当前构建」
@@ -75,7 +95,8 @@ python3 scripts/cross/verify-pe.py "<解包出来的>/Personal Knowledge OS.exe"
 
 每个平台各自的 `SHA256SUMS-<platform>.txt` 会一并附在 Release 上，另有汇总的
 `SHA256SUMS-all.txt`。验收清单见：
-[当前版本（V1.3.0）](./ACCEPTANCE_V1.3.0.md) ·
+[当前版本（V1.3.1）](./ACCEPTANCE_V1.3.1.md) ·
+[上一版（V1.3.0）](./ACCEPTANCE_V1.3.0.md) ·
 [上一版（V1.2.1）](./ACCEPTANCE_V1.2.1.md) ·
 [上一版产物（V1.2.0）](./ACCEPTANCE_V1.2.0.md) ·
 [Windows 安装说明](./WINDOWS_INSTALL_GUIDE.md) · [Linux 安装说明](./LINUX_INSTALL_GUIDE.md)。

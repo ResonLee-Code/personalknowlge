@@ -1,6 +1,6 @@
 # Personal Knowledge OS — Complete Guide
 
-> Applies to **V1.3.0** (2026-10-14) · 中文版：[完全指南](./GUIDE.md)
+> Applies to **V1.3.1** (2026-10-19) · 中文版：[完全指南](./GUIDE.md)
 >
 > This guide is for **users**: install it, use it well, and know what to do when something looks wrong.
 > Developer/build details live in [BUILD_COMMANDS.md](./BUILD_COMMANDS.md) and [RELEASE_PROCESS.md](./RELEASE_PROCESS.md).
