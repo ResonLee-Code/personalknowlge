@@ -863,6 +863,27 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   const narrowButtons = await page.getByTestId('format-bar').locator('button').count();
   expect(narrowButtons).toBeLessThan(wideButtons);
   await expect(page.getByTestId('format-more')).toBeVisible();
+  /**
+   * 插入图片（2026-10-18 修）：必须**真的弹出文件选择框**。
+   * 回归背景：上一轮重写工具栏时把隐藏的 `<input type="file">` 一起删了，
+   * 于是点「图片…」什么都不发生（用户实测报的就是这个）。
+   * 浏览器预览模式写不了本地文件——但必须**明确报失败**，不能静默无反应。
+   */
+  await page.getByTestId('insert-menu').click();
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.getByRole('menuitem', { name: '图片…' }).click(),
+  ]);
+  await chooser.setFiles({
+    name: 'sample.png',
+    mimeType: 'image/png',
+    // 8×8 的合法 PNG（只用来喂给 FileReader，不要求画质）
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR42mP8z8Dwn4GBgYGJAQoAHgQCAZ7c4Y0AAAAASUVORK5CYII=',
+      'base64',
+    ),
+  });
+  await expect(page.getByText('保存图片失败')).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(500);
   const editorToolbar = page.locator('main');

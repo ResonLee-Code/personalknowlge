@@ -656,6 +656,73 @@ const CASES = [
       },
     ],
   },
+  {
+    id: 13,
+    title: '插入图片：原生文件选择框 → 落盘 attachments → 插入正文',
+    expect:
+      '点「插入内容 → 图片…」弹出系统文件面板；选中图片后附件落到 attachments/，正文写入 Markdown 图片链接',
+    steps: [
+      { op: 'app' },
+      { op: 'keyCode', code: 53 },
+      { op: 'click', frame: { role: 'AXLink', title: '全部笔记' } },
+      { op: 'pause', ms: 1000 },
+      { op: 'click', frame: { role: 'AXButton', title: '新建笔记' } },
+      { op: 'paste', text: '插入图片（真机验收）' },
+      { op: 'click', frame: { role: 'AXButton', title: '创建笔记' } },
+      { op: 'pause', ms: 1800 },
+      { op: 'keys', combo: 'cmd+e' },
+      { op: 'pause', ms: 400 },
+      /**
+       * 回归背景（2026-10-18）：上一轮重写工具栏时把隐藏的 `<input type="file">` 删掉了，
+       * 点「图片…」什么都不发生（用户实测报的正是这个）。这条用例从**菜单**点起，
+       * 一直到"附件真的落盘"与"正文真的写了链接"，断的是整条链路。
+       */
+      // Radix 菜单只认 pointerdown：AXPress 打不开 → 先聚焦触发按钮，再用回车展开
+      // （这也是键盘用户的真实路径；菜单项此时会作为 AXMenuItem 出现）
+      { op: 'focus', query: { role: 'AXPopUpButton', description: '插入内容' }, label: '「＋ 插入内容」' },
+      { op: 'pause', ms: 400 },
+      { op: 'keyCode', code: 36 },
+      { op: 'pause', ms: 900 },
+      {
+        op: 'expectElement',
+        query: { role: 'AXMenuItem', title: '图片…' },
+        label: '插入菜单里的「图片…」',
+      },
+      { op: 'click', frame: { role: 'AXMenuItem', title: '图片…' } },
+      { op: 'pause', ms: 1800 },
+      // 系统「打开」面板：⌘⇧G 输入路径 → 回车定位 → 回车打开
+      { op: 'keyCode', code: 5, modifiers: ['shift', 'cmd'] },
+      { op: 'pause', ms: 900 },
+      { op: 'paste', text: '/tmp/pkos-check/sample.png' },
+      { op: 'pause', ms: 600 },
+      { op: 'keyCode', code: 36 },
+      { op: 'pause', ms: 900 },
+      { op: 'keyCode', code: 36 },
+      { op: 'pause', ms: 2500 },
+      { op: 'keys', combo: 'cmd+s' },
+      { op: 'pause', ms: 1200 },
+      // 附件落盘（必须是**这一轮刚生成**的）
+      {
+        op: 'check',
+        path: 'attachments',
+        containsFile: '.png',
+        modifiedWithinMinutes: 2,
+      },
+      // 正文里写入了图片链接（Markdown 语法 + attachments 路径）
+      {
+        op: 'check',
+        path: '00_Inbox',
+        containsFile: '插入图片（真机验收）',
+        grep: 'attachments/',
+        modifiedWithinMinutes: 2,
+      },
+      { op: 'shot', name: '13-insert-image.png' },
+      {
+        op: 'manual',
+        note: '图片在预览里是否正常显示、尺寸是否合适，需要人眼看一下截图',
+      },
+    ],
+  },
 ];
 
 /** 第 10 条（首次启动放行）**只能**在干净机器上人工验，脚本明确不覆盖。 */

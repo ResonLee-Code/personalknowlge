@@ -725,6 +725,25 @@ export function NoteEditorPage() {
           <Save className="h-3.5 w-3.5" />
           保存
         </Button>
+        {/*
+          插入菜单里「图片…／附件…」用的隐藏文件选择框（2026-10-18 补回）：
+          上一轮重写工具栏那一段时**把它一起删掉了**，于是点「图片…」什么都不发生
+          （文件选择框根本不弹）。E2E 补了断言：点菜单里的「图片…」必须真的弹出文件选择框。
+        */}
+        <input
+          ref={attachInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          data-testid="insert-file-input"
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            event.target.value = '';
+            void handleAttachFiles(files, attachKindRef.current).then((snippet) => {
+              if (snippet) applyEdit((state) => insertBlock(state, snippet));
+            });
+          }}
+        />
         {/* 保存状态只留顶栏那一个（2026-10-16 按用户反馈）：
             这里再显示一次「已同步」，同一件事在屏幕上出现两遍，纯属噪音 */}
 

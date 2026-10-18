@@ -126,7 +126,7 @@ hdiutil attach Personal.Knowledge.OS_1.3.0_aarch64.dmg
 
 | 项目 | 结果 | 证据 |
 | --- | --- | --- |
-| 真机验收（E1 脚本，9 条用例） | ✅（当轮记录见 `docs/acceptance/` 里最新一轮；旧轮次移到 `src-tauri/target/acceptance-archive/`，不入库） | 例如 `docs/acceptance/20261017-005300/report.md`（12 条用例 / 185 步自动步骤通过） |
+| 真机验收（E1 脚本，13 条用例） | ✅ 每轮真跑都会更新（旧轮次移到 `src-tauri/target/acceptance-archive/`，不入库） | [`docs/acceptance/`](./acceptance/) 下**最新时间戳目录**里的 `report.md`：12 条自动用例 / 185 步通过；2026-10-18 又加了第 13 条（插入图片整链路） |
 | 跑的是什么 | 当前 `main` 构建的 `Personal Knowledge OS.app`（1.3.0，ad-hoc 签名，**不是** Release 里那份包） | `pnpm tauri build --bundles app`；应用内「关于」显示 1.3.0 |
 | 第 4 条（重写） | ✅ 33 步全过：先用设置页把前提摆回默认 → 这一栏切到大纲 → 挪到正文右侧 → **贴边 mini → 悬停展开 → 钉住** → 挪回列表栏；每处切换都有元素级断言（成对用到 `expectAbsent`） | 截图 `04-outline-in-list.png` / `04-outline-side.png` / `04-outline-mini.png` / `04-outline-hover.png` / `04-outline-split.png` |
 | 其余 8 条 | ✅ 与上一轮一致（笔记落盘、备份 zip、history、网页剪藏真的抓回、首页待复核卡片都在） | 同报告逐条明细 |

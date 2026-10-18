@@ -102,6 +102,34 @@ function resolvePoint(appName, target) {
   return { ok: true, point: { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 }, frame };
 }
 
+/**
+ * 在目录里**递归**找文件名包含 `needle` 的文件（最多 3 层，返回相对名字 + 绝对路径）。
+ *
+ * 为什么要递归（2026-10-18）：附件按 `attachments/YYYY-MM/` 分月存放，
+ * 只读顶层目录会得到"没有匹配的 .png"——那是**断言写错了**，不是没落盘。
+ */
+function findFilesRecursive(root, needle, depth = 3) {
+  const found = [];
+  const walk = (dir, prefix, level) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (level < depth) walk(path.join(dir, entry.name), relative, level + 1);
+      } else if (entry.name.includes(needle)) {
+        found.push({ name: relative, absolute: path.join(dir, entry.name) });
+      }
+    }
+  };
+  walk(root, '', 0);
+  return found;
+}
+
 /** 文件断言：`{path, exists, containsFile, grep}`（相对于工作区）。 */
 function runCheck(workspace, step) {
   const target = path.join(workspace, step.path);
@@ -115,8 +143,9 @@ function runCheck(workspace, step) {
   }
   if (step.containsFile) {
     if (!fs.existsSync(target)) return { ok: false, error: `不存在：${step.path}` };
-    const entries = fs.readdirSync(target).filter((name) => name.includes(step.containsFile));
-    if (entries.length === 0) return { ok: false, error: `${step.path} 下没有匹配「${step.containsFile}」的文件` };
+    // 递归找（附件在 attachments/YYYY-MM/ 子目录里）
+    const entries = findFilesRecursive(target, step.containsFile).map((entry) => entry.name);
+    if (entries.length === 0) return { ok: false, error: `${step.path}（含子目录）下没有匹配「${step.containsFile}」的文件` };
     // 「必须有**刚刚生成**的文件」：只检查"目录里有匹配文件"太弱——
     // 上次验收留下的旧文件也能让断言通过，等于没验（备份那条就踩过）。
     if (step.modifiedWithinMinutes) {
@@ -301,6 +330,19 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           record.detail = clicked.ok
             ? `click(${Math.round(point.point.x)},${Math.round(point.point.y)}) · ${clicked.method ?? 'CGEvent'}${why}`
             : clicked.error;
+          break;
+        }
+        /**
+         * 聚焦某个元素（2026-10-18）。
+         * Radix 的下拉菜单触发按钮只认 `pointerdown`，AXPress 的 `click` 打不开它；
+         * 但触发按钮可聚焦，聚焦后回车/空格就按它的键盘逻辑展开（键盘用户的真实路径）。
+         */
+        case 'focus': {
+          const focused = mac.focus(appName, step.query);
+          record.status = focused.ok ? 'passed' : 'failed';
+          record.detail = focused.ok
+            ? `已聚焦：${step.label || JSON.stringify(step.query)}`
+            : focused.error;
           break;
         }
         case 'drag': {

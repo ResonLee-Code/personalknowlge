@@ -93,6 +93,11 @@ function click(appName, point, query) {
   return agent({ op: 'click', app: appName, point, query });
 }
 
+/** 把元素设为焦点（给 Radix 菜单用：它们只认 pointerdown，AXPress 打不开）。 */
+function focus(appName, query) {
+  return agent({ op: 'focus', app: appName, query });
+}
+
 function drag(from, to) {
   return agent({ op: 'drag', from, to });
 }
@@ -141,6 +146,7 @@ module.exports = {
   activate,
   frameOf,
   click,
+  focus,
   drag,
   hover,
   scroll,

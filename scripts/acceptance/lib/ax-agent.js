@@ -185,6 +185,26 @@ function run(argv) {
         return out(frame ? { ok: true, frame: frame } : { ok: false, error: '拿不到坐标' });
       }
       /**
+       * 把元素设为**焦点**（2026-10-18）。
+       *
+       * 为什么需要：Radix 的下拉菜单触发按钮只认 `pointerdown` 才展开，而 AXPress 合成的是
+       * `click`——于是 `AXPress` 之后菜单根本不弹（实测：工作区切换、插入菜单、更多操作都这样）。
+       * 但这些触发按钮**本身是可聚焦的**，聚焦后按回车/空格就按 Radix 的键盘逻辑展开
+       * （这也正是键盘用户的真实路径）。所以这里补一个"设焦点"原语，菜单类控件走
+       * `focus → 回车 → 点菜单项`。
+       */
+      case 'focus': {
+        const process = Application('System Events').processes.byName(request.app);
+        const element = findElementWithRetry(process, request.query || {});
+        if (!element) return out({ ok: false, error: '没找到元素' });
+        try {
+          element.focused = true;
+          return out({ ok: true });
+        } catch (error) {
+          return out({ ok: false, error: `设焦点失败：${String(error)}` });
+        }
+      }
+      /**
        * 点击：**优先 AXPress**（`element.click()`），拿不到动作才退到真实鼠标事件。
        *
        * 为什么（2026-10-14 实测）：这个应用的界面跑在 WKWebView 里，
@@ -267,12 +287,22 @@ function run(argv) {
         } catch (error) {
           // 拿不到窗口框就按原点走：最坏情况跟以前一样（可能不展开）
         }
+        /**
+         * **从旁边移进去**，而不是瞬移（2026-10-18 实测）：
+         * 贴边条只有 14px 宽、又贴着窗口右缘，直接跳到它的中心时 WebKit 不派发 mouseover
+         * （现象是"hover 步骤 ✅ 但面板没展开"，在长流程里约一半概率）。
+         * 先移到它左侧 28px 的空白处，再分两步挪进去——这就是真人把鼠标移上去的轨迹。
+         */
+        postMouse($.kCGEventMouseMoved, { x: point.x - 28, y: point.y });
+        delay(0.08);
+        postMouse($.kCGEventMouseMoved, { x: point.x - 10, y: point.y });
+        delay(0.08);
         postMouse($.kCGEventMouseMoved, point);
-        // 再补一次：WebKit 对"从没动过就停在原地"的移动不一定会派发 mouseover（实测）
-        delay(0.15);
+        // 最后再来一次微动：确保最后的 mouseover 落在目标上
+        delay(0.1);
         postMouse($.kCGEventMouseMoved, {
           x: point.x - (request.jitter || 2),
-          y: point.y - (request.jitter || 2),
+          y: point.y + (request.jitter || 2),
         });
         return out({ ok: true });
       }
