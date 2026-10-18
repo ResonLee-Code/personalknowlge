@@ -282,6 +282,8 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.locator('.cm-content')).toBeVisible();
 
   // 本篇有一处未解析链接，可一键创建；元信息栏显示引用计数
+  // 未解析子区默认收起（2026-10-19，避免非全屏时把正文挤没）：先展开
+  await page.getByTestId('unresolved-toggle').click();
   await expect(page.getByTestId('unresolved-item')).toHaveCount(1);
   await expect(page.getByTestId('backlink-panel')).toContainText('被 0 篇引用');
   await page.screenshot({ path: path.join(SHOTS, '16-backlink-panel.png') });
@@ -962,6 +964,20 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
     page.locator('[data-testid="mermaid-diagram"]').last().locator('svg'),
   ).toBeVisible();
   void editorToolbar;
+
+  /**
+   * 39. 非全屏窗口：正文编辑/预览必须留得住高度（2026-10-19 用户报的挤压）。
+   * 回归点：底部「关系 + 反向链接 + 本篇未解析」以前不设上限，光未解析链接就能吃掉半个窗口。
+   * 现在整块最多 42%、内部滚动，且未解析默认收起——这里在小窗口下量一次。
+   */
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForTimeout(400);
+  const bottomPanels = (await page.getByTestId('editor-bottom-panels').boundingBox())!;
+  const editorArea = (await page.getByTestId('editor-pane').boundingBox())!;
+  expect(editorArea.height).toBeGreaterThan(220);
+  expect(bottomPanels.height).toBeLessThanOrEqual(340); // ≈ 42% × 800 上下
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(400);
 
   // 选中笔记后开关可用：点它 = 这一栏换成大纲（不多占一列）
   await expect(page.getByTestId('outline-toggle')).toBeEnabled();

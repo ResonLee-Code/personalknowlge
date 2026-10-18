@@ -28,6 +28,14 @@ interface BacklinkPanelProps {
 export function BacklinkPanel({ noteId, refreshKey = 0 }: BacklinkPanelProps) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(true);
+  /**
+   * 「本篇未解析链接」默认**收起**（2026-10-19）。
+   *
+   * 背景：非全屏窗口里，这 9 条未解析链接（每条一行 + 创建按钮）会把正文编辑/预览
+   * 挤到只剩两百多像素。它们不是每次都看，收起后用一个带数量的入口提示即可；
+   * 需要处理时点开（展开后仍受面板自身的高度上限约束、可滚动）。
+   */
+  const [unresolvedOpen, setUnresolvedOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   /** 已加载完成的笔记 id，用于避免切换笔记时短暂显示上一篇的数据 */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
@@ -203,33 +211,49 @@ export function BacklinkPanel({ noteId, refreshKey = 0 }: BacklinkPanelProps) {
 
           {unresolved.length > 0 ? (
             <div className="space-y-1 border-t border-dashed border-[var(--border-subtle)] pt-2">
-              <p className="flex items-center gap-1 text-[11px] font-medium text-amber-600">
+              <button
+                type="button"
+                data-testid="unresolved-toggle"
+                aria-expanded={unresolvedOpen}
+                className="flex w-full items-center gap-1 rounded text-[11px] font-medium text-amber-600 hover:text-amber-700"
+                onClick={() => setUnresolvedOpen((value) => !value)}
+              >
+                {unresolvedOpen ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
                 <Unlink2 className="h-3 w-3" />
                 本篇未解析链接
-              </p>
-              <ul className="space-y-1">
-                {unresolved.map((link, index) => (
-                  <li
-                    key={`${link.targetTitle}-${index}`}
-                    data-testid="unresolved-item"
-                    className="flex items-center gap-2 rounded-md px-2 py-1"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-xs text-[var(--ink-muted)]">
-                      [[{link.targetTitle}]]
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      aria-label={`创建笔记：${link.targetTitle}`}
-                      disabled={creating === link.targetTitle}
-                      onClick={() => void createNote(link.targetTitle)}
+                <span className="rounded-full bg-amber-500/10 px-1.5 text-[10px]">
+                  {unresolved.length}
+                </span>
+              </button>
+              {unresolvedOpen ? (
+                <ul className="space-y-1">
+                  {unresolved.map((link, index) => (
+                    <li
+                      key={`${link.targetTitle}-${index}`}
+                      data-testid="unresolved-item"
+                      className="flex items-center gap-2 rounded-md px-2 py-1"
                     >
-                      <Plus className="h-3 w-3" />
-                      创建
-                    </Button>
-                  </li>
-                ))}
-              </ul>
+                      <span className="min-w-0 flex-1 truncate text-xs text-[var(--ink-muted)]">
+                        [[{link.targetTitle}]]
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        aria-label={`创建笔记：${link.targetTitle}`}
+                        disabled={creating === link.targetTitle}
+                        onClick={() => void createNote(link.targetTitle)}
+                      >
+                        <Plus className="h-3 w-3" />
+                        创建
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
         </div>

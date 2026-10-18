@@ -119,6 +119,8 @@ describe('BacklinkPanel', () => {
     renderPanel();
 
     expect(await screen.findByText('本篇未解析链接')).toBeInTheDocument();
+    // 未解析子区默认收起（2026-10-19，避免把正文挤没）：先展开再操作
+    await userEvent.click(screen.getByTestId('unresolved-toggle'));
     await userEvent.click(screen.getByRole('button', { name: '创建笔记：还没有的笔记' }));
 
     await waitFor(() =>

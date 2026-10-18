@@ -770,7 +770,8 @@ export function NoteEditorPage() {
         </div>
       </div>
 
-      <div className="space-y-2 border-b border-[var(--border-subtle)] px-4 py-3">
+      {/* 标题 + 元信息（2026-10-19）：非全屏时这一块也在抢正文高度，内外边距各收一档 */}
+      <div className="space-y-1.5 border-b border-[var(--border-subtle)] px-4 py-2">
         <Input
           aria-label="笔记标题"
           value={title}
@@ -999,13 +1000,23 @@ export function NoteEditorPage() {
         ) : null}
       </div>
 
-      <RelationsPanel
-        noteId={note.id}
-        refreshKey={linkRevision}
-        onChanged={bumpLinkRevision}
-      />
+      {/*
+        底部信息区整体**限高**（2026-10-19，非全屏窗口的正文被挤到只剩两百多像素）：
+        关系 / 反向链接 / 本篇未解析 三块加起来以前不设上限，光"未解析链接"就能吃掉半个窗口。
+        现在这一整块最多占 42% 高度、内部自己滚动，正文（上面的 flex-1）始终拿得住空间。
+      */}
+      <div
+        data-testid="editor-bottom-panels"
+        className="flex max-h-[42%] min-h-0 shrink-0 flex-col overflow-y-auto"
+      >
+        <RelationsPanel
+          noteId={note.id}
+          refreshKey={linkRevision}
+          onChanged={bumpLinkRevision}
+        />
 
-      <BacklinkPanel noteId={note.id} refreshKey={linkRevision} />
+        <BacklinkPanel noteId={note.id} refreshKey={linkRevision} />
+      </div>
 
       <ConflictDialog onKeepLocal={() => setForceOverwrite(true)} />
       {noteActionRequest === 'move' ? (
