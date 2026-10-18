@@ -57,7 +57,7 @@ scripts/size-report.sh --json   # 机器可读
 注意：**包内那个二进制（11,871,424 B）与独立构建出来的（11,940,704 B）不是一个数**——
 打包时 tauri 会用 `codesign` 重新签一遍（带上 hardened runtime 标记），签名数据不同，别混着比。
 
-### 2.1 已发布版本：V1.3.1 Release 资产（CI 实测，精确字节）
+### 2.1 已发布版本的 Release 资产（CI 实测，精确字节）
 
 这一节按**用户下载到的资产**记账（`Content-Length` / 下载后 `stat -f%z` 一致）。
 机器是 GitHub Actions：macOS 为 `macos-14`（arm64），Windows 为 `windows-latest`（x64），
@@ -75,6 +75,20 @@ Linux 为 `ubuntu-22.04`（x64）。**不可与本机 arm64 构建的数字混�
 > 对照 V1.3.0（同为 CI macOS arm64）：`.dmg` 5,431,245 → 6,971,535 B（**+1,540,290 B**）。
 > 增量主要来自 V1.3.1 新增的图形渲染链路（mermaid / elk / cytoscape 等前端依赖，
 > 前端 `dist` 从 1.9 MB 涨到 6.7 MB，构建后内嵌进二进制）。
+
+**V1.3.2**（纯布局修复，CI 资产）：
+
+| 资产 | 平台 | 字节 | 相对 V1.3.1 |
+| --- | --- | ---: | ---: |
+| `Personal.Knowledge.OS_1.3.2_aarch64.dmg` | macOS arm64 | 6,972,175 | +640 B |
+| `Personal.Knowledge.OS_1.3.2_x64-setup.exe` | Windows x64（NSIS） | 5,820,475 | −1,784 B |
+| `Personal.Knowledge.OS_1.3.2_x64-portable.zip` | Windows x64（便携） | 7,019,936 | +41 B |
+| `Personal.Knowledge.OS_1.3.2_amd64.deb` | Linux x64 | 7,741,508 | +676 B |
+| `Personal.Knowledge.OS-1.3.2-1.x86_64.rpm` | Linux x64 | 7,742,677 | +725 B |
+| `Personal.Knowledge.OS_1.3.2_amd64.AppImage` | Linux x64 | 85,727,736 | +4,096 B |
+
+> 几百字节到几 KB 的差异是打包时间戳 / 压缩分块带来的，**不是功能增量**；
+> 本机 release 二进制在 V1.3.1 与 V1.3.2 之间字节数完全相同（见 §4）。
 
 ## 3. 每个形态"包含什么、能不能独立运行"
 

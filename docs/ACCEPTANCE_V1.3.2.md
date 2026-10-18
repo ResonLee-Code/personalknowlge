@@ -53,8 +53,31 @@
 
 ## D. 发布后抽验
 
-（标签推送、CI 完成后填写；必查：下载目录里 `shasum -a 256 -c SHA256SUMS-all.txt` 6/6 OK、
-macOS `.dmg` 版本与签名、Windows 便携版 PE 结构、deb/rpm/AppImage 文件类型。）
+CI run **39152786198**：preflight / macOS / Windows / Linux / Release 五个作业 **全部 success**
+（总耗时 17 分 23 秒）。发布后把 10 个资产下载到空目录，按用户路径抽验：
+
+| 项目 | 结果 | 证据 |
+| --- | --- | --- |
+| Release 资产 | ✅ 10 个 | 6 个安装包 + 4 份校验文件 |
+| **汇总校验** | ✅ **6/6 OK、退出码 0** | `shasum -a 256 -c SHA256SUMS-all.txt` |
+| 校验文件行尾 | ✅ 全部 LF | `grep $'\r'` 四份均为 0 命中（本轮 workflow 修复已生效） |
+| macOS `.dmg` | ✅ 可挂载、版本正确、签名有效 | `CFBundleShortVersionString = 1.3.2`、`CFBundleVersion = 1.3.2`；`codesign --verify --deep --strict` → *valid on disk* / *satisfies its Designated Requirement*；`spctl` → *rejected*（ad-hoc，见 §E） |
+| Windows 便携版 exe | ✅ 结构校验通过 | PE32+ / x86-64 / GUI / 12.3 MB |
+| Windows `setup.exe` | ✅ NSIS 安装器 | `PE32 ... Nullsoft Installer self-extracting archive`；外壳 i386 是 NSIS stub 的正常形态 |
+| Linux `.deb` | ✅ 结构完整 | control：`Version: 1.3.2`、`Architecture: amd64`；payload 含 `usr/bin/personal-knowledge-os` 与 `.desktop` |
+| Linux `.rpm` | ✅ 结构完整（未安装级验证） | `bsdtar -tf` 列出二进制 / `.desktop` / 图标 |
+| Linux `.AppImage` | ✅ ELF x86-64 | 内嵌 squashfs（`hsqs` 魔数）；**未在 Linux 桌面实际运行** |
+
+发布资产精确字节：
+
+| 资产 | 字节 |
+| --- | ---: |
+| `Personal.Knowledge.OS_1.3.2_aarch64.dmg` | 6,972,175 |
+| `Personal.Knowledge.OS_1.3.2_x64-setup.exe` | 5,820,475 |
+| `Personal.Knowledge.OS_1.3.2_x64-portable.zip` | 7,019,936 |
+| `Personal.Knowledge.OS_1.3.2_amd64.deb` | 7,741,508 |
+| `Personal.Knowledge.OS-1.3.2-1.x86_64.rpm` | 7,742,677 |
+| `Personal.Knowledge.OS_1.3.2_amd64.AppImage` | 85,727,736 |
 
 ## E. 已知限制（与 V1.3.1 相同，未因本版改变）
 
