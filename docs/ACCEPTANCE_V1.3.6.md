@@ -30,7 +30,18 @@
 
 ## D. 发布后抽验
 
-（CI 完成后填写。）
+Release 已生成（10 个资产）。按用户路径抽验：
+
+| 项目 | 结果 | 证据 |
+| --- | --- | --- |
+| 校验文件行尾 | ✅ 全部 LF | 4 份 `SHA256SUMS-*.txt` 均无 `\r` |
+| **汇总校验** | ✅ **6/6 OK、退出码 0** | `shasum -a 256 -c SHA256SUMS-all.txt` |
+| macOS `.dmg` | ✅ 哈希一致、版本 `1.3.6`、`codesign` 有效 | 挂载后 `CFBundleShortVersionString = 1.3.6`；`spctl` 仍 rejected（ad-hoc） |
+| Windows 便携版 exe | ✅ PE32+ / x86-64 / GUI / 12.3 MB | `scripts/cross/verify-pe.py` |
+| Windows `setup.exe` | ✅ NSIS 安装器 | PE32 i386 stub 属正常 |
+| Linux `.deb` | ✅ `Version: 1.3.6`、`Architecture: amd64` | control + payload 二进制 / `.desktop` |
+| Linux `.rpm` | ✅ 结构完整 | `bsdtar -tf` 列出二进制 / `.desktop` / 图标 |
+| Linux `.AppImage` | ✅ ELF x86-64 + 内嵌 squashfs | `file` + `hsqs` 魔数 |
 
 ## E. 已知限制
 

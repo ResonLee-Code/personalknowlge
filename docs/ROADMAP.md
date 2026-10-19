@@ -14,8 +14,9 @@
 - **分支约定**（2026-10-19 起）：`develop` 集成日常改动，`main` 只放**已发布 / 待打标签**的状态；
   发版时在 `develop` 上改版本号与 CHANGELOG，快进合并到 `main`，**在 `main` 上打标签**，两边随后保持同步（详见 [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)）
 - **上一阶段**：~~[PLAN_V1.2.1.md](./PLAN_V1.2.1.md)~~ 已收口（真机验收 10 条 9 通过 + 1 不适用）
-- **当前阶段**：V1.3.x 维护（V1.3.5 已取消自绘标题栏；V1.3.0 的 AI 增强 + 语义检索十项任务已全部收口，
-  见 [PLAN_V1.3.0.md](./PLAN_V1.3.0.md) §7）
+- **当前阶段**：V1.3.x 维护（V1.3.6 绿灯恢复系统全屏箭头、点击仅缩放）；下一步为
+  [V2.0.0 规划](./PLAN_V2.0.0.md)。V1.3.0 的 AI 增强 + 语义检索十项任务已全部收口，
+  见 [PLAN_V1.3.0.md](./PLAN_V1.3.0.md) §7
 - **变更明细**：见 [CHANGELOG.md](./CHANGELOG.md) · **构建命令**：见 [BUILD_COMMANDS.md](./BUILD_COMMANDS.md)
 - **上手文档**：[完全指南（中文）](./GUIDE.md) · [Complete Guide (English)](./GUIDE.en.md)
 
