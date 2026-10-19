@@ -36,7 +36,20 @@
 
 ## D. 发布后抽验
 
-（CI 完成后填写。）
+Release **已生成**（`published 2026-10-19T16:10:38Z`，10 个资产）。
+注意：GitHub Actions 页面/接口一度仍显示 `queued`（GitHub 状态为 Partially Degraded Service），
+但 Release 与资产实际已上传；以 Release API 与下载校验为准。
+
+| 项目 | 结果 | 证据 |
+| --- | --- | --- |
+| 校验文件行尾 | ✅ 全部 LF | 4 份 `SHA256SUMS-*.txt` 均无 `\r` |
+| macOS `.dmg` | ✅ 哈希一致、版本 `1.3.5`、`codesign` 有效 | 挂载后 `CFBundleShortVersionString/CFBundleVersion = 1.3.5`；`spctl` 仍为 rejected（ad-hoc） |
+| Windows 便携版 exe | ✅ PE32+ / x86-64 / GUI / 12.3 MB | `scripts/cross/verify-pe.py` |
+| Windows `setup.exe` | ✅ NSIS 安装器 | PE32 i386 stub 属正常 |
+| Linux `.deb` | ✅ `Version: 1.3.5`、`Architecture: amd64` | control + payload 二进制 / `.desktop` |
+| Linux `.rpm` | ✅ 结构完整 | `bsdtar -tf` 列出二进制 / `.desktop` / 图标 |
+| Linux `.AppImage` | ✅ ELF x86-64 + 内嵌 squashfs | `file`: ELF 64-bit LSB pie / x86-64；`hsqs` 魔数存在；85,723,640 B |
+| **汇总校验** | ✅ **6/6 OK、退出码 0** | 空目录下载全部 10 个资产后 `shasum -a 256 -c SHA256SUMS-all.txt` |
 
 ## E. 已知限制
 

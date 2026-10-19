@@ -90,6 +90,17 @@ Linux 为 `ubuntu-22.04`（x64）。**不可与本机 arm64 构建的数字混�
 > 几百字节到几 KB 的差异是打包时间戳 / 压缩分块带来的，**不是功能增量**；
 > 本机 release 二进制在 V1.3.1 与 V1.3.2 之间字节数完全相同（见 §4）。
 
+**V1.3.5**（取消自绘标题栏、原生缩放；CI 资产）：
+
+| 资产 | 平台 | 字节 |
+| --- | --- | ---: |
+| `Personal.Knowledge.OS_1.3.5_aarch64.dmg` | macOS arm64 | 6,973,243 |
+| `Personal.Knowledge.OS_1.3.5_x64-setup.exe` | Windows x64（NSIS） | 5,820,930 |
+| `Personal.Knowledge.OS_1.3.5_x64-portable.zip` | Windows x64（便携） | 7,020,572 |
+| `Personal.Knowledge.OS_1.3.5_amd64.deb` | Linux x64 | 7,742,466 |
+| `Personal.Knowledge.OS-1.3.5-1.x86_64.rpm` | Linux x64 | 7,743,520 |
+| `Personal.Knowledge.OS_1.3.5_amd64.AppImage` | Linux x64 | 85,723,640 |
+
 ## 3. 每个形态"包含什么、能不能独立运行"
 
 | 形态 | 里面是什么 | 能独立运行吗 | 复现命令 |
