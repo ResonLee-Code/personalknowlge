@@ -9,6 +9,27 @@
 
 ---
 
+## V1.3.6（2026-10-20）
+
+### 绿色按钮：保留系统全屏箭头外观，但只做缩放
+
+V1.3.5 试图给“缩放按钮”替换系统模板图，但 AppKit 会覆盖标准窗口按钮的 image，
+用户实测鼠标扫过仍是 `+`。
+
+最终做法（不碰自绘按钮）：
+
+- 保留窗口的 `FullScreenPrimary`，绿色按钮恢复为 macOS 的 **`full screen button`**——
+  系统自己绘制对角箭头；
+- 在窗口层注册 `PKOSZoomWindow` 子类，重写 `toggleFullScreen:` → 调用 `zoom:`：
+  点绿色按钮、菜单 `Zoom`、`⌃⌘F` 都只做系统缩放，不会进入会藏标题栏的原生全屏；
+- 删除 V1.3.5 的 `NSImageNameExitFullScreenTemplate` 图片替换代码。
+
+**真机验证**：无障碍树 `description of button 2 = full screen button`；点击后
+`AXFullScreen = false`，窗口 `0,33,1512×859`（铺满宽度、标题栏与菜单栏保留）；
+再点菜单 `Zoom` 恢复 `66,33,1380×859`。
+
+---
+
 ## V1.3.5（2026-10-19）
 
 ### 取消自绘标题栏：任何状态都用系统原生红黄绿

@@ -165,8 +165,11 @@ pub fn run() {
 /// 窗口铺满可用区域，但标题栏、菜单栏和系统红黄绿全部保留。
 #[cfg(target_os = "macos")]
 fn configure_macos_window(app: &tauri::App) {
-    use objc2::msg_send;
-    use objc2::runtime::AnyObject;
+    use std::ffi::CStr;
+    use std::sync::OnceLock;
+
+    use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, Sel};
+    use objc2::{class, msg_send, sel};
     use tauri::Manager;
 
     let Some(window) = app.get_webview_window("main") else {
@@ -175,37 +178,37 @@ fn configure_macos_window(app: &tauri::App) {
     };
     match window.ns_window() {
         Ok(pointer) => {
-            // SAFETY: setup 在 macOS 主线程执行；Tauri 返回当前窗口的有效 NSWindow 指针，
-            // 这里只读取 / 设置 collectionBehavior，不转移所有权。
-            let ns_window = pointer as *mut AnyObject;
-            // NSWindowCollectionBehaviorFullScreenPrimary = 1 << 7
-            // NSWindowCollectionBehaviorFullScreenNone    = 1 << 9
-            // 禁用原生全屏：绿色按钮执行系统缩放（保留标题栏 / 红黄绿）。
-            let behavior: usize = unsafe { msg_send![ns_window, collectionBehavior] };
-            let next = (behavior & !(1usize << 7)) | (1usize << 9);
-            let _: () = unsafe { msg_send![ns_window, setCollectionBehavior: next] };
-
-            // 绿色按钮的默认“缩放”图标是 +；换成系统自带的“退出全屏”模板图（对角箭头），
-            // 与用户附图里的样式一致。按钮本身仍是系统绘制，只替换 image。
-            // NSWindowZoomButton = 3
-            let button: *mut AnyObject = unsafe { msg_send![ns_window, standardWindowButton: 3usize] };
-            if !button.is_null() {
-                let name: *mut AnyObject = unsafe {
-                    msg_send![
-                        objc2::class!(NSString),
-                        stringWithUTF8String: b"NSImageNameExitFullScreenTemplate\0".as_ptr()
-                    ]
-                };
-                let image: *mut AnyObject =
-                    unsafe { msg_send![objc2::class!(NSImage), imageNamed: name] };
-                if !image.is_null() {
-                    let _: () = unsafe { msg_send![button, setImage: image] };
-                    let _: () = unsafe { msg_send![button, setAlternateImage: image] };
-                }
+            /// 绿色按钮保持系统“全屏”外观（对角箭头），但执行系统“缩放”。
+            extern "C-unwind" fn toggle_full_screen_as_zoom(
+                this: &mut AnyObject,
+                _cmd: Sel,
+                _sender: *mut AnyObject,
+            ) {
+                // SAFETY: 由 AppKit 在主线程调用；zoom: 是 NSWindow 的标准方法。
+                let _: () = unsafe { msg_send![this, zoom: std::ptr::null_mut::<AnyObject>()] };
             }
+
+            static ZOOM_ONLY_WINDOW: OnceLock<&'static AnyClass> = OnceLock::new();
+            let zoom_class = ZOOM_ONLY_WINDOW.get_or_init(|| {
+                let name = CStr::from_bytes_with_nul(b"PKOSZoomWindow\0").expect("class name");
+                let mut builder = ClassBuilder::new(name, class!(NSWindow))
+                    .expect("创建 PKOSZoomWindow 失败（已存在？）");
+                unsafe {
+                    builder.add_method(
+                        sel!(toggleFullScreen:),
+                        toggle_full_screen_as_zoom as extern "C-unwind" fn(_, _, _),
+                    );
+                }
+                builder.register()
+            });
+
+            // SAFETY: setup 在 macOS 主线程执行；子类只重写 toggleFullScreen:，
+            // 不新增实例变量，实例大小与 NSWindow 相同。
+            let ns_window = pointer as *mut AnyObject;
+            unsafe { AnyObject::set_class(&*ns_window, zoom_class) };
             tracing::info!(
                 target: "app",
-                "macOS 已禁用原生全屏：绿色按钮执行系统缩放，并使用系统全屏箭头图标"
+                "macOS 绿色按钮保留系统全屏箭头外观，但 toggleFullScreen: 已重定向为 zoom:"
             );
         }
         Err(error) => {
