@@ -1026,13 +1026,16 @@ export function NoteEditorPage() {
         - 点「展开」后才渲染关系与反向链接面板，并且整块最多占 42%、内部滚动；
         - 「未解析 N」可以直接展开到未解析列表，不用再点第二次。
       */}
-      <div data-testid="editor-bottom-panels" className="flex min-h-0 shrink-0 flex-col">
-        <div className="flex h-8 shrink-0 items-center gap-3 border-t border-[var(--border-subtle)] px-4 text-[11px] text-[var(--ink-subtle)]">
+      <div
+        data-testid="editor-bottom-panels"
+        className="flex max-h-[42%] min-h-0 shrink-0 flex-col"
+      >
+        <div className="flex h-8 shrink-0 items-center gap-3 border-t border-[var(--border-subtle)] pl-1 pr-3 text-[11px] text-[var(--ink-subtle)]">
           <button
             type="button"
             data-testid="editor-bottom-toggle"
             aria-expanded={bottomOpen}
-            className="flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+            className="flex items-center gap-1 rounded py-0.5 pl-0 pr-1 transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
             title={bottomOpen ? '收起关系与反向链接' : '展开关系与反向链接'}
             onClick={() => setBottomOpen((value) => !value)}
           >
@@ -1076,12 +1079,13 @@ export function NoteEditorPage() {
         {bottomOpen ? (
           <div
             data-testid="editor-bottom-details"
-            className="flex max-h-[42%] min-h-0 flex-col overflow-y-auto"
+            className="flex min-h-0 flex-1 flex-col overflow-y-auto"
           >
             <RelationsPanel
               noteId={note.id}
               refreshKey={linkRevision}
               onChanged={bumpLinkRevision}
+              embedded
             />
 
             <BacklinkPanel
@@ -1089,6 +1093,7 @@ export function NoteEditorPage() {
               refreshKey={linkRevision}
               unresolvedOpen={unresolvedOpen}
               onUnresolvedOpenChange={setUnresolvedOpen}
+              embedded
             />
           </div>
         ) : null}

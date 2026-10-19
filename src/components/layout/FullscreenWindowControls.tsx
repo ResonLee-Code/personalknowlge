@@ -63,6 +63,27 @@ export function FullscreenWindowControls() {
     [],
   );
 
+  /**
+   * 顶部 32px 的悬停感应（2026-10-19）。
+   *
+   * 不用一个透明的 fixed div 去接 mouseenter：那会挡住应用顶栏的点击（搜索、工作区名）。
+   * 改成监听 document 的 mousemove，只在指针进入顶部区域时把标题栏显出来；
+   * 指针在内容区时不做任何事。
+   */
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onMove = (event: MouseEvent) => {
+      if (event.clientY > 32) return;
+      if (hideTimer.current) {
+        window.clearTimeout(hideTimer.current);
+        hideTimer.current = null;
+      }
+      setVisible(true);
+    };
+    window.addEventListener('mousemove', onMove, { passive: true });
+    return () => window.removeEventListener('mousemove', onMove);
+  }, [fullscreen]);
+
   if (!fullscreen) return null;
 
   const cancelHide = () => {
@@ -75,62 +96,58 @@ export function FullscreenWindowControls() {
     cancelHide();
     hideTimer.current = window.setTimeout(() => setVisible(false), HIDE_DELAY);
   };
-  const reveal = () => {
-    cancelHide();
-    setVisible(true);
-  };
   const win = getCurrentWindow();
 
   return (
     <>
-      <div
-        data-testid="fullscreen-hover-sensor"
-        aria-hidden
-        className="fixed inset-x-0 top-0 z-[70] h-2.5"
-        onMouseEnter={reveal}
-        onMouseMove={reveal}
-      />
       <div
         data-testid="fullscreen-window-controls"
         role="toolbar"
         aria-label="全屏窗口控制"
         title="鼠标移到屏幕顶部可再次显示"
         className={cn(
-          'fixed left-3 top-1.5 z-[71] flex h-8 items-center gap-2 rounded-full',
-          'border border-[var(--border-subtle)] bg-[var(--surface)] px-3 shadow-lg transition-opacity duration-150',
+          'fixed inset-x-0 top-0 z-[71] flex h-12 items-center px-5',
+          'border-b border-[var(--border-subtle)] bg-[var(--surface-muted)] shadow-sm',
+          'transition-opacity duration-150',
           visible ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
         onMouseEnter={cancelHide}
         onMouseLeave={scheduleHide}
       >
-        <button
-          type="button"
-          aria-label="关闭窗口"
-          title="关闭"
-          className="group flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#ff5f57] text-black/55"
-          onClick={() => void win.close()}
-        >
-          <X className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100" />
-        </button>
-        <button
-          type="button"
-          aria-label="最小化窗口"
-          title="最小化"
-          className="group flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#febc2e] text-black/55"
-          onClick={() => void win.minimize()}
-        >
-          <Minus className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100" />
-        </button>
-        <button
-          type="button"
-          aria-label="退出全屏"
-          title="退出全屏"
-          className="group flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#28c840] text-black/55"
-          onClick={() => void win.setFullscreen(false)}
-        >
-          <Maximize2 className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100" />
-        </button>
-        <span className="ml-1 text-[10px] text-[var(--ink-subtle)]">全屏</span>
+        {/* 三个圆点作为一组：鼠标落在任意一个上，三个图标一起出现（与 macOS 原生一致） */}
+        <div className="group flex items-center gap-2">
+          <button
+            type="button"
+            aria-label="关闭窗口"
+            title="关闭"
+            className="flex h-3 w-3 items-center justify-center rounded-full bg-[#ff5f57] text-black/55 ring-1 ring-black/10"
+            onClick={() => void win.close()}
+          >
+            <X className="h-2 w-2 opacity-0 group-hover:opacity-100" />
+          </button>
+          <button
+            type="button"
+            aria-label="最小化窗口"
+            title="最小化"
+            className="flex h-3 w-3 items-center justify-center rounded-full bg-[#febc2e] text-black/55 ring-1 ring-black/10"
+            onClick={() => void win.minimize()}
+          >
+            <Minus className="h-2 w-2 opacity-0 group-hover:opacity-100" />
+          </button>
+          <button
+            type="button"
+            aria-label="退出全屏"
+            title="退出全屏"
+            className="flex h-3 w-3 items-center justify-center rounded-full bg-[#28c840] text-black/55 ring-1 ring-black/10"
+            onClick={() => void win.setFullscreen(false)}
+          >
+            <Maximize2 className="h-2 w-2 opacity-0 group-hover:opacity-100" />
+          </button>
+        </div>
+        {/* 居中标题：模仿原生标题栏（附图2），不额外加「全屏」等标签 */}
+        <span className="pointer-events-none absolute inset-x-0 text-center text-[13px] font-semibold text-[var(--ink)]">
+          Personal Knowledge OS
+        </span>
       </div>
     </>
   );

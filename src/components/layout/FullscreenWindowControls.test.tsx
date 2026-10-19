@@ -33,18 +33,17 @@ describe('FullscreenWindowControls', () => {
 
   it('全屏时默认隐藏，鼠标扫过顶部才显示控制条', async () => {
     render(<FullscreenWindowControls />);
-    const sensor = await screen.findByTestId('fullscreen-hover-sensor');
-    const controls = screen.getByTestId('fullscreen-window-controls');
+    const controls = await screen.findByTestId('fullscreen-window-controls');
     expect(controls.className).toContain('pointer-events-none');
 
-    fireEvent.mouseEnter(sensor);
+    fireEvent.mouseMove(window, { clientY: 10 });
     await waitFor(() => expect(controls.className).not.toContain('pointer-events-none'));
-    expect(controls).toHaveTextContent('全屏');
+    expect(controls).toHaveTextContent('Personal Knowledge OS');
   });
 
   it('三个按钮分别调用关闭 / 最小化 / 退出全屏', async () => {
     render(<FullscreenWindowControls />);
-    await screen.findByTestId('fullscreen-hover-sensor');
+    await screen.findByTestId('fullscreen-window-controls');
     fireEvent.click(screen.getByRole('button', { name: '关闭窗口' }));
     fireEvent.click(screen.getByRole('button', { name: '最小化窗口' }));
     fireEvent.click(screen.getByRole('button', { name: '退出全屏' }));
@@ -59,7 +58,6 @@ describe('FullscreenWindowControls', () => {
     render(<FullscreenWindowControls />);
 
     await waitFor(() => expect(tauri.win.isFullscreen).toHaveBeenCalled());
-    expect(screen.queryByTestId('fullscreen-hover-sensor')).toBeNull();
     expect(screen.queryByTestId('fullscreen-window-controls')).toBeNull();
   });
 });

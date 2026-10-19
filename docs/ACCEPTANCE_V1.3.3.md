@@ -72,8 +72,17 @@
 
 ## E. 发布后抽验
 
-（CI 完成后填写：`shasum -a 256 -c SHA256SUMS-all.txt` 6/6 OK、dmg 版本 / 签名、
-Windows 便携版 PE、deb/rpm/AppImage 结构。）
+CI run **39268230691** 五个作业全部 success，Release 有 10 个资产。抽验情况：
+
+| 项目 | 结果 | 证据 |
+| --- | --- | --- |
+| 校验文件行尾 | ✅ 全部 LF | 4 份 `SHA256SUMS-*.txt` 均无 `\r` |
+| macOS `.dmg` | ✅ 哈希一致、版本 `1.3.3`、`codesign` 通过 | 对照 `SHA256SUMS-macos.txt` 校验 OK；挂载后 `CFBundleShortVersionString = 1.3.3` |
+| 其余 5 个平台资产 | ⚠️ **未逐一下载复核** | 发布后网络很慢，下载到一半中止；该版在 1 小时内被 V1.3.4 视觉修复取代 |
+
+> 如实记录：V1.3.3 的 Windows / Linux 资产**没有**在发布后重新下载做结构复核，
+> 只有 CI 构建成功与资产清单（名称/大小）证据。它们与 V1.3.2 使用同一套流水线；
+> V1.3.4 会重新走一遍完整抽验。
 
 ## F. 已知限制（与 V1.3.2 相同）
 

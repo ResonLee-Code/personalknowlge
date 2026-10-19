@@ -4,6 +4,7 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
 
 import { AppShell } from '@/components/layout/AppShell';
+import { FullscreenWindowControls } from '@/components/layout/FullscreenWindowControls';
 import { NotesSection } from '@/components/notes/NotesSection';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { AboutPage } from '@/features/about/AboutPage';
@@ -86,6 +87,8 @@ export function App() {
       <HashRouter>
         <BootstrappedApp />
       </HashRouter>
+      {/* 挂在根组件：欢迎页（还没有工作区）也要能在全屏时唤出窗口控制 */}
+      <FullscreenWindowControls />
       <Toaster
         position="bottom-right"
         toastOptions={{

@@ -28,6 +28,14 @@ interface RelationsPanelProps {
   refreshKey?: number;
   /** 关系变化后通知外部（例如刷新元信息栏角标） */
   onChanged?: () => void;
+  /**
+   * 嵌入编辑器底部摘要区（2026-10-19）。
+   *
+   * 此时摘要条已经显示了「关系 出 N · 入 N」，再把带角标/折叠箭头的完整头部
+   * 叠在下面会形成两层同样的标题。嵌入态只留一个轻量分区标签 + 添加按钮，
+   * 并且默认展开正文。
+   */
+  embedded?: boolean;
 }
 
 /**
@@ -36,9 +44,14 @@ interface RelationsPanelProps {
  * 出边（本篇声明的关系）可增删；入边（谁与本篇有关系）只读展示。
  * 声明写入本篇 frontmatter 的 `relations:` 字段，因此可被外部编辑器查看与修改。
  */
-export function RelationsPanel({ noteId, refreshKey = 0, onChanged }: RelationsPanelProps) {
+export function RelationsPanel({
+  noteId,
+  refreshKey = 0,
+  onChanged,
+  embedded = false,
+}: RelationsPanelProps) {
   const [view, setView] = useState<RelationView | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(embedded);
   const [addOpen, setAddOpen] = useState(false);
   const loadRef = useRef<() => Promise<void>>(async () => {});
 
@@ -83,19 +96,28 @@ export function RelationsPanel({ noteId, refreshKey = 0, onChanged }: RelationsP
       data-testid="relations-panel"
       className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--surface)]"
     >
-      <header className="flex items-center gap-2 px-3 py-2">
-        <button
-          type="button"
-          className="flex items-center gap-1 text-xs font-medium text-[var(--ink)]"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <GitBranch className="h-3.5 w-3.5 text-[var(--brand)]" />
-          关系
-        </button>
-        <span className="rounded-full bg-[var(--surface-muted)] px-2 py-0.5 text-[11px] text-[var(--ink-subtle)]">
-          出 {outgoing.length} · 入 {incoming.length}
-        </span>
+      <header className={embedded ? 'flex items-center gap-2 py-1.5 pl-6 pr-4' : 'flex items-center gap-2 px-3 py-2'}>
+        {embedded ? (
+          <span className="flex items-center gap-1 text-[11px] font-medium text-[var(--ink-muted)]">
+            <GitBranch className="h-3 w-3 text-[var(--brand)]" />
+            关系
+          </span>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs font-medium text-[var(--ink)]"
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+            >
+              <GitBranch className="h-3.5 w-3.5 text-[var(--brand)]" />
+              关系
+            </button>
+            <span className="rounded-full bg-[var(--surface-muted)] px-2 py-0.5 text-[11px] text-[var(--ink-subtle)]">
+              出 {outgoing.length} · 入 {incoming.length}
+            </span>
+          </>
+        )}
         <Button
           size="sm"
           variant="secondary"
@@ -108,10 +130,16 @@ export function RelationsPanel({ noteId, refreshKey = 0, onChanged }: RelationsP
       </header>
 
       {open ? (
-        <div className="max-h-52 space-y-2 overflow-auto px-3 pb-3">
+        <div
+          className={
+            embedded
+              ? 'space-y-2 pb-3 pl-6 pr-4'
+              : 'max-h-52 space-y-2 overflow-auto px-3 pb-3'
+          }
+        >
           {outgoing.length === 0 && incoming.length === 0 ? (
             <p className="text-xs leading-relaxed text-[var(--ink-subtle)]">
-              还没有关系。可以标注「取代 / 冲突 / 派生自」等语义，比普通链接多一层判断依据。
+              还没有关系。可以用「取代 / 冲突 / 派生自」标注语义。
             </p>
           ) : null}
 

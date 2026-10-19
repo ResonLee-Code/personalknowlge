@@ -25,6 +25,11 @@ interface BacklinkPanelProps {
    */
   unresolvedOpen?: boolean;
   onUnresolvedOpenChange?: (open: boolean) => void;
+  /**
+   * 嵌入编辑器底部摘要区（2026-10-19）：摘要条已经显示「反向链接 N / 未解析 N」，
+   * 这里只留一个轻量分区标签 + 刷新，不再重复角标与折叠箭头。
+   */
+  embedded?: boolean;
 }
 
 /**
@@ -38,6 +43,7 @@ export function BacklinkPanel({
   refreshKey = 0,
   unresolvedOpen: controlledUnresolvedOpen,
   onUnresolvedOpenChange,
+  embedded = false,
 }: BacklinkPanelProps) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(true);
@@ -141,35 +147,44 @@ export function BacklinkPanel({
       data-testid="backlink-panel"
       className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--surface)]"
     >
-      <header className="flex items-center gap-2 px-3 py-2">
-        <button
-          type="button"
-          className="flex items-center gap-1 text-xs font-medium text-[var(--ink)]"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          {open ? (
-            <ChevronDown className="h-3.5 w-3.5 text-[var(--ink-subtle)]" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 text-[var(--ink-subtle)]" />
-          )}
-          <Link2 className="h-3.5 w-3.5 text-[var(--brand)]" />
-          反向链接
-        </button>
-        {loadError ? (
-          <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-600">
-            读取失败
+      <header className={embedded ? 'flex items-center gap-2 py-1.5 pl-6 pr-4' : 'flex items-center gap-2 px-3 py-2'}>
+        {embedded ? (
+          <span className="flex items-center gap-1 text-[11px] font-medium text-[var(--ink-muted)]">
+            <Link2 className="h-3 w-3 text-[var(--brand)]" />
+            反向链接
           </span>
         ) : (
-          <span className="rounded-full bg-[var(--surface-muted)] px-2 py-0.5 text-[11px] text-[var(--ink-subtle)]">
-            被 {backlinks.length} 篇引用
-          </span>
+          <>
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs font-medium text-[var(--ink)]"
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+            >
+              {open ? (
+                <ChevronDown className="h-3.5 w-3.5 text-[var(--ink-subtle)]" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 text-[var(--ink-subtle)]" />
+              )}
+              <Link2 className="h-3.5 w-3.5 text-[var(--brand)]" />
+              反向链接
+            </button>
+            {loadError ? (
+              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-600">
+                读取失败
+              </span>
+            ) : (
+              <span className="rounded-full bg-[var(--surface-muted)] px-2 py-0.5 text-[11px] text-[var(--ink-subtle)]">
+                被 {backlinks.length} 篇引用
+              </span>
+            )}
+            {unresolved.length > 0 ? (
+              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-600">
+                未解析 {unresolved.length}
+              </span>
+            ) : null}
+          </>
         )}
-        {unresolved.length > 0 ? (
-          <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-600">
-            未解析 {unresolved.length}
-          </span>
-        ) : null}
         <Button
           size="icon"
           variant="ghost"
@@ -182,7 +197,13 @@ export function BacklinkPanel({
       </header>
 
       {open ? (
-        <div className="max-h-56 space-y-3 overflow-auto px-3 pb-3">
+        <div
+          className={
+            embedded
+              ? 'space-y-3 pb-3 pl-6 pr-4'
+              : 'max-h-56 space-y-3 overflow-auto px-3 pb-3'
+          }
+        >
           {!loaded ? (
             <div className="space-y-2">
               <Skeleton className="h-9 w-full" />

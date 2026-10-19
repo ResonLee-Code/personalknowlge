@@ -286,7 +286,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByTestId('editor-bottom-unresolved')).toContainText('未解析 1');
   await page.getByTestId('editor-bottom-unresolved').click();
   await expect(page.getByTestId('unresolved-item')).toHaveCount(1);
-  await expect(page.getByTestId('backlink-panel')).toContainText('被 0 篇引用');
+  await expect(page.getByTestId('editor-bottom-panels')).toContainText('反向链接 0');
   await page.screenshot({ path: path.join(SHOTS, '16-backlink-panel.png') });
 
   // 打开被引用的笔记，应看到来自「索引设计笔记」的反链与上下文
