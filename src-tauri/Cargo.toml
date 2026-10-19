@@ -1,6 +1,6 @@
 [package]
 name = "personal-knowledge-os"
-version = "1.3.4"
+version = "1.3.5"
 description = "Personal Knowledge OS - 本地优先的个人知识管理桌面应用"
 authors = ["Personal Knowledge OS"]
 edition = "2021"
@@ -51,6 +51,10 @@ encoding_rs = "0.8"
 uuid = { version = "1.20.0", features = ["v4"] }
 walkdir = "2.5.0"
 zip = { version = "4.2.0", default-features = false, features = ["deflate"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# 禁用 macOS 原生全屏：让绿色按钮执行系统“缩放”（保留系统红黄绿），见 lib.rs
+objc2 = "0.6.4"
 
 [dev-dependencies]
 tempfile = "3.27.0"

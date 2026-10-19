@@ -4,13 +4,13 @@
 SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeScript。
 数据自主：删掉应用，笔记还在；删掉数据库，也能从 Markdown 重建。
 
-**当前版本：V1.3.4**（2026-10-19 发布，四处版本号一致：`package.json` /
+**当前版本：V1.3.5**（2026-10-19 发布，四处版本号一致：`package.json` /
 `src-tauri/Cargo.toml` / `Cargo.lock` / `src-tauri/tauri.conf.json`）。
 
-- 📦 **[下载与安装](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.4)**：三平台产物 + `SHA256SUMS-*.txt`
+- 📦 **[下载与安装](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.5)**：三平台产物 + `SHA256SUMS-*.txt`
 - 📘 **[完全指南（中文）](./docs/GUIDE.md)** · **[Complete Guide (English)](./docs/GUIDE.en.md)**
 - 📗 **[使用说明手册（逐控件）](./docs/MANUAL.md)**：每个按钮 / 输入框 / 菜单项各是干什么的
-- 🧾 变更明细 [docs/CHANGELOG.md](./docs/CHANGELOG.md) · 验收实况 [docs/ACCEPTANCE_V1.3.4.md](./docs/ACCEPTANCE_V1.3.4.md)
+- 🧾 变更明细 [docs/CHANGELOG.md](./docs/CHANGELOG.md) · 验收实况 [docs/ACCEPTANCE_V1.3.5.md](./docs/ACCEPTANCE_V1.3.5.md)
 
 本仓库是 [Personal-Knowledge-OS-Engineering-Design-V1.0.md](./Personal-Knowledge-OS-Engineering-Design-V1.0.md)
 工程设计的实现：先把**记录、分类、搜索**做扎实，再在其上长出**研究助手与决策层**——
@@ -106,7 +106,7 @@ cargo build                  # 构建桌面二进制
 
 ## 下载与安装
 
-从 **[v1.3.4 Release](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.4)** 下载；
+从 **[v1.3.5 Release](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.5)** 下载；
 每个平台另附 `SHA256SUMS-<platform>.txt`，在下载目录里直接校验：
 
 ```bash
@@ -115,7 +115,7 @@ shasum -a 256 -c SHA256SUMS-all.txt     # Linux 用 sha256sum -c
 
 | 平台 | 产物 | 说明 |
 | --- | --- | --- |
-| macOS（arm64） | `Personal.Knowledge.OS_1.3.4_aarch64.dmg` | **ad-hoc 签名**（无 Developer ID、无公证）：首次打开会提示「无法验证开发者」，到 系统设置 → 隐私与安全性 →「**仍要打开**」放行一次即可。若看到「**已损坏**」说明该版没走 ad-hoc 签名（本版不会） |
+| macOS（arm64） | `Personal.Knowledge.OS_1.3.5_aarch64.dmg` | **ad-hoc 签名**（无 Developer ID、无公证）：首次打开会提示「无法验证开发者」，到 系统设置 → 隐私与安全性 →「**仍要打开**」放行一次即可。若看到「**已损坏**」说明该版没走 ad-hoc 签名（本版不会） |
 | Windows（x64） | `…_x64-setup.exe`（NSIS）/ `…_x64-portable.zip` | 未签名：SmartScreen 提示后选「更多信息 → 仍要运行」；安装包外壳是 32 位 stub 属正常 |
 | Linux（x64） | `…_amd64.deb` / `…-1.x86_64.rpm` / `…_amd64.AppImage` | 需 WebKitGTK 4.1；AppImage 需 `chmod +x` |
 

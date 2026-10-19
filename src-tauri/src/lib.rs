@@ -29,6 +29,11 @@ pub fn run() {
             let inner = AppInner::new(data_dir.clone(), events)?;
             app.manage(AppState::new(inner));
             tracing::info!(target: "app", "数据目录：{}", data_dir.display());
+            #[cfg(target_os = "macos")]
+            {
+                configure_macos_window(app);
+                relabel_macos_fullscreen_menu(app);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -150,6 +155,101 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("Personal Knowledge OS 启动失败");
+}
+
+/// macOS：禁用“原生全屏”，让绿色按钮执行系统**缩放**（zoom）。
+///
+/// 背景（2026-10-19）：原生全屏会把标题栏与系统红黄绿一起藏起来，鼠标移到顶部也唤不出；
+/// 自绘一套按钮又被指出“像外挂上去的”。最终选择：不再进原生全屏——把窗口的
+/// collection behavior 设为 `FullScreenNone`，绿色按钮改为 macOS 原生“缩放”：
+/// 窗口铺满可用区域，但标题栏、菜单栏和系统红黄绿全部保留。
+#[cfg(target_os = "macos")]
+fn configure_macos_window(app: &tauri::App) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use tauri::Manager;
+
+    let Some(window) = app.get_webview_window("main") else {
+        tracing::warn!(target: "app", "未找到主窗口，跳过 macOS 全屏配置");
+        return;
+    };
+    match window.ns_window() {
+        Ok(pointer) => {
+            // SAFETY: setup 在 macOS 主线程执行；Tauri 返回当前窗口的有效 NSWindow 指针，
+            // 这里只读取 / 设置 collectionBehavior，不转移所有权。
+            let ns_window = pointer as *mut AnyObject;
+            // NSWindowCollectionBehaviorFullScreenPrimary = 1 << 7
+            // NSWindowCollectionBehaviorFullScreenNone    = 1 << 9
+            // 禁用原生全屏：绿色按钮执行系统缩放（保留标题栏 / 红黄绿）。
+            let behavior: usize = unsafe { msg_send![ns_window, collectionBehavior] };
+            let next = (behavior & !(1usize << 7)) | (1usize << 9);
+            let _: () = unsafe { msg_send![ns_window, setCollectionBehavior: next] };
+
+            // 绿色按钮的默认“缩放”图标是 +；换成系统自带的“退出全屏”模板图（对角箭头），
+            // 与用户附图里的样式一致。按钮本身仍是系统绘制，只替换 image。
+            // NSWindowZoomButton = 3
+            let button: *mut AnyObject = unsafe { msg_send![ns_window, standardWindowButton: 3usize] };
+            if !button.is_null() {
+                let name: *mut AnyObject = unsafe {
+                    msg_send![
+                        objc2::class!(NSString),
+                        stringWithUTF8String: b"NSImageNameExitFullScreenTemplate\0".as_ptr()
+                    ]
+                };
+                let image: *mut AnyObject =
+                    unsafe { msg_send![objc2::class!(NSImage), imageNamed: name] };
+                if !image.is_null() {
+                    let _: () = unsafe { msg_send![button, setImage: image] };
+                    let _: () = unsafe { msg_send![button, setAlternateImage: image] };
+                }
+            }
+            tracing::info!(
+                target: "app",
+                "macOS 已禁用原生全屏：绿色按钮执行系统缩放，并使用系统全屏箭头图标"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(target: "app", "读取 macOS 窗口指针失败：{error}");
+        }
+    }
+}
+
+/// 原生全屏已被禁用，菜单里的 “Toggle Full Screen” 实际执行的是系统缩放。
+/// 把标签改成 “Zoom”，避免用户以为还能进全屏。
+#[cfg(target_os = "macos")]
+fn relabel_macos_fullscreen_menu(app: &tauri::App) {
+    let Some(menu) = app.menu() else {
+        return;
+    };
+    let Ok(items) = menu.items() else {
+        return;
+    };
+    for item in items {
+        let Some(submenu) = item.as_submenu() else {
+            continue;
+        };
+        let Ok(sub_items) = submenu.items() else {
+            continue;
+        };
+        for sub in sub_items {
+            let text = sub
+                .as_menuitem()
+                .and_then(|entry| entry.text().ok())
+                .or_else(|| {
+                    sub.as_predefined_menuitem()
+                        .and_then(|entry| entry.text().ok())
+                });
+            if text.as_deref() != Some("Toggle Full Screen") {
+                continue;
+            }
+            if let Some(entry) = sub.as_menuitem() {
+                let _ = entry.set_text("Zoom");
+            }
+            if let Some(entry) = sub.as_predefined_menuitem() {
+                let _ = entry.set_text("Zoom");
+            }
+        }
+    }
 }
 
 /// 供集成测试复用：构建没有 Tauri 运行时的应用上下文。
