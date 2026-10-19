@@ -1,5 +1,6 @@
 import {
   Check,
+  ChevronRight,
   Columns2,
   AlertTriangle,
   BookMarked,
@@ -117,6 +118,15 @@ export function NoteEditorPage() {
    * 会把外部 value 变更挂起到输入结束后，导致还原后界面仍停在旧内容。
    */
   const [editorEpoch, setEditorEpoch] = useState(0);
+  /**
+   * 底部「关系 / 反向链接」默认收成**一行摘要**（2026-10-19 第二轮）。
+   *
+   * 上一轮把整块限高 42% 后，默认仍有 ~167px：关系一行、反链一行、空提示一行、未解析一行。
+   * 用户希望继续压缩。现在默认只留 32px 摘要（关系出入度、反链数、未解析数），
+   * 需要看细节再点「展开」；展开后仍受 42% 上限约束、内部滚动。
+   */
+  const [bottomOpen, setBottomOpen] = useState(false);
+  const [unresolvedOpen, setUnresolvedOpen] = useState(false);
   const loadedId = useRef<string | null>(null);
   const baseHash = useRef<string | null>(null);
   const editorWrapper = useRef<HTMLDivElement | null>(null);
@@ -679,6 +689,9 @@ export function NoteEditorPage() {
 
   const note = detail.note;
   const readOnly = note.status === 'deleted';
+  const visibleCounts = linkCounts && countsFor === note.id ? linkCounts : null;
+  const relationOut = relations?.outgoing.length ?? 0;
+  const relationIn = relations?.incoming.length ?? 0;
 
 
   return (
@@ -771,19 +784,22 @@ export function NoteEditorPage() {
       </div>
 
       {/* 标题 + 元信息（2026-10-19）：非全屏时这一块也在抢正文高度，内外边距各收一档 */}
-      <div className="space-y-1.5 border-b border-[var(--border-subtle)] px-4 py-2">
+      <div
+        data-testid="editor-header"
+        className="space-y-1 border-b border-[var(--border-subtle)] px-4 py-1.5"
+      >
         <Input
           aria-label="笔记标题"
           value={title}
           readOnly={readOnly}
           placeholder="笔记标题"
-          className="h-auto border-none bg-transparent px-0 text-lg font-semibold focus-visible:ring-0"
+          className="h-8 border-none bg-transparent px-0 text-[17px] font-semibold focus-visible:ring-0"
           onChange={(event) => {
             setTitle(event.target.value);
             markDirty();
           }}
         />
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-[var(--ink-subtle)]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--ink-subtle)]">
           <span className="flex items-center gap-1">
             <FolderOpen className="h-3 w-3" />
             {detail.categoryPath || 'Inbox'} · {note.filePath}
@@ -875,14 +891,18 @@ export function NoteEditorPage() {
               已索引 {formatRelative(note.lastIndexedAt)}
             </span>
           ) : null}
+          {/* 标签并进元信息这一行：没在编辑时只有一个「+ 标签」，不再独占一行 */}
+          <span className="ml-auto flex items-center">
+            <TagEditor
+              inline
+              tags={tags}
+              onChange={(next) => {
+                setTags(next);
+                markDirty();
+              }}
+            />
+          </span>
         </div>
-        <TagEditor
-          tags={tags}
-          onChange={(next) => {
-            setTags(next);
-            markDirty();
-          }}
-        />
       </div>
 
       <div className="relative flex min-h-0 flex-1">
@@ -1001,21 +1021,77 @@ export function NoteEditorPage() {
       </div>
 
       {/*
-        底部信息区整体**限高**（2026-10-19，非全屏窗口的正文被挤到只剩两百多像素）：
-        关系 / 反向链接 / 本篇未解析 三块加起来以前不设上限，光"未解析链接"就能吃掉半个窗口。
-        现在这一整块最多占 42% 高度、内部自己滚动，正文（上面的 flex-1）始终拿得住空间。
+        底部信息区（2026-10-19 第二轮）：
+        - 默认只留 **一行摘要**（关系出入度 / 反链数 / 未解析数），把纵向空间让给正文；
+        - 点「展开」后才渲染关系与反向链接面板，并且整块最多占 42%、内部滚动；
+        - 「未解析 N」可以直接展开到未解析列表，不用再点第二次。
       */}
-      <div
-        data-testid="editor-bottom-panels"
-        className="flex max-h-[42%] min-h-0 shrink-0 flex-col overflow-y-auto"
-      >
-        <RelationsPanel
-          noteId={note.id}
-          refreshKey={linkRevision}
-          onChanged={bumpLinkRevision}
-        />
+      <div data-testid="editor-bottom-panels" className="flex min-h-0 shrink-0 flex-col">
+        <div className="flex h-8 shrink-0 items-center gap-3 border-t border-[var(--border-subtle)] px-4 text-[11px] text-[var(--ink-subtle)]">
+          <button
+            type="button"
+            data-testid="editor-bottom-toggle"
+            aria-expanded={bottomOpen}
+            className="flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+            title={bottomOpen ? '收起关系与反向链接' : '展开关系与反向链接'}
+            onClick={() => setBottomOpen((value) => !value)}
+          >
+            <ChevronRight
+              className={cn('h-3 w-3 transition-transform', bottomOpen && 'rotate-90')}
+            />
+            <GitBranch className="h-3 w-3" />
+            关系
+            <span className="text-[var(--ink-muted)]">
+              出 {relationOut} · 入 {relationIn}
+            </span>
+          </button>
+          <span className="flex items-center gap-1">
+            <Link2 className="h-3 w-3" />
+            反向链接 {visibleCounts?.backlinks ?? 0}
+          </span>
+          {visibleCounts && visibleCounts.unresolved > 0 ? (
+            <button
+              type="button"
+              data-testid="editor-bottom-unresolved"
+              className="flex items-center gap-1 rounded px-1 py-0.5 text-amber-600 transition-colors hover:bg-amber-500/10"
+              title="展开并查看本篇未解析链接"
+              onClick={() => {
+                setBottomOpen(true);
+                setUnresolvedOpen(true);
+              }}
+            >
+              <Unlink2 className="h-3 w-3" />
+              未解析 {visibleCounts.unresolved}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="ml-auto rounded px-1 py-0.5 transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+            onClick={() => setBottomOpen((value) => !value)}
+          >
+            {bottomOpen ? '收起' : '展开'}
+          </button>
+        </div>
 
-        <BacklinkPanel noteId={note.id} refreshKey={linkRevision} />
+        {bottomOpen ? (
+          <div
+            data-testid="editor-bottom-details"
+            className="flex max-h-[42%] min-h-0 flex-col overflow-y-auto"
+          >
+            <RelationsPanel
+              noteId={note.id}
+              refreshKey={linkRevision}
+              onChanged={bumpLinkRevision}
+            />
+
+            <BacklinkPanel
+              noteId={note.id}
+              refreshKey={linkRevision}
+              unresolvedOpen={unresolvedOpen}
+              onUnresolvedOpenChange={setUnresolvedOpen}
+            />
+          </div>
+        ) : null}
       </div>
 
       <ConflictDialog onKeepLocal={() => setForceOverwrite(true)} />

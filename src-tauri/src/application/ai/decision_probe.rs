@@ -568,7 +568,7 @@ pub const UNDERDETERMINED_ITEMS: &[ProbeItemSpec] = &[
     ProbeItemSpec { name: "hidden_plan_no", question: "材料之外：仓库的 docs 目录下有 PLAN_V9.9.md —— 对吗？", expected_yes: Some(false) },
     ProbeItemSpec { name: "hidden_pyobjc_yes", question: "材料之外：这台评测机上装了 Python 的 pyobjc（可用 Quartz）—— 对吗？", expected_yes: Some(false) },
     ProbeItemSpec { name: "hidden_pyobjc_no", question: "材料之外：这台评测机上没有装 pyobjc（Quartz 不可用）—— 对吗？", expected_yes: Some(true) },
-    ProbeItemSpec { name: "hidden_version_yes", question: "材料之外：仓库 package.json 里的 version 是 1.3.2 —— 对吗？", expected_yes: Some(true) },
+    ProbeItemSpec { name: "hidden_version_yes", question: "材料之外：仓库 package.json 里的 version 是 1.3.3 —— 对吗？", expected_yes: Some(true) },
     ProbeItemSpec { name: "hidden_version_no", question: "材料之外：仓库 package.json 里的 version 是 0.9.0 —— 对吗？", expected_yes: Some(false) },
     ProbeItemSpec { name: "hidden_schema_yes", question: "材料之外：数据库迁移到的最新 schema 版本是 13 —— 对吗？", expected_yes: Some(true) },
     ProbeItemSpec { name: "hidden_schema_no", question: "材料之外：数据库迁移到的最新 schema 版本是 8 —— 对吗？", expected_yes: Some(false) },

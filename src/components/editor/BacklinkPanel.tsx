@@ -17,6 +17,14 @@ interface BacklinkPanelProps {
   noteId: string;
   /** 保存 / 重命名等写入操作后递增，用于主动刷新链接数据 */
   refreshKey?: number;
+  /**
+   * 「本篇未解析链接」是否展开（可选受控，2026-10-19）。
+   *
+   * 编辑器底部的摘要栏里有一个「未解析 N」入口；它把整块信息区展开的同一次
+   * 也把这个值设为 true，让面板直接露出列表，用户不用点第二次。
+   */
+  unresolvedOpen?: boolean;
+  onUnresolvedOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -25,7 +33,12 @@ interface BacklinkPanelProps {
  * - 上半部分：谁引用了这篇笔记，可点击跳转到来源；
  * - 下半部分：本篇里还没解析的 `[[…]]`，可一键创建目标笔记并自动建立连接。
  */
-export function BacklinkPanel({ noteId, refreshKey = 0 }: BacklinkPanelProps) {
+export function BacklinkPanel({
+  noteId,
+  refreshKey = 0,
+  unresolvedOpen: controlledUnresolvedOpen,
+  onUnresolvedOpenChange,
+}: BacklinkPanelProps) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(true);
   /**
@@ -35,7 +48,22 @@ export function BacklinkPanel({ noteId, refreshKey = 0 }: BacklinkPanelProps) {
    * 挤到只剩两百多像素。它们不是每次都看，收起后用一个带数量的入口提示即可；
    * 需要处理时点开（展开后仍受面板自身的高度上限约束、可滚动）。
    */
-  const [unresolvedOpen, setUnresolvedOpen] = useState(false);
+  const [localUnresolvedOpen, setLocalUnresolvedOpen] = useState(false);
+  const unresolvedOpen = controlledUnresolvedOpen ?? localUnresolvedOpen;
+  const unresolvedRef = useRef<HTMLDivElement | null>(null);
+  const setUnresolvedOpen = (next: boolean | ((value: boolean) => boolean)) => {
+    const value = typeof next === 'function' ? next(unresolvedOpen) : next;
+    setLocalUnresolvedOpen(value);
+    onUnresolvedOpenChange?.(value);
+  };
+  /**
+   * 从底部摘要栏点「未解析 N」时，列表在 42% 限高区里可能正好在视野外；
+   * 展开后把它滚进可视区，避免「点了没反应」的错觉。
+   */
+  useEffect(() => {
+    // jsdom 没实现 scrollIntoView（单元测试会跑），这里按可选方法调用
+    if (unresolvedOpen) unresolvedRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [unresolvedOpen]);
   const [refreshing, setRefreshing] = useState(false);
   /** 已加载完成的笔记 id，用于避免切换笔记时短暂显示上一篇的数据 */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
@@ -210,7 +238,10 @@ export function BacklinkPanel({ noteId, refreshKey = 0 }: BacklinkPanelProps) {
           )}
 
           {unresolved.length > 0 ? (
-            <div className="space-y-1 border-t border-dashed border-[var(--border-subtle)] pt-2">
+            <div
+              ref={unresolvedRef}
+              className="space-y-1 border-t border-dashed border-[var(--border-subtle)] pt-2"
+            >
               <button
                 type="button"
                 data-testid="unresolved-toggle"

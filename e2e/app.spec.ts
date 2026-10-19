@@ -282,8 +282,9 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.locator('.cm-content')).toBeVisible();
 
   // 本篇有一处未解析链接，可一键创建；元信息栏显示引用计数
-  // 未解析子区默认收起（2026-10-19，避免非全屏时把正文挤没）：先展开
-  await page.getByTestId('unresolved-toggle').click();
+  // 底部信息区默认收成一行摘要（2026-10-19 第二轮）：点「未解析 1」会展开整块并直接露出列表
+  await expect(page.getByTestId('editor-bottom-unresolved')).toContainText('未解析 1');
+  await page.getByTestId('editor-bottom-unresolved').click();
   await expect(page.getByTestId('unresolved-item')).toHaveCount(1);
   await expect(page.getByTestId('backlink-panel')).toContainText('被 0 篇引用');
   await page.screenshot({ path: path.join(SHOTS, '16-backlink-panel.png') });
@@ -972,10 +973,22 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
    */
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.waitForTimeout(400);
-  const bottomPanels = (await page.getByTestId('editor-bottom-panels').boundingBox())!;
+  // 默认只留一行摘要
+  const bottomToggle = page.getByTestId('editor-bottom-toggle');
+  if ((await bottomToggle.getAttribute('aria-expanded')) === 'true') {
+    await bottomToggle.click();
+  }
+  const bottomSummary = (await page.getByTestId('editor-bottom-panels').boundingBox())!;
+  expect(bottomSummary.height).toBeLessThan(60);
+  // 标题 + 元信息（含标签入口）整体也压到 100px 以内
+  const header = (await page.getByTestId('editor-header').boundingBox())!;
+  expect(header.height).toBeLessThan(100);
   const editorArea = (await page.getByTestId('editor-pane').boundingBox())!;
   expect(editorArea.height).toBeGreaterThan(220);
-  expect(bottomPanels.height).toBeLessThanOrEqual(340); // ≈ 42% × 800 上下
+  // 展开后仍受 42% 上限
+  await bottomToggle.click();
+  const bottomDetails = (await page.getByTestId('editor-bottom-details').boundingBox())!;
+  expect(bottomDetails.height).toBeLessThanOrEqual(340); // ≈ 42% × 800 上下
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(400);
 

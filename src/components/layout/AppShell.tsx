@@ -9,6 +9,7 @@ import { ROUTES } from '@/lib/constants';
 import { useNotesStore } from '@/stores/notesStore';
 import { useUiStore } from '@/stores/uiStore';
 
+import { FullscreenWindowControls } from './FullscreenWindowControls';
 import { Sidebar } from './Sidebar';
 import { StatusBar } from './StatusBar';
 import { TopBar } from './TopBar';
@@ -39,6 +40,7 @@ export function AppShell() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--surface-muted)]">
+      <FullscreenWindowControls />
       <TopBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
