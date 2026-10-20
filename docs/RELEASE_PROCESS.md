@@ -130,8 +130,13 @@ curl --http1.1 -L --retry 3 -x http://127.0.0.1:8118 \
 | Linux（x64） | `*.deb`、`*.rpm`、`*.AppImage`、`*.AppImage.tar.gz` + `*.sig` | 需 WebKitGTK 4.1；AppImage 需 `chmod +x`；应用内更新使用签名的 gzip 包 |
 | 全平台 updater | `latest.json` | 版本、notes、pub_date、三平台 URL + signature |
 
+GitHub Releases 会把上传资产名中的空格替换为点（例如
+`Personal.Knowledge.OS_...`）；`latest.json` 的下载 URL 必须使用这种归一化名称，
+否则应用能查到新版本但下载会 404。
+
 每个平台各自的 `SHA256SUMS-<platform>.txt` 会一并附在 Release 上，另有汇总的
 `SHA256SUMS-all.txt`。验收清单见：
+[V2 P0 人工报告模板](./acceptance/V2_P0_REPORT_TEMPLATE.md) ·
 [当前版本（V1.3.7）](./ACCEPTANCE_V1.3.7.md) ·
 [上一版（V1.3.6）](./ACCEPTANCE_V1.3.6.md) ·
 [上一版（V1.3.5）](./ACCEPTANCE_V1.3.5.md) ·

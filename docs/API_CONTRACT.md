@@ -133,6 +133,9 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 | --- | --- | --- |
 | `search_notes` | `{ query: SearchQuery }` | `SearchResponse` |
 | `search_quick` | `{ keyword, limit? }` | `NoteSummary[]` |
+
+搜索命中超过 5000 条时不计算全量 BM25 排序，改用 FTS rowid 流式分页以控制 10 万篇
+交互延迟；小结果集仍按 BM25 相关度排序。`total` 在两种路径下都是准确命中数。
 | `search_rebuild_index` | — | `IndexStatus` |
 | `search_get_status` | — | `IndexStatus` |
 
@@ -506,10 +509,15 @@ evidenceNote, warnings[], channels[], retrievedCount, tookMs }`。
 
 - 当前笔记作用域先做本笔记内 FTS5，完全无命中时退回前若干正文块；
   其余作用域用 FTS5 + 规则查询扩展（含中文双字词，最多 8 条）；
+- 编辑器内选中文字后右键可直接选择 Ask 或 Research；格式条保留同一入口；
 - 生成档顺序：在线（已授权；开启逐次确认时必须 `confirmOutbound=true`）→ 本地 → 模板；
+- 单次上下文按中英文保守估算上限 6000 输入 Token、700 输出 Token；输入超限时跳过在线 /
+  本地模型，返回模板整理并在 `warnings` 中说明，不会先发请求再报错；
 - 模型正文只接受本次材料编号 `[n]` / `[Cn]`。出现越界 / 零号编号或没有任何引用时，
   当前档输出整份丢弃并继续降级；模板输出始终带材料编号；
 - 没有材料时返回 `evidenceSufficient=false`、空引用和“证据不足”说明，不生成事实性结论；
+- E 级不可用线索不会进入模型材料；若可用材料全部过期，同样返回 `evidenceSufficient=false`。
+  混合材料中若过滤了 E 级线索或包含过期来源，会在 `warnings` 中逐项说明；
 - 审计能力名为 `ask_answer`，只记录是否外发、结果、耗时与 provider / 错误码，不记录正文。
 
 `AskSaveInput` 为 `{ answer: AskAnswer, title?, categoryId?, confirm? }`。
@@ -542,6 +550,8 @@ payload, sourceHash, createdAt, updatedAt, appliedAt, undoneAt, error, undoAvail
 
 - 生成 / 拒绝阶段只写 `ai_suggestions`；同一笔记同类只有一个 pending，旧项标 superseded；
 - 摘要与标签在模型可用时走在线 → 本地；输出必须是严格 JSON，失败回退规则建议；
+- 关联建议按相似度排序，前两项生成 `RELATED_TO` 类型化关系，其余生成 `WIKILINK`
+  普通链接；接受普通链接时写入“相关笔记”小节，接受类型化关系时写入 frontmatter；
 - 接受前重算完整文件 SHA-256，必须等于 `sourceHash`；
 - 接受成功后保存完整 `before_raw` 与接受后文件哈希 `applied_hash`；撤销前核对当前文件，
   接受后又被编辑时返回 `NOTE_CONFLICT`；通过核对后写回 `before_raw` 并同步索引与派生数据；
@@ -584,10 +594,14 @@ payload, sourceHash, createdAt, updatedAt, appliedAt, undoneAt, error, undoAvail
 - 计划模板存 `.knowledge/research-templates/<id>.json`；复用新课题时把模板原课题文本替换为新课题；
 - `research_rerun` 复用上次实际执行的子问题、时间窗、语言与来源类型，不会静默退回默认问题；
 - `research_resume` 保留中止前的来源；再次 collect 会跳过相同来源，从工作项边界继续；
+- 本地来源从 Markdown frontmatter 的 `applicable_version` / `applicableVersion` /
+  `applicable-version` 读取适用版本；未知时明确显示「未知」，不伪造版本；
 - `ResearchComparison`：
   `{ previousSessionId, currentSessionId, topic, addedSources[], removedSources[], unchangedSources[],
   changedClaims[], previousEvidenceSufficient, currentEvidenceSufficient }`；
 - 会话持久化在 `.knowledge/research/<sessionId>.json`；**不写入正文**以外的任何外部系统；
+- 勾选创建来源清单时，报告正文链接 `[[来源清单：课题]]`，来源清单正文反链报告标题，
+  同时保留子文档 `parent_id` 层级；
 - 报告结构（顺序固定）：① 结论先行（只放交叉验证过的）② 关键事实 ③ 争议与不确定性
   ④ 与本知识库的关系（`[[标题]]`）⑤ 待验证清单 ⑥ 参考来源；推测段由模板 Provider 生成，
   默认不写入笔记，需要时在写入确认里勾选；

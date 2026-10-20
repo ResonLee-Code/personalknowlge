@@ -271,6 +271,7 @@ dist-windows/                           # Windows 安装包与便携版（NSIS �
 
 ```bash
 pnpm bench                                     # 发布规格：1 万篇检索 + 3 万篇图谱
+pnpm bench --only search --search-notes 100000 # 10 万篇扩展门禁
 pnpm bench -- --search-notes 2000 --graph-notes 3000   # 冒烟（约 10 s）
 pnpm bench -- --only search                    # 只跑检索（或 --only graph）
 ```
@@ -284,15 +285,29 @@ pnpm bench -- --only search                    # 只跑检索（或 --only graph
 | 检索 recall@5（1 万篇） | ≥ 100% | `BENCH_MIN_RECALL_PCT` |
 | 图谱全量查询（3 万篇） | < 1500 ms（M3 口径） | `BENCH_MAX_GRAPH_MS` |
 | 扫描采纳超时 | < 600 s | `BENCH_SCAN_TIMEOUT_S` |
+| 10 万篇后端重开 | < 2000 ms | `BENCH_MAX_STARTUP_MS` |
+| 10 万篇进程 RSS | < 1536 MB | `BENCH_MAX_RSS_MB` |
 
 两个基准各自会在末尾打印一行机器可读的 `PKOS_BENCH search …` / `PKOS_BENCH graph …`；
 脚本**核对这一行是否存在**——基准没真的跑起来（例如测试名过滤写错、0 个用例）会被判失败，
 不会出现"什么都没跑也算通过"。日志与摘要落在 `src-tauri/target/bench/`（在 `.gitignore` 里）。
 
-本机实测（2026-10-13，macOS arm64，`pnpm bench` 约 56 s）：
-检索 1 万篇 **p95 47.4 ms / 平均 20.0 ms / recall@5 100%**、库 34.5 MB；
-图谱 3 万篇全量 **895.9 ms**、分类过滤 351.7 ms、2 跳聚焦 669.3 ms。数字用于发版记录，
+本机实测（2026-10-21，macOS arm64）：
+检索 1 万篇 **p95 8.06 ms / 平均 6.31 ms / recall@5 100%**、库 34.5 MB；
+图谱 3 万篇全量 **821.5 ms**、分类过滤 327.7 ms、2 跳聚焦 606.9 ms。数字用于发版记录，
 不是硬编码期望值——**换机器只比红线，不比具体毫秒**。
+
+10 万篇实测（2026-10-21，macOS arm64，24 GB / 15 核）：
+
+- 写入 10 万 Markdown：5.42 s；首次扫描 43.15 s；FTS 重建 50.75 s；
+- 检索：平均 **66.19 ms**、p95 **77.76 ms**、recall@5 **100%**；
+- 数据库 307.6 MB，`.knowledge` 合计 420.4 MB；
+- 已有索引工作区后端重开 **1140.77 ms**，进程 RSS **350.84 MB**；
+- 高频词超过 5000 条命中时使用 FTS rowid 流式分页，避免对全库结果做 BM25 全排序；
+  小结果集仍保留完整相关度排序。
+
+这里的重开与 RSS 是后端基准进程口径；完整 App 的窗口 + WebView 首屏与整机内存
+仍需按人工清单在真实设备上抽样。
 
 ## 8. 相关文档
 
