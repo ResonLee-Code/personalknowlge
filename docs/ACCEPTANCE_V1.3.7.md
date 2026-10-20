@@ -39,7 +39,7 @@ v1.3.6 用 `object_setClass` 把主窗口换成动态子类 `PKOSZoomWindow`，�
   窗口只缩放。
 
 可复跑回归：`scripts/acceptance/close-smoke.sh`（启动 → 5 秒后点红键 → 检查是否有新 `.ips`）。
-本机实测 **PASS：关闭窗口后没有新的崩溃报告**。
+本机连续跑 **3 次**，3/3 **PASS：关闭窗口后没有新的崩溃报告**。
 
 > 说明：原生红黄绿的 hover 图标由系统绘制，自动化抓图仍无法触发，但按钮语义已经是
 > `full screen button`，不再是 `zoom button` 的 `+`。
