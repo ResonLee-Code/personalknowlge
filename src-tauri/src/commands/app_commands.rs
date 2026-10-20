@@ -1,10 +1,12 @@
 //! 应用级命令：版本信息、打开路径、日志位置。
 
 use serde::Serialize;
+use std::path::PathBuf;
 use tauri::State;
 
-use crate::core::error::Result;
+use crate::core::error::{AppError, Result};
 use crate::core::logging;
+use crate::core::time::now_iso;
 use crate::state::AppState;
 
 use super::run;
@@ -64,6 +66,64 @@ pub async fn app_log_path(state: State<'_, AppState>) -> Result<Option<String>> 
         .map(|context| context.paths.log_dir().join("app.log"))
         .or_else(logging::log_file_path);
     Ok(path.map(|path| path.to_string_lossy().to_string()))
+}
+
+/// 导出本地诊断日志。只拼接应用日志与运行元数据，不读取工作区正文。
+#[tauri::command]
+pub async fn app_diagnostic_export(
+    state: State<'_, AppState>,
+    target_path: String,
+) -> Result<String> {
+    let context = state.inner.active();
+    let log_path = context
+        .map(|context| context.paths.log_dir().join("app.log"))
+        .or_else(logging::log_file_path);
+    let target = PathBuf::from(target_path.trim());
+    if target.as_os_str().is_empty() || target.file_name().is_none() {
+        return Err(AppError::invalid_input("诊断导出路径不合法。"));
+    }
+    if target.is_dir() {
+        return Err(AppError::invalid_input("诊断导出目标必须是文件。"));
+    }
+    let mut report = format!(
+        "Personal Knowledge OS 诊断报告\n\
+         导出时间：{}\n\
+         应用版本：{}\n\
+         平台：{}-{}\n\
+         数据库 schema：{}\n\
+         数据目录：{}\n\n",
+        now_iso(),
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        crate::infrastructure::db::SCHEMA_VERSION,
+        state.inner.data_dir.to_string_lossy(),
+    );
+    if let Some(path) = log_path {
+        report.push_str(&format!(
+            "日志文件：{}\n\n--- app.log ---\n",
+            path.display()
+        ));
+        report.push_str(
+            &std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| format!("读取日志失败：{error}\n")),
+        );
+        let rotated = path.with_extension("log.1");
+        if rotated.exists() {
+            report.push_str("\n--- app.log.1 ---\n");
+            report.push_str(
+                &std::fs::read_to_string(rotated)
+                    .unwrap_or_else(|error| format!("读取轮转日志失败：{error}\n")),
+            );
+        }
+    } else {
+        report.push_str("日志文件：尚未初始化\n");
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&target, report)?;
+    Ok(target.to_string_lossy().to_string())
 }
 
 /// 前端启动完成后的握手，返回当前工作区（若已存在）。

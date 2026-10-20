@@ -4,6 +4,7 @@
 //! 避免阻塞 UI 线程（设计文档 6.1：索引更新不阻塞编辑器）。
 
 pub mod ai_commands;
+pub mod ask_commands;
 pub mod attachment_commands;
 pub mod app_commands;
 pub mod backup_commands;
@@ -13,11 +14,13 @@ pub mod clip_commands;
 pub mod graph_commands;
 pub mod link_commands;
 pub mod note_commands;
+pub mod organize_commands;
 pub mod relation_commands;
 pub mod research_commands;
 pub mod search_commands;
 pub mod tag_commands;
 pub mod template_commands;
+pub mod update_commands;
 pub mod workspace_commands;
 
 use crate::core::error::{AppError, Result};

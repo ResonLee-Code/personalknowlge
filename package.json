@@ -12,12 +12,15 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\"",
     "test": "vitest run",
+    "test:ask-eval": "cargo test --offline --manifest-path src-tauri/Cargo.toml --test ask_eval_flow -- --nocapture",
+    "test:release-manifest": "node --test scripts/release/update-manifest.test.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "bench": "bash scripts/bench/run.sh",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "release:manifest": "node scripts/release/update-manifest.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.3",
@@ -39,7 +42,7 @@
     "@radix-ui/react-switch": "^1.2.0",
     "@radix-ui/react-tabs": "^1.1.0",
     "@radix-ui/react-tooltip": "^1.2.0",
-    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@uiw/react-codemirror": "^4.25.11",

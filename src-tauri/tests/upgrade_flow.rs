@@ -1,7 +1,7 @@
 //! 升级路径验收：旧版本工作区打开后应完成迁移并自动重建搜索索引。
 //!
 //! 场景：库停留在迁移 005（没有 FTS rowid 映射表，索引里是旧格式记录），
-//! 用当前版本打开，期望：schema → **9**（006 映射表 / 007 层级 / 008 手动排序 / 009 置顶）、
+//! 用当前版本打开，期望：schema → **15**（006 映射表 / 007–010 层级与展示 / 011–015 AI 数据）、
 //! 映射表建立、FTS 自动重建（已索引 == 总数）、检索可用。
 
 use std::sync::Arc;
@@ -80,8 +80,8 @@ fn opening_a_v1_1_workspace_migrates_and_rebuilds_search_index() {
     let context = app.context().expect("上下文");
     assert_eq!(
         context.db.schema_version().expect("schema 版本"),
-        13,
-        "应自动迁移到最新 schema（010 父文档声明原文 / 011 分块索引 / 012 决策缓存 / 013 向量索引）"
+        15,
+        "应自动迁移到最新 schema（011 分块 / 012 决策缓存 / 013 向量索引 / 014 Organize / 015 撤销哈希）"
     );
     let (has_map, fts_rows, map_rows): (i64, i64, i64) = context
         .db

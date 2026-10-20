@@ -56,6 +56,9 @@ zip = { version = "4.2.0", default-features = false, features = ["deflate"] }
 # 禁用 macOS 原生全屏：让绿色按钮执行系统“缩放”（保留系统红黄绿），见 lib.rs
 objc2 = "0.6.4"
 
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2.14.0"
+
 [dev-dependencies]
 tempfile = "3.27.0"
 zip = { version = "4.2.0", default-features = false, features = ["deflate"] }

@@ -8,15 +8,36 @@
 //! 纪律（与在线模型同一套）：**Key 只出现在请求头**，错误信息只带主机名与状态码；
 //! 出错一律向上返回 `Err`，由调用方降级（通道不可用 → 只用 BM25）。
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use crate::application::context::WorkspaceContext;
 use crate::core::error::{AppError, ErrorCode, Result};
+
+use super::policy::AiPolicyService;
 
 /// 单次请求最多带多少条文本（各家限制不同，保守取小；实现内部会按需拆分）。
 pub const MAX_BATCH: usize = 16;
 
 /// 单条文本的字符上限：控制成本，也避免超出端点限制。
 pub const MAX_INPUT_CHARS: usize = 2000;
+
+/// 按当前策略构造可用的嵌入 Provider。
+///
+/// 任何一项不就绪都返回 `None`；“不构造 = 不外发”由这个统一入口保证。
+pub fn embedding_provider(context: &Arc<WorkspaceContext>) -> Option<Arc<dyn EmbeddingProvider>> {
+    let policy = context.settings().ai;
+    if !policy.enabled || !policy.vector_enabled || policy.vector_authorized_at.is_none() {
+        return None;
+    }
+    let embedding_model = policy.remote_embedding_model.clone()?;
+    let service = AiPolicyService::new(Arc::clone(context));
+    let (base, _chat_model, key) = service.remote_model()?;
+    Some(Arc::new(
+        RemoteEmbeddingProvider::new(&base, &embedding_model, &key)
+            .with_proxy(service.outbound_proxy()),
+    ))
+}
 
 /// 向量化 Provider。
 pub trait EmbeddingProvider: Send + Sync {
@@ -73,8 +94,11 @@ impl EmbeddingProvider for RemoteEmbeddingProvider {
     fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
         for batch in texts.chunks(MAX_BATCH) {
-            let agent =
-                crate::core::net::agent_for(&self.base_url, Duration::from_secs(60), self.proxy.as_deref());
+            let agent = crate::core::net::agent_for(
+                &self.base_url,
+                Duration::from_secs(60),
+                self.proxy.as_deref(),
+            );
             let body = serde_json::json!({ "model": self.model, "input": batch });
             let response = agent
                 .post(format!("{}/embeddings", self.base_url))
@@ -111,7 +135,10 @@ impl EmbeddingProvider for RemoteEmbeddingProvider {
             let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| {
                 AppError::new(
                     ErrorCode::InvalidInput,
-                    format!("嵌入响应不是合法 JSON（主机 {}）：{error}", self.host_label()),
+                    format!(
+                        "嵌入响应不是合法 JSON（主机 {}）：{error}",
+                        self.host_label()
+                    ),
                 )
             })?;
             let data = value
@@ -174,11 +201,20 @@ mod tests {
     /// 错误信息里绝不能出现 Key —— 它会进界面、进日志、进问题反馈。
     #[test]
     fn error_messages_never_leak_the_api_key() {
-        let provider = RemoteEmbeddingProvider::new("http://127.0.0.1:9/v1", "m", "sk-secret-value");
+        let provider =
+            RemoteEmbeddingProvider::new("http://127.0.0.1:9/v1", "m", "sk-secret-value");
         let error = provider
             .embed(&["测试".to_string()])
             .expect_err("端口没人听，必须失败");
-        assert!(!error.message.contains("sk-secret-value"), "{}", error.message);
-        assert!(error.message.contains("主机"), "错误要能定位主机：{}", error.message);
+        assert!(
+            !error.message.contains("sk-secret-value"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("主机"),
+            "错误要能定位主机：{}",
+            error.message
+        );
     }
 }

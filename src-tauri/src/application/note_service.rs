@@ -11,17 +11,14 @@ use crate::core::paths::{WorkspacePaths, INBOX_DIR};
 use crate::core::text::{count_words, markdown_to_plain_text};
 use crate::core::time::{days_between, now_file_timestamp, now_iso, today_date};
 use crate::domain::note::{
-    ReorderNotesInput,
-    ReviewDueNote,
-    SetParentInput,
-    SetSourceInput,
     CreateNoteInput, Note, NoteDetail, NoteListQuery, NoteListResult, NoteStatus, NoteSummary,
-    SaveNoteInput, SaveNoteResult,
+    ReorderNotesInput, ReviewDueNote, SaveNoteInput, SaveNoteResult, SetParentInput,
+    SetSourceInput,
 };
 use crate::infrastructure::frontmatter::{self, Frontmatter};
 use crate::infrastructure::markdown_storage::{file_name_of, join_relative, parent_relative};
 use crate::repositories::tag_repository::tags_for_note;
-use crate::repositories::{NoteRepository, SqliteNoteRepository, trash_path_of};
+use crate::repositories::{trash_path_of, NoteRepository, SqliteNoteRepository};
 
 use super::context::WorkspaceContext;
 use super::history_service::{HistoryContent, HistoryEntry, HistoryService};
@@ -159,7 +156,13 @@ impl NoteService {
             .db
             .with_conn(|conn| tags_for_note(conn, &note.id))?;
 
-        Ok(NoteDetail { note, content, category, category_path, tags })
+        Ok(NoteDetail {
+            note,
+            content,
+            category,
+            category_path,
+            tags,
+        })
     }
 
     /// 目录：分类目录缺失时回退到 Inbox。
@@ -184,7 +187,12 @@ impl NoteService {
         let title = normalize_title(&input.title);
         let tags = self.tags().normalize_names(input.tags.unwrap_or_default());
         // 子文档：父文档可以用 id 指定（前端），也允许直接写标题
-        let parent = match input.parent_id.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        let parent = match input
+            .parent_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
             Some(reference) => self.resolve_parent(reference, None)?,
             None => None,
         };
@@ -287,6 +295,81 @@ impl NoteService {
         self.detail(note)
     }
 
+    /// 把完整 Markdown 原文按字节原样写回，并同步元数据与派生索引。
+    ///
+    /// Organize 的“撤销建议”必须恢复接受前的字节，而不是重新序列化 frontmatter：
+    /// 后者可能改变字段顺序、空行或未知 YAML 写法，不满足字节级恢复。
+    pub fn restore_raw_bytes(&self, id: &str, raw: &str) -> Result<NoteDetail> {
+        let current = self.note_or_err(id)?;
+        if let Ok(previous_raw) = self.ctx.storage.read_raw(&current.file_path) {
+            if let Err(error) = self.history().capture(&current.id, &previous_raw) {
+                tracing::warn!(target: "history", "撤销前留档失败：{}", error.message);
+            }
+        }
+        self.ctx.storage.write_atomic(&current.file_path, raw)?;
+        let stored = self.ctx.storage.read_note(&current.file_path)?;
+        let title = stored
+            .frontmatter
+            .title
+            .clone()
+            .map(|value| normalize_title(&value))
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| current.title.clone());
+        let updated_at = stored
+            .frontmatter
+            .updated_at
+            .clone()
+            .or_else(|| stored.modified_at.clone())
+            .unwrap_or_else(now_iso);
+        let word_count = count_words(&markdown_to_plain_text(&stored.body));
+        self.ctx.db.with_conn(|conn| {
+            SqliteNoteRepository.update_identity(
+                conn,
+                &current.id,
+                &title,
+                &current.file_path,
+                current.category_id.as_deref(),
+                &updated_at,
+            )?;
+            SqliteNoteRepository.update_content_meta(
+                conn,
+                &current.id,
+                &updated_at,
+                &stored.content_hash,
+                word_count,
+                None,
+            )?;
+            SqliteNoteRepository.set_source(
+                conn,
+                &current.id,
+                stored.frontmatter.source_type.as_deref(),
+                stored.frontmatter.source_ref.as_deref(),
+                stored.frontmatter.source_reliability,
+                stored.frontmatter.valid_until.as_deref(),
+            )?;
+            SqliteNoteRepository.set_sort_order(
+                conn,
+                &current.id,
+                stored.frontmatter.order.unwrap_or(0).max(0),
+            )?;
+            SqliteNoteRepository.set_pinned(conn, &current.id, stored.frontmatter.pinned)?;
+            SqliteNoteRepository.set_favorite(conn, &current.id, stored.frontmatter.favorite)
+        })?;
+        self.tags()
+            .set_note_tags(&current.id, &stored.frontmatter.tags)?;
+        self.refresh_file_stamp(&current.id, &current.file_path);
+
+        let updated = self.note_or_err(&current.id)?;
+        self.refresh_parent(&updated)?;
+        self.reindex(&updated.id)?;
+        if let Err(error) = RelationService::new(Arc::clone(&self.ctx)).refresh_note(&updated) {
+            tracing::warn!(target: "relations", "撤销后刷新关系失败：{}", error.message);
+        }
+        self.refresh_links(&updated, &stored.body);
+        self.emit_change("updated", &updated.id);
+        self.detail(updated)
+    }
+
     /// 保存笔记（FR-N03 / 13.1 / 19.3）。
     pub fn save(&self, input: SaveNoteInput) -> Result<SaveNoteResult> {
         let note = self.note_or_err(&input.id)?;
@@ -320,7 +403,10 @@ impl NoteService {
             .map(normalize_title)
             .filter(|title| !title.is_empty())
             .unwrap_or_else(|| note.title.clone());
-        let category_id = input.category_id.clone().or_else(|| note.category_id.clone());
+        let category_id = input
+            .category_id
+            .clone()
+            .or_else(|| note.category_id.clone());
         let lookup = self.ctx.category_lookup()?;
         let category_path = category_id
             .as_ref()
@@ -383,10 +469,7 @@ impl NoteService {
         }
         self.refresh_file_stamp(&note.id, &note.file_path);
         let _ = self.refresh_parent(&note);
-        let content_hash = self
-            .ctx
-            .storage
-            .write_atomic(&note.file_path, &markdown)?;
+        let content_hash = self.ctx.storage.write_atomic(&note.file_path, &markdown)?;
 
         let word_count = count_words(&markdown_to_plain_text(&input.content));
         self.ctx.db.with_conn(|conn| {
@@ -511,9 +594,11 @@ impl NoteService {
             self.refresh_outgoing_links(&updated, &stored.body);
         }
         // 指向旧标题的链接自动重连（含改写来源笔记正文）
-        if let Err(error) = RelationService::new(Arc::clone(&self.ctx))
-            .on_note_renamed(&note.id, &note.title, &title)
-        {
+        if let Err(error) = RelationService::new(Arc::clone(&self.ctx)).on_note_renamed(
+            &note.id,
+            &note.title,
+            &title,
+        ) {
             tracing::warn!(target: "relations", "重命名时更新关系失败：{}", error.message);
         }
         if let Err(error) = self.links().on_note_renamed(&note.id, &note.title, &title) {
@@ -522,8 +607,12 @@ impl NoteService {
         // 子文档的 `parent:` 声明（按标题写的那种）也要跟着改名，否则重建后就找不到父文档了
         match self.sync_children_parent_declaration(&note.id, &note.title, &title) {
             Ok(0) => {}
-            Ok(count) => tracing::debug!(target: "notes", "重命名时同步了 {count} 篇子文档的 parent 声明"),
-            Err(error) => tracing::warn!(target: "notes", "同步子文档 parent 声明失败：{}", error.message),
+            Ok(count) => {
+                tracing::debug!(target: "notes", "重命名时同步了 {count} 篇子文档的 parent 声明")
+            }
+            Err(error) => {
+                tracing::warn!(target: "notes", "同步子文档 parent 声明失败：{}", error.message)
+            }
         }
         self.emit_change("renamed", &note.id);
         self.detail(self.note_or_err(&note.id)?)
@@ -639,7 +728,12 @@ impl NoteService {
             None
         };
         self.ctx.db.with_conn(|conn| {
-            SqliteNoteRepository.set_status(conn, &note.id, NoteStatus::Deleted, trash_path.as_deref())
+            SqliteNoteRepository.set_status(
+                conn,
+                &note.id,
+                NoteStatus::Deleted,
+                trash_path.as_deref(),
+            )
         })?;
         let _ = self.index().remove_note(&note.id);
         let _ = self.links().on_note_unavailable(&note.id);
@@ -658,7 +752,10 @@ impl NoteService {
             .db
             .with_conn(|conn| trash_path_of(conn, &note.id))?
             .ok_or_else(|| {
-                AppError::new(ErrorCode::NoteNotFound, "回收站中找不到对应文件，无法恢复。")
+                AppError::new(
+                    ErrorCode::NoteNotFound,
+                    "回收站中找不到对应文件，无法恢复。",
+                )
             })?;
         let restored = self
             .ctx
@@ -761,10 +858,15 @@ impl NoteService {
     /// 设置父文档（子文档层级）：写回 frontmatter 的 `parent` 并更新派生列。
     pub fn set_parent(&self, input: SetParentInput) -> Result<NoteDetail> {
         let note = self.note_or_err(&input.id)?;
-        let parent = match input.parent_id.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            Some(reference) => Some(self.resolve_parent(reference, Some(&note.id))?.ok_or_else(|| {
-                AppError::new(ErrorCode::NoteNotFound, "父文档不存在或已被删除。")
-            })?),
+        let parent = match input
+            .parent_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            Some(reference) => Some(self.resolve_parent(reference, Some(&note.id))?.ok_or_else(
+                || AppError::new(ErrorCode::NoteNotFound, "父文档不存在或已被删除。"),
+            )?),
             None => None,
         };
         // 防环：不能把自己或自己的后代设为父文档
@@ -773,7 +875,9 @@ impl NoteService {
             let mut hops = 0;
             while let Some(current) = cursor {
                 if current == note.id {
-                    return Err(AppError::invalid_input("不能把文档设置到它自己的子层级下。"));
+                    return Err(AppError::invalid_input(
+                        "不能把文档设置到它自己的子层级下。",
+                    ));
                 }
                 hops += 1;
                 if hops > 64 {
@@ -893,7 +997,11 @@ impl NoteService {
 
         // 同层归一化：传入顺序在前，其余同层笔记按原顺序追加
         let siblings = self.ctx.db.with_conn(|conn| {
-            SqliteNoteRepository.active_ids_under_parent(conn, self.workspace_id(), parent_id.as_deref())
+            SqliteNoteRepository.active_ids_under_parent(
+                conn,
+                self.workspace_id(),
+                parent_id.as_deref(),
+            )
         })?;
         let mut ordered: Vec<String> = ids
             .iter()
@@ -985,7 +1093,12 @@ impl NoteService {
     ///
     /// 只处理 `parent_id` 指向本笔记的**直接子文档**，且只改「声明值不等于 id」的那些，
     /// 因此代价与子文档数量成正比（不是全库扫描）。
-    pub fn sync_children_parent_declaration(&self, parent_id: &str, old_title: &str, new_title: &str) -> Result<usize> {
+    pub fn sync_children_parent_declaration(
+        &self,
+        parent_id: &str,
+        old_title: &str,
+        new_title: &str,
+    ) -> Result<usize> {
         if old_title == new_title {
             return Ok(0);
         }
@@ -1007,7 +1120,12 @@ impl NoteService {
             let Ok(stored) = self.ctx.storage.read_note(&child.file_path) else {
                 continue;
             };
-            let declared = stored.frontmatter.parent.as_deref().map(str::trim).unwrap_or("");
+            let declared = stored
+                .frontmatter
+                .parent
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("");
             // 按 id 声明的（声明值就是父 id）无需改写
             if declared.is_empty() || declared == parent_id {
                 continue;
@@ -1083,7 +1201,11 @@ impl NoteService {
             id: Some(note.id.clone()),
             title: Some(note.title.clone()),
             note_type: stored.frontmatter.note_type.clone(),
-            status: stored.frontmatter.status.clone().or(Some("active".to_string())),
+            status: stored
+                .frontmatter
+                .status
+                .clone()
+                .or(Some("active".to_string())),
             category: Some(category_path).filter(|value| !value.is_empty()),
             tags: stored.frontmatter.tags.clone(),
             created_at: stored
@@ -1169,10 +1291,9 @@ impl NoteService {
     /// 只返回**活跃**笔记；时效字段无法解析时跳过（宁可漏报，也不误报）。
     pub fn due_for_review(&self, within_days: i64) -> Result<Vec<ReviewDueNote>> {
         let within = within_days.clamp(0, 3650);
-        let candidates = self
-            .ctx
-            .db
-            .with_conn(|conn| SqliteNoteRepository.list_with_valid_until(conn, self.workspace_id()))?;
+        let candidates = self.ctx.db.with_conn(|conn| {
+            SqliteNoteRepository.list_with_valid_until(conn, self.workspace_id())
+        })?;
         let today = today_date();
         let mut due: Vec<(Note, i64)> = Vec::new();
         for note in candidates {
@@ -1220,13 +1341,19 @@ impl NoteService {
     }
 
     pub fn list(&self, query: NoteListQuery) -> Result<NoteListResult> {
-        let (notes, total) = self.ctx.db.with_conn(|conn| {
-            SqliteNoteRepository.list(conn, self.workspace_id(), &query)
-        })?;
+        let (notes, total) = self
+            .ctx
+            .db
+            .with_conn(|conn| SqliteNoteRepository.list(conn, self.workspace_id(), &query))?;
         let page = query.page.unwrap_or(1).max(1);
         let page_size = query.page_size.unwrap_or(200).clamp(1, 500);
         let items = self.ctx.to_summaries(notes)?;
-        Ok(NoteListResult { items, total, page, page_size })
+        Ok(NoteListResult {
+            items,
+            total,
+            page,
+            page_size,
+        })
     }
 
     /// 最近编辑（FR-N08）。
@@ -1258,7 +1385,6 @@ impl NoteService {
         };
         Ok(self.list(query)?.items)
     }
-
 
     /// 写入文件后刷新「mtime + size」快照，使后续扫描可以直接短路。
     fn refresh_file_stamp(&self, note_id: &str, file_path: &str) {

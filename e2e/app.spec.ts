@@ -778,7 +778,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   expect(Math.abs(expandBox!.y - collapseBox!.y)).toBeLessThan(4);
   // 收起后不是"空了"：导航项以图标栏形式留在那里（选中项高亮、悬停出名字）
   const railLinks = page.locator('nav[aria-label="主导航"] a');
-  await expect(railLinks).toHaveCount(11);
+  await expect(railLinks).toHaveCount(12);
   const railBackground = async (locator: Locator) =>
     locator.evaluate((element) => getComputedStyle(element).backgroundColor);
   const activeRail = page.locator('nav[aria-label="主导航"] a[aria-current="page"]');

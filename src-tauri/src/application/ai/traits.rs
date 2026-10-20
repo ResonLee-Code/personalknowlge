@@ -207,6 +207,9 @@ pub trait GenerativeModel: Send + Sync {
 #[serde(rename_all = "camelCase")]
 pub struct GenerationRequest {
     pub prompt: String,
+    /// 任务专属输出约束；为空时使用研究助手的历史默认提示词。
+    #[serde(default)]
+    pub instructions: Option<String>,
     /// 证据片段（携带 note_id + 字符区间，便于生成引用）
     pub evidence: Vec<RetrievedChunk>,
     pub max_tokens: Option<u32>,

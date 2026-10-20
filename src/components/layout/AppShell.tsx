@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 
+import { AskKnowledgePanel } from '@/components/ask/AskKnowledgePanel';
 import { GlobalSearchDialog } from '@/components/search/GlobalSearchDialog';
 import { NewNoteDialog } from '@/components/notes/NewNoteDialog';
 import { QuickSwitcherDialog } from '@/components/search/QuickSwitcherDialog';
@@ -19,6 +20,7 @@ export function AppShell() {
   const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
   const setNewNoteDialogOpen = useUiStore((state) => state.setNewNoteDialogOpen);
   const setQuickSwitcherOpen = useUiStore((state) => state.setQuickSwitcherOpen);
+  const askPanelOpen = useUiStore((state) => state.askPanelOpen);
   const selectedId = useNotesStore((state) => state.selectedId);
   const removeNote = useNotesStore((state) => state.remove);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -53,6 +55,7 @@ export function AppShell() {
       <GlobalSearchDialog />
       <QuickSwitcherDialog />
       <NewNoteDialog />
+      {askPanelOpen ? <AskKnowledgePanel /> : null}
       {deleteTarget ? (
         <ConfirmDeleteDialog
           noteId={deleteTarget}

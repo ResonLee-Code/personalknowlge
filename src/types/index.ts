@@ -383,6 +383,26 @@ export interface AppInfo {
   sqliteVersion: string;
 }
 
+export interface AppUpdateInfo {
+  currentVersion: string;
+  version: string;
+  date?: string | null;
+  body?: string | null;
+  target: string;
+}
+
+export interface AppUpdateInstallResult {
+  installed: boolean;
+  version: string;
+  message: string;
+}
+
+export interface AppUpdateProgress {
+  stage: 'downloading' | 'verifying';
+  downloaded: number;
+  contentLength?: number | null;
+}
+
 export interface FileChange {
   path: string;
   kind: 'created' | 'modified' | 'removed';
@@ -995,6 +1015,10 @@ export interface ResearchRequest {
   topic: string;
   scope?: string | null;
   timeWindowDays?: number | null;
+  language?: string | null;
+  sourceTypes?: string[];
+  rerunOf?: string | null;
+  planTemplateId?: string | null;
   /** 用户是否明确表达「结果写入知识库」 */
   writeBack?: boolean;
   targetCategoryId?: string | null;
@@ -1021,9 +1045,56 @@ export interface ResearchPlan {
   queries?: string[];
   localBaseline: ResearchKbBaseline[];
   timeWindowDays: number;
+  language: string;
+  sourceTypes: string[];
   budget: AiResearchBudget;
   /** 计划说明（含降级路径与局限） */
   notes: string[];
+}
+
+export interface ResearchPlanEdit {
+  subQuestions?: string[] | null;
+  timeWindowDays?: number | null;
+  language?: string | null;
+  sourceTypes?: string[] | null;
+}
+
+export interface ResearchPlanTemplate {
+  id: string;
+  name: string;
+  topic: string;
+  scope?: string | null;
+  timeWindowDays: number;
+  language: string;
+  sourceTypes: string[];
+  subQuestions: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResearchSourceChange {
+  key: string;
+  title: string;
+  url?: string | null;
+  noteId?: string | null;
+}
+
+export interface ResearchClaimChange {
+  subQuestionId: string;
+  previous: string[];
+  current: string[];
+}
+
+export interface ResearchComparison {
+  previousSessionId: string;
+  currentSessionId: string;
+  topic: string;
+  addedSources: ResearchSourceChange[];
+  removedSources: ResearchSourceChange[];
+  unchangedSources: ResearchSourceChange[];
+  changedClaims: ResearchClaimChange[];
+  previousEvidenceSufficient?: boolean | null;
+  currentEvidenceSufficient?: boolean | null;
 }
 
 export interface ResearchSource {
@@ -1131,6 +1202,7 @@ export interface ResearchStepLog {
 export interface ResearchSession {
   id: string;
   request: ResearchRequest;
+  rerunOf?: string | null;
   status: ResearchStatus;
   createdAt: string;
   updatedAt: string;
@@ -1243,6 +1315,185 @@ export interface RetrievalHit {
 export interface RetrievalReport {
   channels: RetrievalChannelStatus[];
   hits: RetrievalHit[];
+}
+
+/** Ask（V2.0 M1）的检索作用域。 */
+export type AskScope = 'note' | 'category' | 'tag' | 'all';
+
+export interface AskQuestionInput {
+  question: string;
+  scope: AskScope;
+  scopeId?: string | null;
+  /** 编辑器中选中的原文；只用于理解问题，不作为可引用材料 */
+  selection?: string | null;
+  /** 最近几轮对话，仅用于消解指代；每轮仍重新检索 */
+  history?: AskHistoryTurn[];
+  confirmOutbound?: boolean;
+}
+
+export interface AskHistoryTurn {
+  question: string;
+  answer: string;
+}
+
+/** 答案中的一条原文引用（字符下标按 Unicode 码点计算）。 */
+export interface AskCitation {
+  citationId: string;
+  noteId: string;
+  title: string;
+  chunkIndex: number;
+  heading: string;
+  snippet: string;
+  charStart: number;
+  charEnd: number;
+}
+
+export interface AskAnswer {
+  question: string;
+  text: string;
+  citations: AskCitation[];
+  /** 实际使用的生成档位（含模型名） */
+  provider: string;
+  tier: 'online' | 'local' | 'template';
+  evidenceSufficient: boolean;
+  evidenceNote: string;
+  warnings: string[];
+  channels: RetrievalChannelStatus[];
+  retrievedCount: number;
+  tookMs: number;
+}
+
+export interface AskSaveInput {
+  answer: AskAnswer;
+  title?: string | null;
+  categoryId?: string | null;
+  /** 预览传 false；真正落库必须传 true */
+  confirm?: boolean;
+}
+
+export interface AskSourcePreview {
+  citationId: string;
+  noteId: string;
+  title: string;
+  heading: string;
+}
+
+export interface AskNotePreview {
+  title: string;
+  content: string;
+  categoryId?: string | null;
+  sources: AskSourcePreview[];
+  warnings: string[];
+}
+
+export interface AskSaveResult {
+  noteId: string;
+  title: string;
+  filePath: string;
+  indexWarning?: string | null;
+}
+
+export type OrganizeSuggestionKind = 'summary' | 'tags' | 'relations' | 'duplicate';
+export type OrganizeSuggestionStatus = 'pending' | 'accepted' | 'rejected' | 'superseded';
+
+export interface OrganizeSuggestionEvidence {
+  noteId: string;
+  title: string;
+  heading: string;
+  snippet: string;
+  charStart: number;
+  charEnd: number;
+}
+
+export interface SuggestedTag {
+  tag: string;
+  reason: string;
+  existing: boolean;
+}
+
+export interface SuggestedRelation {
+  targetNoteId: string;
+  targetTitle: string;
+  relationType: string;
+  reason: string;
+}
+
+export interface DuplicateCandidate {
+  noteId: string;
+  title: string;
+  score: number;
+  reasons: string[];
+}
+
+export type OrganizeSuggestionPayload =
+  | { type: 'summary'; summary: string; bullets: string[] }
+  | { type: 'tags'; tags: SuggestedTag[] }
+  | { type: 'relations'; relations: SuggestedRelation[] }
+  | { type: 'duplicate'; candidates: DuplicateCandidate[] };
+
+export interface OrganizeSuggestion {
+  id: string;
+  noteId: string;
+  noteTitle: string;
+  kind: OrganizeSuggestionKind;
+  status: OrganizeSuggestionStatus;
+  model: string;
+  promptVersion: string;
+  evidence: OrganizeSuggestionEvidence[];
+  payload: OrganizeSuggestionPayload;
+  sourceHash: string;
+  createdAt: string;
+  updatedAt: string;
+  appliedAt?: string | null;
+  undoneAt?: string | null;
+  error?: string | null;
+  undoAvailable: boolean;
+}
+
+export interface OrganizeBatchFailure {
+  suggestionId: string;
+  message: string;
+}
+
+export interface OrganizeBatchReport {
+  requested: number;
+  succeeded: number;
+  failures: OrganizeBatchFailure[];
+}
+
+export type OrganizeJobStatus =
+  | 'queued'
+  | 'running'
+  | 'paused'
+  | 'canceled'
+  | 'completed'
+  | 'failed';
+
+export type OrganizeJobItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+export interface OrganizeJob {
+  id: string;
+  workspaceId: string;
+  kind: string;
+  status: OrganizeJobStatus;
+  total: number;
+  completed: number;
+  failed: number;
+  payload: Record<string, unknown>;
+  error?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+}
+
+export interface OrganizeJobProgress {
+  jobId: string;
+  status: OrganizeJobStatus;
+  total: number;
+  completed: number;
+  failed: number;
+  currentNoteId?: string | null;
 }
 
 export interface ResearchSessionSummary {

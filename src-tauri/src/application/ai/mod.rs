@@ -1,4 +1,4 @@
-//! 第二代能力**接口预留**（方案储备，本版不接任何模型、不注册任何命令）。
+//! AI 应用层：策略闸门、检索、生成/决策模型与上层能力。
 //!
 //! 目的：先固定「决策层 / 检索层 / 生成层」的 trait 与 DTO，
 //! 让第一代功能（笔记、检索、关系、生命周期）继续按自己的节奏演进；
@@ -9,8 +9,10 @@
 //! - **决策层 `DecisionModel` 已有三个实现**：规则 `RuleDecisionProvider`（离线兜底、无网络、无新依赖）、
 //!   本地 `OllamaModel`、在线 `RemoteModel`（在线档需显式授权后才构造）；
 //! - **生成层 `GenerativeModel` 同构**：`TemplateGenerativeModel` / `OllamaModel` / `RemoteModel`；
-//! - **检索层 `Retriever` 仍是纯接口预留**（无实现），当前检索仍走第一代的 FTS + 图检索。
+//! - **检索层 `Retriever` 已有关键词与可选向量实现**，由 `retrieval::retrieve` 做 RRF 融合；
+//! - **Ask（V2.0 M1）** 已把检索、生成和三档降级串成带引用校验的只读问答。
 
+pub mod ask;
 pub mod policy;
 pub mod decision_cache;
 pub mod calibration;
@@ -21,6 +23,8 @@ pub mod embeddings;
 pub mod evidence;
 pub mod host;
 pub mod local_model;
+pub mod model_gateway;
+pub mod organize;
 pub mod presets;
 pub mod query_expansion;
 pub mod remote_model;
@@ -36,10 +40,12 @@ pub mod vector_index;
 pub mod web_search;
 
 pub use policy::AiPolicyService;
+pub use ask::AskService;
 pub use decision_cache::{CachedDecision, DecisionCache};
 pub use decision_engine::{DecisionEngine, DecisionOutcome};
 pub use diagnose::{AiDiagnosis, AiDiagnosisCheck, DiagnoseInputs, HttpLocalModelProbe, LocalModelProbe};
 pub use local_model::OllamaModel;
+pub use organize::OrganizeService;
 pub use presets::{LocalModelPreset, LOCAL_MODEL_PRESETS};
 pub use remote_model::RemoteModel;
 pub use research::ResearchService;

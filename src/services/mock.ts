@@ -12,6 +12,12 @@ import type {
   AiPolicy,
   AppError,
   AppSettings,
+  AskAnswer,
+  AskCitation,
+  AskNotePreview,
+  AskQuestionInput,
+  AskSaveInput,
+  AskSaveResult,
   Backlink,
   BackupInfo,
   Category,
@@ -28,6 +34,10 @@ import type {
   NoteDetail,
   NoteListQuery,
   NoteSummary,
+  OrganizeJob,
+  OrganizeSuggestion,
+  OrganizeSuggestionKind,
+  OrganizeSuggestionPayload,
   OutgoingLink,
   ResearchClaim,
   ResearchDuplicateNote,
@@ -37,6 +47,9 @@ import type {
   ResearchProposal,
   ResearchReport,
   ResearchRequest,
+  ResearchComparison,
+  ResearchPlanEdit,
+  ResearchPlanTemplate,
   ResearchSession,
   ResearchSessionSummary,
   ResearchSource,
@@ -63,7 +76,7 @@ import type {
 import packageJson from '../../package.json';
 
 /** 与后端 `SCHEMA_VERSION` 对齐的迁移版本（预览端不跑迁移，只用于如实展示）。 */
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 15;
 
 /** 仓库当前版本（来自 package.json，避免预览端硬编码版本号）。 */
 const packageVersion = packageJson.version;
@@ -86,6 +99,10 @@ interface MockState {
   aiAudit: AiAuditEntry[];
   /** 研究会话（D1/D2）：key = sessionId */
   research: Record<string, ResearchSession>;
+  /** Organize 建议与持久化批任务（浏览器预览） */
+  organizeSuggestions: OrganizeSuggestion[];
+  organizeJobs: OrganizeJob[];
+  researchTemplates: ResearchPlanTemplate[];
 }
 
 interface MockHistoryEntry {
@@ -151,7 +168,8 @@ function applyMockSettings(current: AppSettings, input: Record<string, unknown>)
     typeof value === 'string' && allowed.includes(value) ? value : undefined;
 
   if (typeof input.autosaveEnabled === 'boolean') next.autosaveEnabled = input.autosaveEnabled;
-  if (input.autosaveDelayMs !== undefined) next.autosaveDelayMs = clamp(input.autosaveDelayMs, 200, 10_000);
+  if (input.autosaveDelayMs !== undefined)
+    next.autosaveDelayMs = clamp(input.autosaveDelayMs, 200, 10_000);
   if (input.fontSize !== undefined) next.fontSize = clamp(input.fontSize, 10, 32);
   if (input.sidebarWidth !== undefined) next.sidebarWidth = clamp(input.sidebarWidth, 160, 480);
   if (input.listWidth !== undefined) next.listWidth = clamp(input.listWidth, 220, 640);
@@ -163,8 +181,7 @@ function applyMockSettings(current: AppSettings, input: Record<string, unknown>)
   next.defaultNewLocation =
     pick(input.defaultNewLocation, ['inbox', 'currentCategory', 'lastCategory']) ??
     next.defaultNewLocation;
-  next.editorMode =
-    pick(input.editorMode, ['edit', 'split', 'preview']) ?? next.editorMode;
+  next.editorMode = pick(input.editorMode, ['edit', 'split', 'preview']) ?? next.editorMode;
   next.listSort =
     pick(input.listSort, ['updatedDesc', 'updatedAsc', 'createdDesc', 'titleAsc', 'manual']) ??
     next.listSort;
@@ -227,6 +244,9 @@ function load(): MockState {
         ...parsed,
         settings: { ...emptySettings, ...parsed.settings },
         research: parsed.research ?? {},
+        organizeSuggestions: parsed.organizeSuggestions ?? [],
+        organizeJobs: parsed.organizeJobs ?? [],
+        researchTemplates: parsed.researchTemplates ?? [],
       };
     }
   } catch {
@@ -245,6 +265,9 @@ function load(): MockState {
     ai: { ...defaultAiPolicy },
     aiAudit: [],
     research: {},
+    organizeSuggestions: [],
+    organizeJobs: [],
+    researchTemplates: [],
   };
 }
 
@@ -397,7 +420,11 @@ function normalizeRemoteBaseUrl(value: string): string | null {
   const trimmed = value.trim().replace(/\/+$/, '');
   if (trimmed.length === 0) return null;
   const lowered = trimmed.toLowerCase();
-  const scheme = lowered.startsWith('https://') ? 'https' : lowered.startsWith('http://') ? 'http' : null;
+  const scheme = lowered.startsWith('https://')
+    ? 'https'
+    : lowered.startsWith('http://')
+      ? 'http'
+      : null;
   if (!scheme) return null;
   const rest = lowered.slice(scheme.length + 3);
   const authority = rest.split(/[/?#]/)[0]!;
@@ -410,9 +437,7 @@ function normalizeRemoteBaseUrl(value: string): string | null {
   if (host.length === 0) return null;
   const labels = host.split('.');
   const ipLiteral =
-    /^\d{1,3}(\.\d{1,3}){3}$/.test(host) ||
-    host.includes(':') ||
-    /^[0-9.]+$/.test(host);
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':') || /^[0-9.]+$/.test(host);
   const numericTld = /^[0-9]+$/.test(labels[labels.length - 1]!);
   if (ipLiteral || numericTld) return null;
   const loopback = host === 'localhost';
@@ -564,7 +589,17 @@ const RESEARCH_MAX_SOURCES = 24;
 const RESEARCH_REVIEW_DAYS = 180;
 
 /** 冲突判定的正/负面词表（D4 规则档，与 Rust 端同表）。 */
-const RESEARCH_POSITIVE_MARKERS = ['支持', '可以', '推荐', '适用', '可行', '优势', '有效', '最佳', '建议使用'];
+const RESEARCH_POSITIVE_MARKERS = [
+  '支持',
+  '可以',
+  '推荐',
+  '适用',
+  '可行',
+  '优势',
+  '有效',
+  '最佳',
+  '建议使用',
+];
 const RESEARCH_NEGATIVE_MARKERS = [
   '不支持',
   '不能',
@@ -614,7 +649,11 @@ const MOCK_DOMAIN_LEVELS: Array<[string, ResearchSourceLevel]> = [
   ['x.com', 'E'],
 ];
 
-function mockGradeWeb(url: string, title: string, snippet: string): { level: ResearchSourceLevel; reason: string } {
+function mockGradeWeb(
+  url: string,
+  title: string,
+  snippet: string,
+): { level: ResearchSourceLevel; reason: string } {
   const haystack = `${title} ${snippet}`.toLowerCase();
   if (haystack.includes('ai 生成') || haystack.includes('generated by ai')) {
     return { level: 'E', reason: '内容自证为 AI 生成，只作线索' };
@@ -738,9 +777,7 @@ function researchExpandQueries(topic: string, subQuestions: ResearchSubQuestion[
 
 function researchTokens(keyword: string): string[] {
   const tokens: string[] = [];
-  (keyword.match(/[A-Za-z0-9_+-]{2,}/g) ?? []).forEach((word) =>
-    tokens.push(word.toLowerCase()),
-  );
+  (keyword.match(/[A-Za-z0-9_+-]{2,}/g) ?? []).forEach((word) => tokens.push(word.toLowerCase()));
   (keyword.match(/[\u4e00-\u9fff]+/g) ?? []).forEach((run) => {
     const chars = [...run];
     if (chars.length === 1) tokens.push(chars[0]!);
@@ -764,16 +801,15 @@ function researchLocalHits(topic: string, limit: number): Note[] {
       return { note, hits: tokens.filter((token) => haystack.includes(token)).length };
     })
     .filter((item) => item.hits >= required)
-    .sort((left, right) => right.hits - left.hits || right.note.updatedAt.localeCompare(left.note.updatedAt))
+    .sort(
+      (left, right) =>
+        right.hits - left.hits || right.note.updatedAt.localeCompare(left.note.updatedAt),
+    )
     .slice(0, limit)
     .map((item) => item.note);
 }
 
-function researchAssign(
-  title: string,
-  snippet: string,
-  questions: ResearchSubQuestion[],
-): number {
+function researchAssign(title: string, snippet: string, questions: ResearchSubQuestion[]): number {
   const haystack = `${title} ${snippet}`.toLowerCase();
   let best = 0;
   let bestScore = 0;
@@ -901,8 +937,8 @@ function researchVerifyClaims(session: ResearchSession): ResearchClaim[] {
       new Set(evidence.map((source) => source.noteId ?? `ref${source.reference}`)),
     );
     const confidence = researchClaimConfidence(
-      evidence.map((source) =>
-        source.credibility ?? researchBlendedCredibility(null, source.reliability),
+      evidence.map(
+        (source) => source.credibility ?? researchBlendedCredibility(null, source.reliability),
       ),
       independent.length,
     );
@@ -1059,8 +1095,12 @@ function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]):
     if (evidence.length < 2) return;
     const polarities = evidence.map((source) => {
       const haystack = `${source.title} ${source.snippet}`.toLowerCase();
-      const positive = RESEARCH_POSITIVE_MARKERS.filter((marker) => haystack.includes(marker)).length;
-      const negative = RESEARCH_NEGATIVE_MARKERS.filter((marker) => haystack.includes(marker)).length;
+      const positive = RESEARCH_POSITIVE_MARKERS.filter((marker) =>
+        haystack.includes(marker),
+      ).length;
+      const negative = RESEARCH_NEGATIVE_MARKERS.filter((marker) =>
+        haystack.includes(marker),
+      ).length;
       return positive - negative;
     });
     if (polarities.some((value) => value > 0) && polarities.some((value) => value < 0)) {
@@ -1156,9 +1196,10 @@ function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]):
   if (!evidence.sufficient) {
     warnings.push({
       kind: 'insufficientEvidence',
-      message: `${evidence.verdict} ${evidence.gaps.map((gap) => gap.message).join(' ')} 本报告不给结论段。${
-        evidence.recommendation ? ` ${evidence.recommendation}` : ''
-      }`.trim(),
+      message:
+        `${evidence.verdict} ${evidence.gaps.map((gap) => gap.message).join(' ')} 本报告不给结论段。${
+          evidence.recommendation ? ` ${evidence.recommendation}` : ''
+        }`.trim(),
       references: evidence.gaps.flatMap((gap) => gap.references ?? []),
     });
   }
@@ -1183,9 +1224,7 @@ function researchBuildReport(session: ResearchSession, claims: ResearchClaim[]):
       cache: 'miss',
       provider: 'rule',
       candidates: session.sources.length,
-      attempts: [
-        { provider: 'rule', ok: true, detail: `返回 ${session.sources.length} 条` },
-      ],
+      attempts: [{ provider: 'rule', ok: true, detail: `返回 ${session.sources.length} 条` }],
       tookMs: 0,
     },
     conclusions,
@@ -1404,7 +1443,11 @@ function researchRequire(sessionId: string): ResearchSession {
   return structuredClone(session);
 }
 
-function researchRequireStatus(session: ResearchSession, expected: ResearchStatus[], action: string) {
+function researchRequireStatus(
+  session: ResearchSession,
+  expected: ResearchStatus[],
+  action: string,
+) {
   if (!expected.includes(session.status)) {
     fail(
       'INVALID_INPUT',
@@ -1607,20 +1650,20 @@ function listNotes(query: NoteListQuery = {}) {
     );
   }
   /** 与 SQLite `COLLATE NOCASE` 同口径：只折叠 ASCII 大小写，其余按码点比较。 */
-function compareNoCase(left: string, right: string): number {
-  const fold = (value: string) =>
-    [...value]
-      .map((ch) => {
-        const code = ch.charCodeAt(0);
-        return code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : ch;
-      })
-      .join('');
-  const a = fold(left);
-  const b = fold(right);
-  return a < b ? -1 : a > b ? 1 : 0;
-}
+  function compareNoCase(left: string, right: string): number {
+    const fold = (value: string) =>
+      [...value]
+        .map((ch) => {
+          const code = ch.charCodeAt(0);
+          return code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : ch;
+        })
+        .join('');
+    const a = fold(left);
+    const b = fold(right);
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
 
-const sort = query.sort ?? 'updatedDesc';
+  const sort = query.sort ?? 'updatedDesc';
   items = [...items].sort((a, b) => {
     // 与后端 `NoteSort::order_by()` 逐字对齐：置顶最前 + 次级键 `id`
     // （缺次级键时，同秒写入的笔记顺序不确定，分页会抖动）
@@ -1683,9 +1726,28 @@ function assertCategoryExists(categoryId?: string | null) {
 const MAX_FILE_STEM_CHARS = 120;
 /** Windows 保留名称（与 Rust `sanitize_file_name` 一致）。 */
 const RESERVED_FILE_STEMS = [
-  'CON', 'PRN', 'AUX', 'NUL',
-  'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
-  'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+  'CON',
+  'PRN',
+  'AUX',
+  'NUL',
+  'COM1',
+  'COM2',
+  'COM3',
+  'COM4',
+  'COM5',
+  'COM6',
+  'COM7',
+  'COM8',
+  'COM9',
+  'LPT1',
+  'LPT2',
+  'LPT3',
+  'LPT4',
+  'LPT5',
+  'LPT6',
+  'LPT7',
+  'LPT8',
+  'LPT9',
 ];
 
 /** 清理文件名：非法字符与控制字符替换为 `-`，折叠分隔符并限制长度。 */
@@ -1857,7 +1919,11 @@ function createNote(input: CreateNoteInput): NoteDetail {
   const title = input.title.trim() || '未命名笔记';
   // 未显式指定分类时继承父文档分类（与后端一致）
   const categoryId = input.categoryId ?? parent?.categoryId ?? null;
-  const filePath = notePathIn(categoryDirectory(categoryId), noteFileStem(title, new Date(createdAt)), id);
+  const filePath = notePathIn(
+    categoryDirectory(categoryId),
+    noteFileStem(title, new Date(createdAt)),
+    id,
+  );
   const note: Note = {
     id,
     workspaceId: workspace.id,
@@ -1982,8 +2048,7 @@ function searchNotes(query: SearchQuery) {
         const needle = Array.from(keyword);
         for (let index = 0; index + needle.length <= chars.length; index += 1) {
           const same = needle.every(
-            (char, offset) =>
-              (chars[index + offset] ?? '').toLowerCase() === char.toLowerCase(),
+            (char, offset) => (chars[index + offset] ?? '').toLowerCase() === char.toLowerCase(),
           );
           if (same) {
             location = {
@@ -2018,6 +2083,438 @@ function searchNotes(query: SearchQuery) {
     tookMs: 3,
     indexStale: false,
   };
+}
+
+/**
+ * Ask 的浏览器预览实现。
+ *
+ * 预览端没有 FTS5 / 分块表 / 模型，因此只做可解释的片段匹配并**始终走模板档**；
+ * 字符区间仍按码点计算，与桌面端引用跳转口径一致。不会假装调用已配置的模型。
+ */
+function mockAsk(input: AskQuestionInput): AskAnswer {
+  const started = performance.now();
+  const question = input.question.trim();
+  if (!question) fail('INVALID_INPUT', '问题不能为空。');
+  if ([...question].length > 2000) fail('INVALID_INPUT', '问题过长：最多 2000 个字符。');
+  requireAi();
+  const retrievalText = [
+    ...(input.history ?? []).slice(-2).map((turn) => turn.question),
+    input.selection ?? '',
+    question,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const tokens = [
+    ...new Set(
+      [
+        ...(retrievalText.toLowerCase().match(/[a-z0-9_+.-]{2,}/g) ?? []),
+        ...Array.from(retrievalText.matchAll(/\p{Script=Han}+/gu)).flatMap((match) => {
+          const chars = Array.from(match[0]);
+          if (chars.length <= 2) return [match[0]];
+          return chars.slice(0, -1).map((char, index) => `${char}${chars[index + 1]}`);
+        }),
+      ].filter(Boolean),
+    ),
+  ].slice(0, 24);
+
+  let notes = activeNotes();
+  if (input.scope === 'note') {
+    const noteId = input.scopeId;
+    if (!noteId) fail('INVALID_INPUT', '当前笔记作用域缺少笔记 id。');
+    notes = notes.filter((note) => note.id === noteId);
+    if (notes.length === 0) fail('NOTE_NOT_FOUND', '笔记不存在或已被删除。');
+  } else if (input.scope === 'category') {
+    if (!input.scopeId) fail('INVALID_INPUT', '当前分类作用域缺少分类 id。');
+    notes = notes.filter((note) => note.categoryId === input.scopeId);
+  } else if (input.scope === 'tag') {
+    if (!input.scopeId) fail('INVALID_INPUT', '当前标签作用域缺少标签 id。');
+    notes = notes.filter((note) => (state.noteTags[note.id] ?? []).includes(input.scopeId!));
+  }
+
+  const candidates: Array<{
+    note: Note;
+    chunk: { text: string; start: number; end: number; heading: string };
+    score: number;
+  }> = [];
+  for (const note of notes) {
+    for (const chunk of mockAskChunks(state.contents[note.id] ?? '')) {
+      const lower = chunk.text.toLowerCase();
+      const score = tokens.reduce((total, token) => total + (lower.includes(token) ? 1 : 0), 0);
+      if (input.scope === 'note' || score > 0) candidates.push({ note, chunk, score });
+    }
+  }
+  candidates.sort(
+    (left, right) =>
+      right.score - left.score ||
+      right.note.updatedAt.localeCompare(left.note.updatedAt) ||
+      left.note.title.localeCompare(right.note.title),
+  );
+  const selected = candidates.slice(0, 8);
+  const citations: AskCitation[] = selected.map((item, index) => ({
+    citationId: `C${index + 1}`,
+    noteId: item.note.id,
+    title: item.note.title,
+    chunkIndex: index,
+    heading: item.chunk.heading,
+    snippet: item.chunk.text,
+    charStart: item.chunk.start,
+    charEnd: item.chunk.end,
+  }));
+  const sufficient = citations.length > 0;
+  const text = sufficient
+    ? [
+        '**证据整理（浏览器预览模板）**',
+        '',
+        '预览模式不调用模型；以下按命中片段列出可核对材料：',
+        '',
+        ...citations.map(
+          (citation, index) =>
+            `${index + 1}. ${citation.snippet.slice(0, 240)}${citation.snippet.length > 240 ? '…' : ''}\n   [C${index + 1}]`,
+        ),
+        '',
+        '请打开桌面端并配置本地或在线模型，获得归纳后的回答。',
+      ].join('\n')
+    : '证据不足：当前作用域内没有找到可以回答这个问题的材料。请补充相关笔记、调整作用域或换一种问法。';
+  auditResearch('ask_answer', 'ok', sufficient ? 'preview.template.ask' : 'INSUFFICIENT_EVIDENCE');
+  return {
+    question,
+    text,
+    citations,
+    provider: 'template.ask',
+    tier: 'template',
+    evidenceSufficient: sufficient,
+    evidenceNote: sufficient
+      ? `检索到 ${citations.length} 条可引用材料；预览端只做模板整理。`
+      : '没有找到可引用材料，因此不生成事实性结论。',
+    warnings: state.ai.remoteModelCompose
+      ? ['浏览器预览模式不会外发内容，也不会调用已配置的在线模型。']
+      : [],
+    channels: [{ id: 'bm25', available: true, note: `预览匹配召回 ${citations.length} 条材料` }],
+    retrievedCount: citations.length,
+    tookMs: Math.max(1, Math.round(performance.now() - started)),
+  };
+}
+
+function mockAskChunks(content: string): Array<{
+  text: string;
+  start: number;
+  end: number;
+  heading: string;
+}> {
+  const chars = Array.from(content);
+  const chunks: Array<{ text: string; start: number; end: number; heading: string }> = [];
+  let cursor = 0;
+  while (cursor < chars.length) {
+    while (cursor < chars.length && /\s/.test(chars[cursor] ?? '')) cursor += 1;
+    if (cursor >= chars.length) break;
+    const start = cursor;
+    while (
+      cursor < chars.length &&
+      !(chars[cursor] === '\n' && (chars[cursor + 1] === '\n' || cursor + 1 >= chars.length))
+    ) {
+      cursor += 1;
+    }
+    let end = cursor;
+    while (end > start && /\s/.test(chars[end - 1] ?? '')) end -= 1;
+    if (end > start) {
+      const text = chars.slice(start, end).join('');
+      const heading =
+        text
+          .split('\n')
+          .find((line) => /^#{1,6}\s+/.test(line.trim()))
+          ?.replace(/^#{1,6}\s+/, '')
+          .trim() ?? '';
+      chunks.push({ text, start, end, heading });
+    }
+    cursor += 1;
+  }
+  return chunks;
+}
+
+function mockAskSavePreview(input: AskSaveInput): AskNotePreview {
+  const answer = input.answer;
+  if (!answer.question.trim()) fail('INVALID_INPUT', '答案缺少原始问题，不能存为笔记。');
+  if (!answer.evidenceSufficient || answer.citations.length === 0) {
+    fail('INVALID_INPUT', '证据不足的回答不能存为结论笔记；请补充材料后重新提问。');
+  }
+  for (const citation of answer.citations) {
+    if (!state.notes.some((note) => note.id === citation.noteId && note.status === 'active')) {
+      fail('NOTE_CONFLICT', `来源笔记「${citation.title}」已不存在；请重新提问。`);
+    }
+  }
+  const title =
+    input.title?.trim() ||
+    [...answer.question.trim().split('\n')[0]!].slice(0, 48).join('').trim() ||
+    '知识库问答';
+  const sourceRows: Array<{ citationId: string; noteId: string; title: string; heading: string }> =
+    [];
+  const seen = new Set<string>();
+  for (const citation of answer.citations) {
+    if (seen.has(citation.noteId)) continue;
+    seen.add(citation.noteId);
+    sourceRows.push({
+      citationId: citation.citationId,
+      noteId: citation.noteId,
+      title: citation.title,
+      heading: citation.heading,
+    });
+  }
+  const content = [
+    `> 问题：${answer.question}`,
+    `> 生成档位：${answer.provider}（${answer.tier}）`,
+    `> 证据：${answer.evidenceNote}`,
+    '',
+    answer.text,
+    '',
+    '## 来源',
+    '',
+    ...sourceRows.map(
+      (source) =>
+        `- ${source.citationId} · [[${source.title}]]${source.heading ? ` · ${source.heading}` : ''}`,
+    ),
+    '',
+    '<details>',
+    '<summary>原文摘录</summary>',
+    '',
+    ...answer.citations.flatMap((citation) => [
+      `### ${citation.citationId}`,
+      '',
+      citation.snippet,
+      '',
+    ]),
+    '</details>',
+  ].join('\n');
+  const warnings: string[] = [];
+  if (answer.tier === 'template') warnings.push('当前答案来自模板档；保存后仍需人工核对。');
+  if (
+    state.notes.some(
+      (note) => note.status === 'active' && note.title.toLowerCase() === title.toLowerCase(),
+    )
+  ) {
+    warnings.push('已有同标题笔记；本次会新建另一篇，不会覆盖原笔记。');
+  }
+  return {
+    title,
+    content,
+    categoryId: input.categoryId ?? null,
+    sources: sourceRows,
+    warnings,
+  };
+}
+
+function mockOrganizeGenerate(noteId: string, kind: OrganizeSuggestionKind): OrganizeSuggestion {
+  requireAi();
+  const note = state.notes.find((item) => item.id === noteId && item.status === 'active');
+  if (!note) fail('NOTE_NOT_FOUND', '笔记不存在或已被删除。');
+  const content = state.contents[noteId] ?? '';
+  const evidence = mockAskChunks(content)
+    .slice(0, 4)
+    .map((chunk) => ({
+      noteId,
+      title: note.title,
+      heading: chunk.heading,
+      snippet: chunk.text,
+      charStart: chunk.start,
+      charEnd: chunk.end,
+    }));
+  let payload: OrganizeSuggestionPayload;
+  if (kind === 'summary') {
+    payload = {
+      type: 'summary',
+      summary: [...plainText(content)].slice(0, 240).join(''),
+      bullets: evidence
+        .map((item) => item.heading)
+        .filter(Boolean)
+        .slice(0, 4),
+    };
+  } else if (kind === 'tags') {
+    const assigned = new Set((state.noteTags[noteId] ?? []).map((name) => tagKey(name)));
+    const candidates = [
+      ...state.tags.map((tag) => tag.name),
+      ...evidence.map((item) => item.heading),
+      note.title,
+    ];
+    const tags = normalizeTagNames(candidates)
+      .filter((name) => [...name].length >= 2 && [...name].length <= 24)
+      .filter((name) => !assigned.has(tagKey(name)))
+      .slice(0, 5)
+      .map((tag) => ({
+        tag,
+        reason: state.tags.some((item) => tagKey(item.name) === tagKey(tag))
+          ? '正文提到，复用已有标签'
+          : '来自标题或小节标题',
+        existing: state.tags.some((item) => tagKey(item.name) === tagKey(tag)),
+      }));
+    payload = { type: 'tags', tags };
+  } else if (kind === 'relations') {
+    const terms = normalizeTagNames(
+      Array.from(content.matchAll(/\p{Script=Han}{2,}|[A-Za-z0-9_-]{2,}/gu)).map(
+        (match) => match[0],
+      ),
+    );
+    const relations = state.notes
+      .filter((item) => item.id !== noteId && item.status === 'active')
+      .map((item) => {
+        const text = `${item.title}\n${state.contents[item.id] ?? ''}`.toLowerCase();
+        const score = terms.filter((term) => text.includes(term.toLowerCase())).length;
+        return { item, score };
+      })
+      .filter((item) => item.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 4)
+      .map(({ item, score }) => ({
+        targetNoteId: item.id,
+        targetTitle: item.title,
+        relationType: 'RELATED_TO',
+        reason: `共享 ${score} 个关键词`,
+      }));
+    payload = { type: 'relations', relations };
+  } else {
+    const currentTitle = note.title.toLowerCase();
+    const candidates = state.notes
+      .filter((item) => item.id !== noteId && item.status === 'active')
+      .filter(
+        (item) =>
+          item.title.toLowerCase().includes(currentTitle) ||
+          currentTitle.includes(item.title.toLowerCase()),
+      )
+      .slice(0, 5)
+      .map((item) => ({
+        noteId: item.id,
+        title: item.title,
+        score: 0.7,
+        reasons: ['标题高度相似'],
+      }));
+    payload = { type: 'duplicate', candidates };
+  }
+  for (const old of state.organizeSuggestions) {
+    if (old.noteId === noteId && old.kind === kind && old.status === 'pending') {
+      old.status = 'superseded';
+      old.updatedAt = now();
+    }
+  }
+  const suggestion: OrganizeSuggestion = {
+    id: ulid(),
+    noteId,
+    noteTitle: note.title,
+    kind,
+    status: 'pending',
+    model: 'rule.organize',
+    promptVersion: 'organize-v1',
+    evidence,
+    payload,
+    sourceHash: note.contentHash ?? '',
+    createdAt: now(),
+    updatedAt: now(),
+    appliedAt: null,
+    undoneAt: null,
+    error: null,
+    undoAvailable: false,
+  };
+  state.organizeSuggestions.unshift(suggestion);
+  auditResearch('organize_generate', 'ok', kind);
+  persist();
+  return suggestion;
+}
+
+function mockOrganizeAccept(id: string): OrganizeSuggestion {
+  const suggestion = state.organizeSuggestions.find((item) => item.id === id);
+  if (!suggestion) fail('NOTE_NOT_FOUND', '建议不存在。');
+  if (suggestion.status !== 'pending') fail('INVALID_INPUT', '这条建议已经处理过。');
+  const note = state.notes.find((item) => item.id === suggestion.noteId);
+  if (!note || note.status !== 'active') fail('NOTE_NOT_FOUND', '笔记不存在或已删除。');
+  if ((note.contentHash ?? '') !== suggestion.sourceHash) {
+    fail('NOTE_CONFLICT', '笔记在建议生成后被修改；请拒绝旧建议并重新生成。');
+  }
+  const before = state.contents[note.id] ?? '';
+  if (suggestion.payload.type === 'summary') {
+    state.contents[note.id] = `${before.trimEnd()}\n\n## 摘要\n\n${suggestion.payload.summary}\n`;
+  } else if (suggestion.payload.type === 'tags') {
+    state.noteTags[note.id] = normalizeTagNames([
+      ...(state.noteTags[note.id] ?? []),
+      ...suggestion.payload.tags.map((tag) => tag.tag),
+    ]);
+  } else if (suggestion.payload.type === 'relations') {
+    fail('INVALID_INPUT', '浏览器预览模式暂不支持写入类型化关系（桌面端支持）。');
+  }
+  (suggestion as OrganizeSuggestion & { undoContent?: string }).undoContent = before;
+  suggestion.status = 'accepted';
+  suggestion.appliedAt = now();
+  suggestion.updatedAt = now();
+  suggestion.undoAvailable = true;
+  note.contentHash = ulid();
+  note.updatedAt = now();
+  note.wordCount = plainText(state.contents[note.id] ?? '').length;
+  auditResearch('organize_accept', 'ok', suggestion.kind);
+  persist();
+  emit('notes://changed', { kind: 'modified', noteId: note.id });
+  return suggestion;
+}
+
+function mockOrganizeUndo(id: string): OrganizeSuggestion {
+  const suggestion = state.organizeSuggestions.find((item) => item.id === id);
+  if (!suggestion) fail('NOTE_NOT_FOUND', '建议不存在。');
+  if (suggestion.status !== 'accepted' || !suggestion.undoAvailable) {
+    fail('INVALID_INPUT', '这条建议当前不可撤销。');
+  }
+  const note = state.notes.find((item) => item.id === suggestion.noteId);
+  if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
+  const undo = (suggestion as OrganizeSuggestion & { undoContent?: string }).undoContent;
+  if (undo === undefined) fail('INVALID_INPUT', '建议缺少撤销快照。');
+  state.contents[note.id] = undo;
+  note.contentHash = ulid();
+  note.updatedAt = now();
+  note.wordCount = plainText(undo).length;
+  suggestion.undoneAt = now();
+  suggestion.updatedAt = now();
+  suggestion.undoAvailable = false;
+  auditResearch('organize_undo', 'ok', suggestion.kind);
+  persist();
+  emit('notes://changed', { kind: 'modified', noteId: note.id });
+  return suggestion;
+}
+
+function mockOrganizeRunJob(id: string): OrganizeJob {
+  const job = state.organizeJobs.find((item) => item.id === id);
+  if (!job) fail('NOTE_NOT_FOUND', '批量任务不存在。');
+  if (!['queued', 'running', 'paused'].includes(job.status)) return job;
+  job.status = 'running';
+  job.startedAt ??= now();
+  job.updatedAt = now();
+  persist();
+  const noteIds = Array.isArray(job.payload.noteIds)
+    ? job.payload.noteIds.filter((value): value is string => typeof value === 'string')
+    : [];
+  const kind = String(job.payload.suggestionKind ?? 'summary') as OrganizeSuggestionKind;
+  for (let index = job.completed + job.failed; index < noteIds.length; index += 1) {
+    if (job.status !== 'running') break;
+    const noteId = noteIds[index];
+    if (!noteId) continue;
+    try {
+      mockOrganizeGenerate(noteId, kind);
+      job.completed += 1;
+    } catch {
+      job.failed += 1;
+    }
+    job.updatedAt = now();
+    emit('ai://organize-progress', {
+      jobId: job.id,
+      status: job.status,
+      total: job.total,
+      completed: job.completed,
+      failed: job.failed,
+      currentNoteId: noteId,
+    });
+    persist();
+  }
+  if (job.status === 'running') {
+    job.status = job.completed === 0 && job.failed > 0 ? 'failed' : 'completed';
+    job.finishedAt = now();
+    job.updatedAt = now();
+    persist();
+  }
+  return job;
 }
 
 // ---------------------------------------------------------------- 双向链接（V1.1 M1）
@@ -2215,7 +2712,10 @@ function mockGraph(query: GraphQuery): GraphData {
   let truncated = false;
   if (nodes.length > maxNodes) {
     nodes = [...nodes]
-      .sort((left, right) => right.degree - left.degree || right.updatedAt.localeCompare(left.updatedAt))
+      .sort(
+        (left, right) =>
+          right.degree - left.degree || right.updatedAt.localeCompare(left.updatedAt),
+      )
       .slice(0, maxNodes);
     truncated = true;
   }
@@ -2298,6 +2798,12 @@ export async function handleMockInvoke(
       return true;
     case 'app_log_path':
       return null;
+    case 'app_update_check':
+    case 'app_update_install':
+    case 'app_restart':
+      return fail('INVALID_INPUT', '浏览器预览模式不支持签名更新；请使用桌面安装版验证更新流程。');
+    case 'app_diagnostic_export':
+      return fail('INVALID_INPUT', '浏览器预览模式没有本地诊断日志；请使用桌面应用导出。');
     case 'app_log':
       // 与桌面端同口径：把界面上的失败记进应用日志。预览模式没有日志文件，
       // 这里只落到控制台（debug 级），**不伪造**「已写入日志文件」。
@@ -2359,6 +2865,9 @@ export async function handleMockInvoke(
         ai: { ...defaultAiPolicy },
         aiAudit: [],
         research: {},
+        organizeSuggestions: [],
+        organizeJobs: [],
+        researchTemplates: [],
       };
       persist();
       return null;
@@ -2389,7 +2898,10 @@ export async function handleMockInvoke(
       return listNotes({
         pageSize: Math.min(
           100,
-          Math.max(1, Number.isFinite(Number(payload.limit ?? 10)) ? Number(payload.limit ?? 10) : 10),
+          Math.max(
+            1,
+            Number.isFinite(Number(payload.limit ?? 10)) ? Number(payload.limit ?? 10) : 10,
+          ),
         ),
       }).items;
     case 'note_list_deleted':
@@ -2438,7 +2950,15 @@ export async function handleMockInvoke(
       if (!note) fail('NOTE_NOT_FOUND', '笔记不存在或已被删除。');
       const oldTitle = note.title;
       // 与 Rust `normalize_title` 同规则：折叠空白并按字符数截断到 200
-      const title = [...String(payload.title ?? '').split(/\s+/).filter(Boolean).join(' ')].slice(0, 200).join('').trim();
+      const title = [
+        ...String(payload.title ?? '')
+          .split(/\s+/)
+          .filter(Boolean)
+          .join(' '),
+      ]
+        .slice(0, 200)
+        .join('')
+        .trim();
       if (!title) fail('INVALID_INPUT', '标题不能为空。');
       const renameFile = payload.renameFile !== false;
       if (renameFile) {
@@ -2671,7 +3191,9 @@ export async function handleMockInvoke(
               ? [...incoming]
               : [
                   ...current,
-                  ...incoming.filter((name) => !current.some((item) => item.toLowerCase() === name.toLowerCase())),
+                  ...incoming.filter(
+                    (name) => !current.some((item) => item.toLowerCase() === name.toLowerCase()),
+                  ),
                 ];
         state.noteTags[id] = next;
         next.forEach((name) => {
@@ -2778,6 +3300,176 @@ export async function handleMockInvoke(
       emit('notes://changed', { kind: 'modified', noteId: note.id });
       return toDetail(note);
     }
+    case 'organize_generate':
+      requireWorkspace();
+      return mockOrganizeGenerate(
+        String(payload.noteId ?? ''),
+        String(payload.kindValue ?? '') as OrganizeSuggestionKind,
+      );
+    case 'organize_suggestions': {
+      requireWorkspace();
+      const status = payload.statusValue == null ? null : String(payload.statusValue);
+      const kind = payload.kindValue == null ? null : String(payload.kindValue);
+      return state.organizeSuggestions
+        .filter((item) => !status || item.status === status)
+        .filter((item) => !kind || item.kind === kind)
+        .slice(0, Number(payload.limit ?? 200));
+    }
+    case 'organize_accept':
+      requireWorkspace();
+      return mockOrganizeAccept(String(payload.id ?? ''));
+    case 'organize_accept_many': {
+      requireWorkspace();
+      const ids = Array.isArray(payload.ids) ? payload.ids.map(String) : [];
+      const failures: Array<{ suggestionId: string; message: string }> = [];
+      let succeeded = 0;
+      for (const id of ids) {
+        try {
+          mockOrganizeAccept(id);
+          succeeded += 1;
+        } catch (error) {
+          failures.push({
+            suggestionId: id,
+            message:
+              (error as { message?: string }).message ??
+              (error instanceof Error ? error.message : '应用建议失败'),
+          });
+        }
+      }
+      return { requested: ids.length, succeeded, failures };
+    }
+    case 'organize_reject': {
+      requireWorkspace();
+      const suggestion = state.organizeSuggestions.find((item) => item.id === payload.id);
+      if (!suggestion || suggestion.status !== 'pending') {
+        fail('INVALID_INPUT', '建议不存在或已不是待确认状态。');
+      }
+      suggestion.status = 'rejected';
+      suggestion.updatedAt = now();
+      persist();
+      return suggestion;
+    }
+    case 'organize_undo':
+      requireWorkspace();
+      return mockOrganizeUndo(String(payload.id ?? ''));
+    case 'organize_job_create': {
+      requireWorkspace();
+      requireAi();
+      const noteIds = normalizeTagNames(
+        Array.isArray(payload.noteIds)
+          ? payload.noteIds.filter((value): value is string => typeof value === 'string')
+          : [],
+      );
+      if (noteIds.length === 0) fail('INVALID_INPUT', '批量任务至少需要一篇笔记。');
+      const kind = String(payload.kindValue ?? 'summary') as OrganizeSuggestionKind;
+      const job: OrganizeJob = {
+        id: ulid(),
+        workspaceId: state.workspace!.id,
+        kind: `organize.${kind}`,
+        status: 'queued',
+        total: noteIds.length,
+        completed: 0,
+        failed: 0,
+        payload: {
+          suggestionKind: kind,
+          noteIds,
+          confirmOutbound: Boolean(payload.confirmOutbound),
+        },
+        error: null,
+        createdAt: now(),
+        updatedAt: now(),
+        startedAt: null,
+        finishedAt: null,
+      };
+      state.organizeJobs.unshift(job);
+      persist();
+      return job;
+    }
+    case 'organize_job_get': {
+      requireWorkspace();
+      const job = state.organizeJobs.find((item) => item.id === payload.id);
+      if (!job) fail('NOTE_NOT_FOUND', '批量任务不存在。');
+      return job;
+    }
+    case 'organize_job_list':
+      requireWorkspace();
+      return state.organizeJobs.slice(0, Number(payload.limit ?? 20));
+    case 'organize_job_run':
+      requireWorkspace();
+      return mockOrganizeRunJob(String(payload.id ?? ''));
+    case 'organize_job_pause':
+    case 'organize_job_cancel': {
+      requireWorkspace();
+      const job = state.organizeJobs.find((item) => item.id === payload.id);
+      if (!job) fail('NOTE_NOT_FOUND', '批量任务不存在。');
+      if (!['queued', 'running', 'paused'].includes(job.status)) {
+        fail('INVALID_INPUT', '任务已经结束。');
+      }
+      job.status = command === 'organize_job_pause' ? 'paused' : 'canceled';
+      job.updatedAt = now();
+      job.finishedAt = job.status === 'canceled' ? now() : null;
+      persist();
+      return job;
+    }
+    case 'organize_job_resume': {
+      requireWorkspace();
+      const job = state.organizeJobs.find((item) => item.id === payload.id);
+      if (!job) fail('NOTE_NOT_FOUND', '批量任务不存在。');
+      if (!['paused', 'failed'].includes(job.status)) {
+        fail('INVALID_INPUT', '只有暂停或失败的任务可以继续。');
+      }
+      job.status = 'running';
+      return mockOrganizeRunJob(job.id);
+    }
+    case 'organize_job_retry': {
+      requireWorkspace();
+      const job = state.organizeJobs.find((item) => item.id === payload.id);
+      if (!job) fail('NOTE_NOT_FOUND', '批量任务不存在。');
+      job.completed = 0;
+      job.failed = 0;
+      job.status = 'queued';
+      job.finishedAt = null;
+      return mockOrganizeRunJob(job.id);
+    }
+    case 'organize_recover': {
+      requireWorkspace();
+      let count = 0;
+      for (const job of state.organizeJobs) {
+        if (job.status === 'running') {
+          job.status = 'paused';
+          job.updatedAt = now();
+          count += 1;
+        }
+      }
+      persist();
+      return count;
+    }
+    case 'ask_question':
+      requireWorkspace();
+      return mockAsk((payload.input ?? {}) as AskQuestionInput);
+    case 'ask_answer_note_preview':
+      requireWorkspace();
+      return mockAskSavePreview((payload.input ?? {}) as AskSaveInput);
+    case 'ask_answer_save': {
+      requireWorkspace();
+      const input = (payload.input ?? {}) as AskSaveInput;
+      if (!input.confirm) {
+        fail('INVALID_INPUT', '保存答案前必须确认预览；本次没有写入任何文件。');
+      }
+      const preview = mockAskSavePreview(input);
+      const detail = createNote({
+        title: preview.title,
+        categoryId: preview.categoryId ?? null,
+        initialContent: preview.content,
+      });
+      auditResearch('ask_save_answer', 'ok', detail.note.id);
+      return {
+        noteId: detail.note.id,
+        title: detail.note.title,
+        filePath: detail.note.filePath,
+        indexWarning: null,
+      } satisfies AskSaveResult;
+    }
     case 'ai_policy_get':
       requireWorkspace();
       return state.ai;
@@ -2799,16 +3491,19 @@ export async function handleMockInvoke(
       if (input.searchEndpoint !== undefined) {
         const endpoint = (input.searchEndpoint ?? '').trim();
         next.searchEndpoint =
-          endpoint.length > 0 &&
-          /^https?:\/\//i.test(endpoint) &&
-          endpoint.includes('{query}')
+          endpoint.length > 0 && /^https?:\/\//i.test(endpoint) && endpoint.includes('{query}')
             ? endpoint
             : null;
       }
       if (input.localModelEndpoint !== undefined) {
         // 只允许本机地址（与 Rust `normalize_local_endpoint` 同规则）
         const endpoint = (input.localModelEndpoint ?? '').trim().replace(/\/+$/, '');
-        const host = endpoint.replace(/^https?:\/\//i, '').split(/[/?#]/)[0]!.split('@').pop()!.split(':')[0]!;
+        const host = endpoint
+          .replace(/^https?:\/\//i, '')
+          .split(/[/?#]/)[0]!
+          .split('@')
+          .pop()!
+          .split(':')[0]!;
         const isLocal = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host.toLowerCase());
         next.localModelEndpoint = /^https?:\/\//i.test(endpoint) && isLocal ? endpoint : null;
       }
@@ -2816,7 +3511,8 @@ export async function handleMockInvoke(
         const name = (input.localModelName ?? '').trim();
         next.localModelName = name.length > 0 ? name : null;
       }
-      if (typeof input.localModelCompose === 'boolean') next.localModelCompose = input.localModelCompose;
+      if (typeof input.localModelCompose === 'boolean')
+        next.localModelCompose = input.localModelCompose;
       if (typeof input.localModelScore === 'boolean') next.localModelScore = input.localModelScore;
       if (input.remoteModelBaseUrl !== undefined) {
         const endpoint = normalizeRemoteBaseUrl(input.remoteModelBaseUrl ?? '');
@@ -2830,8 +3526,10 @@ export async function handleMockInvoke(
         if (resolved !== next.remoteModelName) next.remoteModelAuthorizedAt = null;
         next.remoteModelName = resolved;
       }
-      if (typeof input.remoteModelCompose === 'boolean') next.remoteModelCompose = input.remoteModelCompose;
-      if (typeof input.remoteModelScore === 'boolean') next.remoteModelScore = input.remoteModelScore;
+      if (typeof input.remoteModelCompose === 'boolean')
+        next.remoteModelCompose = input.remoteModelCompose;
+      if (typeof input.remoteModelScore === 'boolean')
+        next.remoteModelScore = input.remoteModelScore;
       if (typeof input.confirmEachOutbound === 'boolean') {
         next.confirmEachOutbound = input.confirmEachOutbound;
       }
@@ -2929,10 +3627,10 @@ export async function handleMockInvoke(
           : null;
       const remoteOk = Boolean(
         enabled &&
-          ai.remoteModelCompose &&
-          remoteBaseName &&
-          ai.remoteModelKeySet &&
-          ai.remoteModelAuthorizedAt,
+        ai.remoteModelCompose &&
+        remoteBaseName &&
+        ai.remoteModelKeySet &&
+        ai.remoteModelAuthorizedAt,
       );
       const remoteDetail = !enabled
         ? 'AI 总开关关闭，不会调用'
@@ -3081,7 +3779,10 @@ export async function handleMockInvoke(
       requireWorkspace();
       if (!state.ai.enabled) fail('AI_DISABLED', 'AI 能力未开启：请到「设置 → AI」打开总开关。');
       if (state.ai.network !== 'allowNetwork') {
-        fail('NETWORK_DISABLED', '联网检索当前是「仅本地」：需要到「设置 → AI」切到「允许联网检索」。');
+        fail(
+          'NETWORK_DISABLED',
+          '联网检索当前是「仅本地」：需要到「设置 → AI」切到「允许联网检索」。',
+        );
       }
       if (!state.ai.networkConfirmedAt || !payload.confirmed) {
         fail('NETWORK_DISABLED', '本次联网尚未确认：请先确认，本次不会发起任何请求。');
@@ -3101,12 +3802,28 @@ export async function handleMockInvoke(
       requireAi();
       const input = (payload.input ?? {}) as ResearchRequest;
       const topic = researchValidateTopic(String(input.topic ?? ''));
+      const planTemplate = input.planTemplateId
+        ? state.researchTemplates.find((item) => item.id === input.planTemplateId)
+        : undefined;
       const timeWindowDays = Math.min(
         3650,
-        Math.max(7, Math.round(input.timeWindowDays ?? 730)),
+        Math.max(7, Math.round(input.timeWindowDays ?? planTemplate?.timeWindowDays ?? 730)),
       );
+      const language = input.language?.trim() || planTemplate?.language || 'zh-CN';
+      const sourceTypes = input.sourceTypes?.length
+        ? [...new Set(input.sourceTypes.map((item) => item.trim().toLowerCase()).filter(Boolean))]
+        : planTemplate?.sourceTypes?.length
+          ? planTemplate.sourceTypes
+          : ['local', 'official', 'docs', 'paper', 'blog', 'community'];
       const maxSub = Math.min(10, Math.max(1, Math.round(state.ai.budget.maxSubquestions)));
-      const subQuestions = researchSubQuestions(topic, maxSub);
+      const subQuestions = planTemplate
+        ? planTemplate.subQuestions.slice(0, maxSub).map((question, index) => ({
+            id: `q${index + 1}`,
+            question: question.replaceAll(planTemplate.topic, topic),
+            keywords: [topic],
+            localHits: 0,
+          }))
+        : researchSubQuestions(topic, maxSub);
       const queries = researchExpandQueries(topic, subQuestions);
       const localBaseline = researchLocalHits(topic, 3).map((note) => ({
         noteId: note.id,
@@ -3116,6 +3833,7 @@ export async function handleMockInvoke(
       const planNotes = [
         '本次只用本地知识库材料（外部检索属于阶段 D3，接入前不会发起任何请求）。',
         `子问题 ${subQuestions.length} 个 · 时间窗 ${timeWindowDays} 天 · 抓取页上限 ${state.ai.budget.maxPages}（外部检索启用后生效）。`,
+        `输出语言：${language} · 期望来源类型：${sourceTypes.join(' / ')}。`,
         `检索查询 ${queries.length} 条（课题原文 + 规则扩展）：${queries
           .map((query) => `\`${query}\``)
           .join('、')}。扩展只做「括号短语 / 连接词切分 / 拉丁词」，不发明新词。`,
@@ -3132,9 +3850,14 @@ export async function handleMockInvoke(
           topic,
           scope: input.scope ?? null,
           timeWindowDays,
+          language,
+          sourceTypes,
+          rerunOf: input.rerunOf ?? null,
+          planTemplateId: input.planTemplateId ?? null,
           writeBack: Boolean(input.writeBack),
           targetCategoryId: input.targetCategoryId ?? null,
         },
+        rerunOf: input.rerunOf ?? null,
         status: 'planned',
         createdAt,
         updatedAt: createdAt,
@@ -3145,6 +3868,8 @@ export async function handleMockInvoke(
           queries,
           localBaseline,
           timeWindowDays,
+          language,
+          sourceTypes,
           budget: { ...state.ai.budget },
           notes: planNotes,
         },
@@ -3178,6 +3903,174 @@ export async function handleMockInvoke(
           writtenNoteId: session.writtenNoteId ?? null,
         }));
     }
+    case 'research_update_plan': {
+      requireWorkspace();
+      requireAi();
+      const session = researchRequire(String(payload.sessionId ?? ''));
+      researchRequireStatus(session, ['planned'], '编辑研究计划');
+      const plan = session.plan;
+      if (!plan) fail('INVALID_INPUT', '会话缺少研究计划。');
+      const edit = (payload.edit ?? {}) as ResearchPlanEdit;
+      if (edit.subQuestions) {
+        const values = edit.subQuestions.map((item) => item.trim()).filter(Boolean);
+        if (values.length === 0) fail('INVALID_INPUT', '研究计划至少保留一个子问题。');
+        const max = Math.min(5, state.ai.budget.maxSubquestions);
+        plan.subQuestions = values.slice(0, max).map((question, index) => ({
+          id: `q${index + 1}`,
+          question,
+          keywords: [plan.topic, question],
+          localHits: 0,
+        }));
+        plan.queries = researchExpandQueries(plan.topic, plan.subQuestions);
+      }
+      if (edit.timeWindowDays != null) {
+        plan.timeWindowDays = Math.min(3650, Math.max(7, Math.round(edit.timeWindowDays)));
+        session.request.timeWindowDays = plan.timeWindowDays;
+      }
+      if (edit.language != null) {
+        plan.language = edit.language.trim() || 'zh-CN';
+        session.request.language = plan.language;
+      }
+      if (edit.sourceTypes != null) {
+        plan.sourceTypes = edit.sourceTypes.length
+          ? [...new Set(edit.sourceTypes.map((item) => item.trim().toLowerCase()).filter(Boolean))]
+          : ['local', 'official', 'docs', 'paper', 'blog', 'community'];
+        session.request.sourceTypes = plan.sourceTypes;
+      }
+      session.updatedAt = now();
+      session.steps.push({
+        step: 'plan_edit',
+        at: session.updatedAt,
+        detail: '已编辑研究计划',
+      });
+      persist();
+      return researchSave(session);
+    }
+    case 'research_rerun': {
+      requireWorkspace();
+      requireAi();
+      const previous = researchRequire(String(payload.sessionId ?? ''));
+      const plan = previous.plan;
+      if (!plan) fail('INVALID_INPUT', '会话缺少研究计划。');
+      return handleMockInvoke('research_start', {
+        input: {
+          topic: previous.request.topic,
+          scope: previous.request.scope,
+          timeWindowDays: plan.timeWindowDays,
+          language: plan.language,
+          sourceTypes: plan.sourceTypes,
+          rerunOf: previous.id,
+          writeBack: false,
+          targetCategoryId: previous.request.targetCategoryId,
+        } satisfies ResearchRequest,
+      });
+    }
+    case 'research_resume': {
+      requireWorkspace();
+      requireAi();
+      const session = researchRequire(String(payload.sessionId ?? ''));
+      researchRequireStatus(session, ['aborted'], '恢复研究');
+      session.status = 'planned';
+      session.report = null;
+      session.proposal = null;
+      session.abortReason = null;
+      session.updatedAt = now();
+      session.steps.push({
+        step: 'resume',
+        at: session.updatedAt,
+        detail: `已恢复：保留 ${session.sources.length} 条已完成来源`,
+      });
+      return researchSave(session);
+    }
+    case 'research_compare': {
+      requireWorkspace();
+      const previous = researchRequire(String(payload.previousId ?? ''));
+      const current = researchRequire(String(payload.currentId ?? ''));
+      const sourceKey = (source: ResearchSource) =>
+        source.url ?? source.noteId ?? source.title.toLowerCase();
+      const previousSources = new Map(previous.sources.map((item) => [sourceKey(item), item]));
+      const currentSources = new Map(current.sources.map((item) => [sourceKey(item), item]));
+      const change = (source: ResearchSource) => ({
+        key: sourceKey(source),
+        title: source.title,
+        url: source.url,
+        noteId: source.noteId,
+      });
+      const claimMap = (session: ResearchSession) => {
+        const map = new Map<string, string[]>();
+        for (const claim of [
+          ...(session.report?.conclusions ?? []),
+          ...(session.report?.keyFacts ?? []),
+        ]) {
+          map.set(claim.subQuestionId, [...(map.get(claim.subQuestionId) ?? []), claim.text]);
+        }
+        return map;
+      };
+      const beforeClaims = claimMap(previous);
+      const afterClaims = claimMap(current);
+      const claimIds = new Set([...beforeClaims.keys(), ...afterClaims.keys()]);
+      return {
+        previousSessionId: previous.id,
+        currentSessionId: current.id,
+        topic: current.request.topic,
+        addedSources: [...currentSources]
+          .filter(([key]) => !previousSources.has(key))
+          .map(([, source]) => change(source)),
+        removedSources: [...previousSources]
+          .filter(([key]) => !currentSources.has(key))
+          .map(([, source]) => change(source)),
+        unchangedSources: [...currentSources]
+          .filter(([key]) => previousSources.has(key))
+          .map(([, source]) => change(source)),
+        changedClaims: [...claimIds]
+          .filter(
+            (id) =>
+              JSON.stringify(beforeClaims.get(id) ?? []) !==
+              JSON.stringify(afterClaims.get(id) ?? []),
+          )
+          .map((subQuestionId) => ({
+            subQuestionId,
+            previous: beforeClaims.get(subQuestionId) ?? [],
+            current: afterClaims.get(subQuestionId) ?? [],
+          })),
+        previousEvidenceSufficient: previous.report?.evidence?.sufficient ?? null,
+        currentEvidenceSufficient: current.report?.evidence?.sufficient ?? null,
+      } satisfies ResearchComparison;
+    }
+    case 'research_template_save': {
+      requireWorkspace();
+      const session = researchRequire(String(payload.sessionId ?? ''));
+      const plan = session.plan;
+      if (!plan) fail('INVALID_INPUT', '会话缺少研究计划。');
+      const name = String(payload.name ?? '').trim();
+      if (!name) fail('INVALID_INPUT', '模板名称不能为空。');
+      const previous = state.researchTemplates.find(
+        (item) => item.name.toLowerCase() === name.toLowerCase(),
+      );
+      const template: ResearchPlanTemplate = {
+        id: previous?.id ?? `research_template_${ulid()}`,
+        name: [...name].slice(0, 80).join(''),
+        topic: plan.topic,
+        scope: plan.scope,
+        timeWindowDays: plan.timeWindowDays,
+        language: plan.language,
+        sourceTypes: plan.sourceTypes,
+        subQuestions: plan.subQuestions.map((item) => item.question),
+        createdAt: previous?.createdAt ?? now(),
+        updatedAt: now(),
+      };
+      state.researchTemplates = [
+        template,
+        ...state.researchTemplates.filter((item) => item.id !== template.id),
+      ];
+      persist();
+      return template;
+    }
+    case 'research_template_list':
+      requireWorkspace();
+      return [...state.researchTemplates].sort((left, right) =>
+        left.name.localeCompare(right.name),
+      );
     case 'research_collect': {
       requireWorkspace();
       requireAi();
@@ -3194,11 +4087,18 @@ export async function handleMockInvoke(
         }
         if (candidates.length >= RESEARCH_MAX_SOURCES * 2) break;
       }
-      const sources: ResearchSource[] = [];
+      const sources: ResearchSource[] = [...session.sources];
       const perQuestion = plan.subQuestions.map(() => 0);
+      for (const source of sources) {
+        const index = plan.subQuestions.findIndex(
+          (question) => question.id === source.subQuestionId,
+        );
+        if (index >= 0) perQuestion[index] = (perQuestion[index] ?? 0) + 1;
+      }
       const seen: string[] = [];
       candidates.forEach((note) => {
         if (sources.length >= RESEARCH_MAX_SOURCES) return;
+        if (sources.some((source) => source.noteId === note.id)) return;
         const snippet = plainText(state.contents[note.id] ?? '').slice(0, 160) || note.title;
         const index = researchAssign(note.title, snippet, plan.subQuestions);
         const question = plan.subQuestions[index];
@@ -3284,11 +4184,7 @@ export async function handleMockInvoke(
       });
       session.sources = sources;
       session.status = 'collected';
-      researchStep(
-        session,
-        'collect',
-        `本地材料 ${sources.length - webCount} 条；${webNote}`,
-      );
+      researchStep(session, 'collect', `本地材料 ${sources.length - webCount} 条；${webNote}`);
       auditResearch(
         'research_collect',
         'ok',
@@ -3326,7 +4222,9 @@ export async function handleMockInvoke(
           '（模板草稿·未接模型）以下是按材料顺序罗列的待确认方向，**不构成结论**：',
         ];
         session.sources.slice(0, 5).forEach((source, index) => {
-          speculation.push(`${index + 1}. ${source.title} —— ${researchFirstSentence(source.snippet)}`);
+          speculation.push(
+            `${index + 1}. ${source.title} —— ${researchFirstSentence(source.snippet)}`,
+          );
         });
         speculation.push('下一步需要接入模型（或人工复核）才能把这些方向写成结论。');
         report.speculation = speculation;
@@ -3429,10 +4327,7 @@ export async function handleMockInvoke(
       if (mode === 'append') {
         const target = input.targetNoteId ?? proposal.duplicates[0]?.noteId ?? null;
         if (!target) {
-          fail(
-            'INVALID_INPUT',
-            '追加模式需要指定目标笔记（同标题笔记不存在时请改用「新建」）。',
-          );
+          fail('INVALID_INPUT', '追加模式需要指定目标笔记（同标题笔记不存在时请改用「新建」）。');
         }
         const note = state.notes.find((item) => item.id === target && item.status !== 'deleted');
         if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
@@ -3652,7 +4547,9 @@ export async function handleMockInvoke(
     case 'note_history_label': {
       requireWorkspace();
       const noteId = String(payload.noteId);
-      const raw = String(payload.label ?? '').trim().slice(0, 60);
+      const raw = String(payload.label ?? '')
+        .trim()
+        .slice(0, 60);
       const entries = state.history[noteId] ?? [];
       const entry = entries.find((item) => item.entryId === payload.entryId);
       if (!entry) fail('NOTE_NOT_FOUND', '该历史版本已不存在。');
@@ -3844,9 +4741,7 @@ export async function handleMockInvoke(
       tag.name = renamed;
       Object.keys(state.noteTags).forEach((noteId) => {
         const names = state.noteTags[noteId] ?? [];
-        state.noteTags[noteId] = names.map((name) =>
-          tagKey(name) === oldKey ? tag.name : name,
-        );
+        state.noteTags[noteId] = names.map((name) => (tagKey(name) === oldKey ? tag.name : name));
       });
       persist();
       return { ...tag, workspaceId: requireWorkspace().id, noteCount: 0 };

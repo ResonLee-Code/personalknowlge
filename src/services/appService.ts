@@ -1,4 +1,8 @@
-import type { AppInfo } from '@/types';
+import type {
+  AppInfo,
+  AppUpdateInfo,
+  AppUpdateInstallResult,
+} from '@/types';
 
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openPath as openWithSystem } from '@tauri-apps/plugin-opener';
@@ -11,6 +15,16 @@ export const appService = {
   logPath: () => call<string | null>('app_log_path'),
 
   ready: () => call<boolean>('app_ready'),
+
+  checkUpdate: () => call<AppUpdateInfo | null>('app_update_check'),
+
+  installUpdate: () =>
+    call<AppUpdateInstallResult>('app_update_install'),
+
+  restart: () => call<void>('app_restart'),
+
+  exportDiagnostics: (targetPath: string) =>
+    call<string>('app_diagnostic_export', { targetPath }),
 };
 
 /** 在系统文件管理器中打开路径（需要 opener 插件）。 */

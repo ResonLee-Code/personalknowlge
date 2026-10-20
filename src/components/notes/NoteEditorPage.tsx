@@ -97,6 +97,8 @@ export function NoteEditorPage() {
   const setEditorSplitRatio = useUiStore((state) => state.setEditorSplitRatio);
   const pendingHighlight = useUiStore((state) => state.pendingHighlight);
   const setPendingHighlight = useUiStore((state) => state.setPendingHighlight);
+  const openAskPanel = useUiStore((state) => state.openAskPanel);
+  const openResearchDraft = useUiStore((state) => state.openResearchDraft);
 
   const [content, setContent] = useState('');
   const [title, setTitle] = useState('');
@@ -306,6 +308,49 @@ export function NoteEditorPage() {
     });
     view.focus();
   }, []);
+
+  /** 用编辑器选区打开 Ask；选区只作为提问上下文，引用仍由后端从笔记中重新召回。 */
+  const askAboutSelection = useCallback(() => {
+    const view = editorViewRef.current?.view;
+    if (!view || !activeNoteId) return;
+    const { from, to } = view.state.selection.main;
+    if (to <= from) {
+      toast.info('先在正文里选中一段文字，再点「就选中文字提问」。');
+      view.focus();
+      return;
+    }
+    const selection = Array.from(view.state.sliceDoc(from, to)).slice(0, 4000).join('').trim();
+    if (!selection) {
+      toast.info('选中的内容为空，请重新选择。');
+      return;
+    }
+    openAskPanel({
+      noteId: activeNoteId,
+      selection,
+      question: '请解释并核对这段内容的要点。',
+    });
+  }, [activeNoteId, openAskPanel]);
+
+  const researchAboutSelection = useCallback(() => {
+    const view = editorViewRef.current?.view;
+    if (!view) return;
+    const { from, to } = view.state.selection.main;
+    if (to <= from) {
+      toast.info('先在正文里选中一段文字，再点「就选中文字调研」。');
+      view.focus();
+      return;
+    }
+    const topic = Array.from(view.state.sliceDoc(from, to)).slice(0, 200).join('').trim();
+    if (!topic) {
+      toast.info('选中的内容为空，请重新选择。');
+      return;
+    }
+    openResearchDraft({
+      topic,
+      scope: detail?.note.title ? `从笔记《${detail.note.title}》发起的调研` : null,
+    });
+    navigate(ROUTES.research);
+  }, [detail, navigate, openResearchDraft]);
 
   /** 插入菜单里的「图片…」「附件…」：走隐藏的文件选择框 + 应用自己的附件流程 */
   const attachInputRef = useRef<HTMLInputElement | null>(null);
@@ -772,6 +817,8 @@ export function NoteEditorPage() {
           {editorMode !== 'preview' ? (
             <MarkdownFormatBar
               disabled={readOnly}
+              onAskSelection={askAboutSelection}
+              onResearchSelection={researchAboutSelection}
               onWrap={(before, after, placeholder) =>
                 applyEdit((state) => wrapSelection(state, before, after, placeholder))
               }

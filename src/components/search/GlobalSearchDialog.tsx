@@ -1,4 +1,4 @@
-import { CornerDownLeft, Loader2, Search } from 'lucide-react';
+import { CornerDownLeft, Loader2, Search, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -15,12 +15,28 @@ import type { NoteSummary } from '@/types';
 export function GlobalSearchDialog() {
   const open = useUiStore((state) => state.commandPaletteOpen);
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
+  const openAskPanel = useUiStore((state) => state.openAskPanel);
+  const openResearchDraft = useUiStore((state) => state.openResearchDraft);
   // 面板在打开时挂载，关闭即销毁，因此无需在 effect 中重置状态
   if (!open) return null;
-  return <SearchPanel onClose={() => setOpen(false)} />;
+  return (
+    <SearchPanel
+      onClose={() => setOpen(false)}
+      onAsk={openAskPanel}
+      onResearch={openResearchDraft}
+    />
+  );
 }
 
-function SearchPanel({ onClose }: { onClose: () => void }) {
+function SearchPanel({
+  onClose,
+  onAsk,
+  onResearch,
+}: {
+  onClose: () => void;
+  onAsk: (seed: { question?: string }) => void;
+  onResearch: (seed: { topic: string }) => void;
+}) {
   const navigate = useNavigate();
   const [keyword, setKeyword] = useState('');
   const debounced = useDebouncedValue(keyword, 180);
@@ -48,11 +64,28 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
     };
   }, [debounced]);
 
-  const hint = useMemo(() => (debounced.trim() ? '输入以搜索标题与正文' : '输入关键词开始搜索'), [debounced]);
+  const hint = useMemo(
+    () => (debounced.trim() ? '输入以搜索标题与正文' : '输入关键词开始搜索'),
+    [debounced],
+  );
 
   const openSearchPage = () => {
     onClose();
     navigate(`${ROUTES.search}?q=${encodeURIComponent(keyword)}`);
+  };
+
+  const askKnowledge = () => {
+    const question = keyword.trim();
+    onClose();
+    onAsk({ question });
+  };
+
+  const startResearch = () => {
+    const topic = keyword.trim();
+    if (!topic) return;
+    onClose();
+    onResearch({ topic });
+    navigate(ROUTES.research);
   };
 
   return (
@@ -76,6 +109,10 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
                 setActiveIndex((index) => Math.max(index - 1, 0));
               } else if (event.key === 'Enter') {
                 event.preventDefault();
+                if (event.metaKey || event.ctrlKey) {
+                  askKnowledge();
+                  return;
+                }
                 const target = results[activeIndex];
                 if (target) {
                   onClose();
@@ -86,7 +123,9 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
               }
             }}
           />
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--ink-subtle)]" /> : null}
+          {loading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--ink-subtle)]" />
+          ) : null}
         </div>
 
         <div className="max-h-[60vh] min-h-[160px] overflow-auto p-2">
@@ -113,10 +152,14 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
                     }}
                     className={[
                       'flex w-full flex-col items-start gap-0.5 rounded-md px-3 py-2 text-left transition-colors',
-                      index === activeIndex ? 'bg-[var(--brand-soft)]' : 'hover:bg-[var(--surface-muted)]',
+                      index === activeIndex
+                        ? 'bg-[var(--brand-soft)]'
+                        : 'hover:bg-[var(--surface-muted)]',
                     ].join(' ')}
                   >
-                    <span className="truncate text-sm font-medium text-[var(--ink)]">{note.title}</span>
+                    <span className="truncate text-sm font-medium text-[var(--ink)]">
+                      {note.title}
+                    </span>
                     <span className="truncate text-[11px] text-[var(--ink-subtle)]">
                       {note.categoryPath || 'Inbox'} · {note.filePath}
                     </span>
@@ -133,10 +176,29 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
             <span className="flex items-center gap-1">
               <CornerDownLeft className="h-3 w-3" /> 打开
             </span>
+            <span>⌘/Ctrl + Enter 问 AI</span>
           </span>
-          <button type="button" className="text-[var(--brand)]" onClick={openSearchPage}>
-            查看全部结果
-          </button>
+          <span className="flex items-center gap-3">
+            <button
+              type="button"
+              className="flex items-center gap-1 text-[var(--brand)]"
+              onClick={askKnowledge}
+            >
+              <Sparkles className="h-3 w-3" />
+              AI: {keyword.trim() ? '就当前问题提问' : '问知识库'}…
+            </button>
+            <button
+              type="button"
+              className="text-[var(--brand)]"
+              disabled={!keyword.trim()}
+              onClick={startResearch}
+            >
+              AI: 深入调研…
+            </button>
+            <button type="button" className="text-[var(--brand)]" onClick={openSearchPage}>
+              查看全部结果
+            </button>
+          </span>
         </div>
       </DialogContent>
     </Dialog>

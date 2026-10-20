@@ -1,4 +1,4 @@
-import { Moon, Search, Settings, Sun } from 'lucide-react';
+import { Moon, Search, Settings, Sparkles, Sun } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { SaveStatusBadge } from '@/components/editor/SaveStatusBadge';
@@ -13,6 +13,7 @@ export function TopBar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
+  const openAskPanel = useUiStore((state) => state.openAskPanel);
   const theme = useUiStore((state) => state.theme);
   const setTheme = useUiStore((state) => state.setTheme);
   const workspace = useWorkspaceStore((state) => state.workspace);
@@ -64,6 +65,15 @@ export function TopBar() {
             deleted={openNote.status === 'deleted'}
           />
         ) : null}
+        <Button
+          variant="ghost"
+          size="icon"
+          title="问知识库"
+          aria-label="问知识库"
+          onClick={() => openAskPanel()}
+        >
+          <Sparkles className="h-4 w-4" />
+        </Button>
         <Button
           variant="ghost"
           size="icon"

@@ -22,6 +22,10 @@ pub mod events {
     pub const RESEARCH_COMPOSE_DELTA: &str = "ai://research-compose-delta";
     /// 向量索引构建进度（D3）：`{ done, total, skipped }`，只含计数、不含正文。
     pub const VECTOR_INDEX_PROGRESS: &str = "ai://vector-index-progress";
+    /// Organize 持久化任务进度（只含计数与当前笔记 id，不含正文）。
+    pub const ORGANIZE_PROGRESS: &str = "ai://organize-progress";
+    /// 签名更新下载 / 校验进度。
+    pub const UPDATE_PROGRESS: &str = "app://update-progress";
 }
 
 pub trait EventSink: Send + Sync {

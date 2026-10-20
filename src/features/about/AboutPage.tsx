@@ -1,10 +1,26 @@
-import { BookOpen, Database, FileCode2, Shield, Sparkles } from 'lucide-react';
+import {
+  BookOpen,
+  Database,
+  Download,
+  FileCode2,
+  Loader2,
+  RefreshCw,
+  Shield,
+  Sparkles,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { SHORTCUTS } from '@/lib/constants';
+import { Button } from '@/components/ui/button';
+import { EVENTS, SHORTCUTS } from '@/lib/constants';
 import { errorMessage } from '@/lib/format';
-import { appService } from '@/services/appService';
-import type { AppInfo } from '@/types';
+import { appService, pickSavePath } from '@/services/appService';
+import { subscribe } from '@/services/api';
+import type {
+  AppInfo,
+  AppUpdateInfo,
+  AppUpdateInstallResult,
+  AppUpdateProgress,
+} from '@/types';
 
 const STACK = [
   { label: '桌面外壳', value: 'Tauri 2 + Rust' },
@@ -21,6 +37,13 @@ export function AboutPage() {
   const [logPath, setLogPath] = useState<string | null>(null);
   /** 读取失败的原因：不能只把版本/平台显示成「—」——用户来这页就是为了看这些 */
   const [infoError, setInfoError] = useState<string | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [updateResult, setUpdateResult] =
+    useState<AppUpdateInstallResult | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<AppUpdateProgress | null>(null);
+  const [updating, setUpdating] = useState<'check' | 'install' | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void appService
@@ -36,13 +59,74 @@ export function AboutPage() {
     void appService.logPath().then(setLogPath).catch(() => setLogPath(null));
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void subscribe<AppUpdateProgress>(EVENTS.updateProgress, (progress) => {
+      if (!cancelled) setUpdateProgress(progress);
+    })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  const checkUpdate = async () => {
+    setUpdating('check');
+    setUpdateError(null);
+    setUpdateResult(null);
+    try {
+      setUpdateInfo(await appService.checkUpdate());
+    } catch (caught) {
+      setUpdateError(errorMessage(caught));
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const installUpdate = async () => {
+    setUpdating('install');
+    setUpdateError(null);
+    setUpdateProgress(null);
+    try {
+      setUpdateResult(await appService.installUpdate());
+    } catch (caught) {
+      setUpdateError(errorMessage(caught));
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const exportDiagnostics = async () => {
+    setDiagnosticMessage(null);
+    try {
+      const target = await pickSavePath(
+        `pkos-diagnostics-${new Date().toISOString().slice(0, 10)}.txt`,
+        ['txt', 'log'],
+        '诊断日志',
+      );
+      if (!target) return;
+      const saved = await appService.exportDiagnostics(target);
+      setDiagnosticMessage(`已导出诊断日志：${saved}`);
+    } catch (caught) {
+      setDiagnosticMessage(`导出失败：${errorMessage(caught)}`);
+    }
+  };
+
   return (
     <div className="h-full overflow-auto p-6">
       <div className="mx-auto max-w-3xl space-y-6">
         <header className="space-y-2">
           <div className="flex items-center gap-2 text-[var(--brand)]">
             <Sparkles className="h-4 w-4" />
-            <span className="text-xs font-semibold uppercase tracking-wide">V1.0</span>
+            <span className="text-xs font-semibold uppercase tracking-wide">
+              V2.0 · DEVELOPMENT
+            </span>
           </div>
           <h1 className="text-lg font-semibold text-[var(--ink)]">Personal Knowledge OS</h1>
           <p className="text-sm leading-relaxed text-[var(--ink-muted)]">
@@ -63,6 +147,84 @@ export function AboutPage() {
               <p className="mt-0.5 text-sm text-[var(--ink)]">{item.value}</p>
             </div>
           ))}
+        </section>
+
+        <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--ink)]">
+              <Download className="h-4 w-4" />
+              应用更新
+            </h2>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              disabled={updating !== null}
+              onClick={() => void checkUpdate()}
+            >
+              {updating === 'check' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              检查更新
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-[var(--ink-muted)]">
+            更新包必须通过内置公钥签名校验；校验失败不会安装，也不会替换当前版本。
+          </p>
+          {updateInfo ? (
+            <div className="mt-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-muted)] p-3">
+              <p className="text-sm font-medium text-[var(--ink)]">
+                发现新版本 {updateInfo.version}
+              </p>
+              <p className="mt-1 text-xs text-[var(--ink-subtle)]">
+                当前 {updateInfo.currentVersion} · {updateInfo.target}
+                {updateInfo.date ? ` · ${updateInfo.date}` : ''}
+              </p>
+              {updateInfo.body ? (
+                <p className="mt-2 whitespace-pre-wrap text-xs text-[var(--ink-muted)]">
+                  {updateInfo.body}
+                </p>
+              ) : null}
+              <Button
+                className="mt-3"
+                size="sm"
+                disabled={updating !== null}
+                onClick={() => void installUpdate()}
+              >
+                {updating === 'install' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )}
+                下载并安装
+              </Button>
+            </div>
+          ) : null}
+          {updateProgress ? (
+            <p className="mt-2 text-xs text-[var(--ink-muted)]">
+              {updateProgress.stage === 'verifying'
+                ? '下载完成，正在验证签名…'
+                : `正在下载：${Math.round(updateProgress.downloaded / 1024)} KB`}
+            </p>
+          ) : null}
+          {updateResult ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-emerald-500/10 p-2 text-xs text-emerald-700 dark:text-emerald-300">
+              <span>{updateResult.message}</span>
+              <Button
+                size="sm"
+                onClick={() => {
+                  void appService.restart();
+                }}
+              >
+                立即重启
+              </Button>
+            </div>
+          ) : null}
+          {updateError ? (
+            <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">{updateError}</p>
+          ) : null}
         </section>
 
         <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4">
@@ -101,6 +263,20 @@ export function AboutPage() {
               <dd className="truncate">{logPath ?? '—'}</dd>
             </div>
           </dl>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => void exportDiagnostics()}>
+              <Download className="h-3.5 w-3.5" />
+              导出诊断日志
+            </Button>
+            <span className="text-[11px] text-[var(--ink-subtle)]">
+              只包含运行元数据与应用日志，不读取笔记正文。
+            </span>
+          </div>
+          {diagnosticMessage ? (
+            <p className="mt-2 break-all text-xs text-[var(--ink-muted)]">
+              {diagnosticMessage}
+            </p>
+          ) : null}
         </section>
 
         <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4">

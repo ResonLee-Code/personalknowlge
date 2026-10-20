@@ -102,6 +102,161 @@ pub struct RetrievalReport {
     pub hits: Vec<RetrievalHit>,
 }
 
+/// Ask（V2.0 M1）的检索作用域。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AskScope {
+    /// 当前笔记
+    Note,
+    /// 当前分类
+    Category,
+    /// 当前标签
+    Tag,
+    /// 全库
+    #[default]
+    All,
+}
+
+/// 一次“问知识库”请求。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AskQuestionInput {
+    pub question: String,
+    pub scope: AskScope,
+    /// `note` / `category` / `tag` 作用域对应的 id；全库时忽略。
+    pub scope_id: Option<String>,
+    /// 编辑器里选中的原文。参与检索与提示词，但**不是可引用材料**；
+    /// 引用仍必须来自本轮检索命中的笔记分块。
+    pub selection: Option<String>,
+    /// 多轮上下文，只保留最近若干轮。每轮都会重新检索，历史答案不作为事实来源。
+    pub history: Vec<AskHistoryTurn>,
+    /// 开启“逐次外发确认”时，只有用户本次确认才允许构造在线模型。
+    pub confirm_outbound: bool,
+}
+
+impl Default for AskQuestionInput {
+    fn default() -> Self {
+        Self {
+            question: String::new(),
+            scope: AskScope::All,
+            scope_id: None,
+            selection: None,
+            history: Vec::new(),
+            confirm_outbound: false,
+        }
+    }
+}
+
+/// 多轮问答中的一轮。后端只把它用于理解指代，不把 `answer` 当事实或引用来源。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskHistoryTurn {
+    pub question: String,
+    pub answer: String,
+}
+
+/// 答案中的一条可跳转引用。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskCitation {
+    /// 稳定引用编号（`C1`、`C2`…），与答案正文里的 `[C1]` 对应。
+    pub citation_id: String,
+    pub note_id: String,
+    pub title: String,
+    pub chunk_index: i64,
+    pub heading: String,
+    pub snippet: String,
+    /// 正文（不含 frontmatter）里的 Unicode 字符区间 `[charStart, charEnd)`。
+    pub char_start: i64,
+    pub char_end: i64,
+}
+
+/// “问知识库”的回答。
+///
+/// 引用只可能来自本次检索到的材料：模型返回未知编号时整份输出会被判为无依据，
+/// 并降级到模板答案，而不是把编造来源原样展示。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskAnswer {
+    pub question: String,
+    pub text: String,
+    pub citations: Vec<AskCitation>,
+    /// 实际使用的生成档位（含模型名）
+    pub provider: String,
+    /// `online` / `local` / `template`
+    pub tier: String,
+    pub evidence_sufficient: bool,
+    pub evidence_note: String,
+    pub warnings: Vec<String>,
+    pub channels: Vec<RetrievalChannelStatus>,
+    pub retrieved_count: usize,
+    pub took_ms: u64,
+}
+
+/// 把答案存为笔记的输入。`confirm=false` 只允许生成预览，不能落库。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AskSaveInput {
+    pub answer: AskAnswer,
+    pub title: Option<String>,
+    pub category_id: Option<String>,
+    pub confirm: bool,
+}
+
+impl Default for AskSaveInput {
+    fn default() -> Self {
+        Self {
+            answer: AskAnswer {
+                question: String::new(),
+                text: String::new(),
+                citations: Vec::new(),
+                provider: "template.ask".to_string(),
+                tier: "template".to_string(),
+                evidence_sufficient: false,
+                evidence_note: String::new(),
+                warnings: Vec::new(),
+                channels: Vec::new(),
+                retrieved_count: 0,
+                took_ms: 0,
+            },
+            title: None,
+            category_id: None,
+            confirm: false,
+        }
+    }
+}
+
+/// 保存前预览中的来源（已重新核对原文区间）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskSourcePreview {
+    pub citation_id: String,
+    pub note_id: String,
+    pub title: String,
+    pub heading: String,
+}
+
+/// 答案存为笔记的预览。预览只读，不写文件。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskNotePreview {
+    pub title: String,
+    pub content: String,
+    pub category_id: Option<String>,
+    pub sources: Vec<AskSourcePreview>,
+    pub warnings: Vec<String>,
+}
+
+/// 答案落库结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskSaveResult {
+    pub note_id: String,
+    pub title: String,
+    pub file_path: String,
+    pub index_warning: Option<String>,
+}
+
 /// 向量索引状态（D3/N7 第二步）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -155,7 +310,11 @@ pub struct ResearchBudget {
 
 impl Default for ResearchBudget {
     fn default() -> Self {
-        Self { max_subquestions: 5, max_pages: 12, max_duration_secs: 480 }
+        Self {
+            max_subquestions: 5,
+            max_pages: 12,
+            max_duration_secs: 480,
+        }
     }
 }
 

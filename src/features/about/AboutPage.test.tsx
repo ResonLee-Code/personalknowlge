@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -49,5 +50,39 @@ describe('AboutPage · 运行信息', () => {
 
     expect(await screen.findByText('1.2.0')).toBeInTheDocument();
     expect(screen.queryByTestId('about-info-error')).not.toBeInTheDocument();
+  });
+
+  it('签名更新先检查、再显式安装，并提示重启', async () => {
+    vi.spyOn(appService, 'info').mockResolvedValue({
+      name: 'Personal Knowledge OS',
+      version: '2.0.0',
+      schemaVersion: 15,
+      dataDir: '/tmp/data',
+      platform: 'macos-aarch64',
+      sqliteVersion: '3.45',
+    });
+    vi.spyOn(appService, 'checkUpdate').mockResolvedValue({
+      currentVersion: '2.0.0',
+      version: '2.0.1',
+      date: '2026-10-20',
+      body: '修复更新流程',
+      target: 'darwin-aarch64',
+    });
+    const install = vi.spyOn(appService, 'installUpdate').mockResolvedValue({
+      installed: true,
+      version: '2.0.1',
+      message: '更新包已通过签名校验并安装；请重启应用以运行新版本。',
+    });
+    render(
+      <MemoryRouter>
+        <AboutPage />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: '检查更新' }));
+    expect(await screen.findByText('发现新版本 2.0.1')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '下载并安装' }));
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('button', { name: '立即重启' })).toBeInTheDocument();
   });
 });

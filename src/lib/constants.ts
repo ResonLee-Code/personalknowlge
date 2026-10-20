@@ -10,6 +10,7 @@ export const ROUTES = {
   favorites: '/favorites',
   graph: '/graph',
   research: '/research',
+  organize: '/organize',
   attachments: '/attachments',
   manage: '/manage',
   trash: '/trash',
@@ -28,6 +29,10 @@ export const EVENTS = {
   researchComposeDelta: 'ai://research-compose-delta',
   /** 向量索引构建进度（D3）：`{ done, total, skipped }`，只含计数、不含正文 */
   vectorIndexProgress: 'ai://vector-index-progress',
+  /** Organize 批量任务进度：只含计数与当前笔记 id */
+  organizeProgress: 'ai://organize-progress',
+  /** 签名更新下载 / 校验进度 */
+  updateProgress: 'app://update-progress',
 } as const;
 
 /** 默认工作区目录约定（与 Rust 端保持一致）。 */

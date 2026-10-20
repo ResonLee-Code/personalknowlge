@@ -13,18 +13,20 @@ use personal_knowledge_os_lib::application::tag_service::TagService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::error::ErrorCode;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
-use personal_knowledge_os_lib::infrastructure::watcher::{
-    start_best_watcher, FileChange, FileChangeBatch, FileChangeKind,
-};
-use personal_knowledge_os_lib::repositories::{NoteRepository, SqliteNoteRepository};
 use personal_knowledge_os_lib::domain::backup::{
     BackupCreateInput, ExportMarkdownInput, RestoreBackupInput,
 };
-use personal_knowledge_os_lib::domain::category::{CategoryDeleteStrategy, CreateCategoryInput, DeleteCategoryInput};
+use personal_knowledge_os_lib::domain::category::{
+    CategoryDeleteStrategy, CreateCategoryInput, DeleteCategoryInput,
+};
 use personal_knowledge_os_lib::domain::note::{
     CreateNoteInput, NoteListQuery, NoteStatus, SaveNoteInput,
 };
 use personal_knowledge_os_lib::domain::search::{SearchQuery, SearchSort};
+use personal_knowledge_os_lib::infrastructure::watcher::{
+    start_best_watcher, FileChange, FileChangeBatch, FileChangeKind,
+};
+use personal_knowledge_os_lib::repositories::{NoteRepository, SqliteNoteRepository};
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -43,7 +45,12 @@ impl Harness {
         let app = AppInner::new(data.path().to_path_buf(), Arc::new(NoopEventSink))
             .expect("初始化应用状态");
         let root = workspace_dir.path().to_path_buf();
-        Self { _data: data, _workspace_dir: workspace_dir, app, root }
+        Self {
+            _data: data,
+            _workspace_dir: workspace_dir,
+            app,
+            root,
+        }
     }
 
     /// 创建并打开一个全新工作区。
@@ -89,7 +96,10 @@ impl Harness {
 
 fn list_all(notes: &NoteService) -> Vec<personal_knowledge_os_lib::domain::note::NoteSummary> {
     notes
-        .list(NoteListQuery { page_size: Some(500), ..Default::default() })
+        .list(NoteListQuery {
+            page_size: Some(500),
+            ..Default::default()
+        })
         .expect("列出笔记")
         .items
 }
@@ -116,7 +126,9 @@ fn creates_workspace_with_layout_and_welcome_note() {
     // 默认分类来自目录约定
     let categories = harness.categories().list().expect("分类列表");
     assert!(categories.iter().any(|category| category.name == "技术"));
-    assert!(categories.iter().any(|category| category.dir_name == "01_技术"));
+    assert!(categories
+        .iter()
+        .any(|category| category.dir_name == "01_技术"));
 
     // 欢迎笔记
     let notes = list_all(&harness.notes());
@@ -173,7 +185,10 @@ fn creates_saves_and_reads_note_with_frontmatter() {
         })
         .expect("保存笔记");
     assert!(saved.index_updated);
-    assert_ne!(saved.content_hash, detail.note.content_hash.unwrap_or_default());
+    assert_ne!(
+        saved.content_hash,
+        detail.note.content_hash.unwrap_or_default()
+    );
 
     let reloaded = notes.get(&detail.note.id).expect("重新读取");
     assert!(reloaded.content.contains("中文全文检索验证"));
@@ -204,7 +219,10 @@ fn rejects_save_when_file_changed_externally() {
 
     // 模拟外部编辑器修改文件
     let path = harness.absolute(&detail.note.file_path);
-    let external = format!("{}\n\n外部追加内容", std::fs::read_to_string(&path).unwrap());
+    let external = format!(
+        "{}\n\n外部追加内容",
+        std::fs::read_to_string(&path).unwrap()
+    );
     std::fs::write(&path, external).expect("外部写入");
 
     let error = notes
@@ -259,7 +277,9 @@ fn renames_moves_and_duplicates_notes() {
     let original_path = detail.note.file_path.clone();
 
     // 重命名（同步文件名）
-    let renamed = notes.rename(&detail.note.id, "SQLite 索引设计", true).expect("重命名");
+    let renamed = notes
+        .rename(&detail.note.id, "SQLite 索引设计", true)
+        .expect("重命名");
     assert_eq!(renamed.note.title, "SQLite 索引设计");
     assert_ne!(renamed.note.file_path, original_path);
     assert!(renamed.note.file_path.contains("SQLite-索引设计"));
@@ -270,8 +290,16 @@ fn renames_moves_and_duplicates_notes() {
     let moved = notes
         .move_to_category(&detail.note.id, Some(&tech.id))
         .expect("移动笔记");
-    assert!(moved.note.file_path.starts_with("01_技术/"), "{}", moved.note.file_path);
-    assert!(moved.note.file_path.contains("数据库"), "{}", moved.note.file_path);
+    assert!(
+        moved.note.file_path.starts_with("01_技术/"),
+        "{}",
+        moved.note.file_path
+    );
+    assert!(
+        moved.note.file_path.contains("数据库"),
+        "{}",
+        moved.note.file_path
+    );
     assert!(harness.absolute(&moved.note.file_path).exists());
     assert_eq!(moved.category_path, "技术/数据库");
     assert!(moved.tags.is_empty());
@@ -303,7 +331,10 @@ fn deletes_restores_and_purges_notes() {
 
     notes.delete(&detail.note.id).expect("删除笔记");
     assert!(!harness.absolute(&file_path).exists(), "原文件应移出工作区");
-    assert!(harness.absolute(".trash").join(&file_path).exists(), "文件应进入回收站");
+    assert!(
+        harness.absolute(".trash").join(&file_path).exists(),
+        "文件应进入回收站"
+    );
 
     let deleted = notes.list_deleted().expect("回收站列表");
     assert_eq!(deleted.len(), 1);
@@ -311,7 +342,10 @@ fn deletes_restores_and_purges_notes() {
     // 删除后不再出现在搜索结果中
     assert!(harness
         .search()
-        .search(SearchQuery { keyword: "临时内容".into(), ..Default::default() })
+        .search(SearchQuery {
+            keyword: "临时内容".into(),
+            ..Default::default()
+        })
         .unwrap()
         .hits
         .is_empty());
@@ -364,7 +398,10 @@ fn searches_chinese_english_and_ranks_titles_first() {
     // 中文双字短语
     let chinese = harness
         .search()
-        .search(SearchQuery { keyword: "全文搜索".into(), ..Default::default() })
+        .search(SearchQuery {
+            keyword: "全文搜索".into(),
+            ..Default::default()
+        })
         .expect("中文搜索");
     assert_eq!(chinese.hits.len(), 2, "应命中标题与正文");
     assert_eq!(chinese.hits[0].note.id, title_hit.note.id, "标题命中优先");
@@ -374,21 +411,30 @@ fn searches_chinese_english_and_ranks_titles_first() {
     // 中文单字
     let single = harness
         .search()
-        .search(SearchQuery { keyword: "索".into(), ..Default::default() })
+        .search(SearchQuery {
+            keyword: "索".into(),
+            ..Default::default()
+        })
         .expect("单字搜索");
     assert!(!single.hits.is_empty());
 
     // 英文前缀
     let english = harness
         .search()
-        .search(SearchQuery { keyword: "borr".into(), ..Default::default() })
+        .search(SearchQuery {
+            keyword: "borr".into(),
+            ..Default::default()
+        })
         .expect("英文搜索");
     assert_eq!(english.hits.len(), 1);
 
     // 无结果
     let empty = harness
         .search()
-        .search(SearchQuery { keyword: "不存在的关键词".into(), ..Default::default() })
+        .search(SearchQuery {
+            keyword: "不存在的关键词".into(),
+            ..Default::default()
+        })
         .expect("空结果搜索");
     assert!(empty.hits.is_empty());
     assert_eq!(empty.total, 0);
@@ -396,7 +442,10 @@ fn searches_chinese_english_and_ranks_titles_first() {
     // 空关键词回退为按时间浏览
     let browse = harness
         .search()
-        .search(SearchQuery { keyword: "".into(), ..Default::default() })
+        .search(SearchQuery {
+            keyword: "".into(),
+            ..Default::default()
+        })
         .expect("空关键词");
     assert_eq!(browse.total, 4);
 }
@@ -436,7 +485,10 @@ fn search_supports_filters_tags_and_highlights() {
         .expect("创建笔记");
 
     let tags = harness.tags().list().expect("标签列表");
-    let tag = tags.iter().find(|tag| tag.name == "检索").expect("标签已创建");
+    let tag = tags
+        .iter()
+        .find(|tag| tag.name == "检索")
+        .expect("标签已创建");
     assert_eq!(tag.note_count, 1);
 
     // 关键词 + 标签过滤
@@ -485,7 +537,11 @@ fn search_supports_filters_tags_and_highlights() {
 
     // 标签删除不影响笔记正文
     harness.tags().delete(&tag.id).expect("删除标签");
-    assert!(notes.get(&target.note.id).expect("笔记仍存在").content.contains("向量检索"));
+    assert!(notes
+        .get(&target.note.id)
+        .expect("笔记仍存在")
+        .content
+        .contains("向量检索"));
 }
 
 #[test]
@@ -505,14 +561,19 @@ fn adopts_external_files_and_marks_missing_ones() {
     let report = harness.index().scan_workspace().expect("扫描工作区");
     assert_eq!(report.added, 1);
 
-    let adopted = notes.get("note_external_1").expect("按 frontmatter id 采纳");
+    let adopted = notes
+        .get("note_external_1")
+        .expect("按 frontmatter id 采纳");
     assert_eq!(adopted.note.title, "外部笔记");
     assert_eq!(adopted.category_path, "技术", "目录应映射到分类");
     assert_eq!(adopted.tags.len(), 1);
     assert_eq!(adopted.note.word_count > 0, true);
     assert!(!harness
         .search()
-        .search(SearchQuery { keyword: "中文检索".into(), ..Default::default() })
+        .search(SearchQuery {
+            keyword: "中文检索".into(),
+            ..Default::default()
+        })
         .unwrap()
         .hits
         .is_empty());
@@ -536,7 +597,10 @@ fn adopts_external_files_and_marks_missing_ones() {
     assert_eq!(notes.list_missing().unwrap().len(), 1);
     assert!(harness
         .search()
-        .search(SearchQuery { keyword: "更新后的正文".into(), ..Default::default() })
+        .search(SearchQuery {
+            keyword: "更新后的正文".into(),
+            ..Default::default()
+        })
         .unwrap()
         .hits
         .is_empty());
@@ -573,14 +637,28 @@ fn manages_categories_with_directory_rename_and_delete_strategies() {
             parent_id: None,
         })
         .expect("创建笔记");
-    assert!(detail.note.file_path.contains("资料"), "{}", detail.note.file_path);
-    assert!(detail.note.file_path.contains("论文"), "{}", detail.note.file_path);
+    assert!(
+        detail.note.file_path.contains("资料"),
+        "{}",
+        detail.note.file_path
+    );
+    assert!(
+        detail.note.file_path.contains("论文"),
+        "{}",
+        detail.note.file_path
+    );
 
     // 重命名分类 -> 目录同步改名，笔记路径更新
-    let renamed = categories.rename(&parent.id, "参考资料").expect("重命名分类");
+    let renamed = categories
+        .rename(&parent.id, "参考资料")
+        .expect("重命名分类");
     assert_eq!(renamed.name, "参考资料");
     let note_after = notes.get(&detail.note.id).unwrap();
-    assert!(note_after.note.file_path.contains("参考资料"), "{}", note_after.note.file_path);
+    assert!(
+        note_after.note.file_path.contains("参考资料"),
+        "{}",
+        note_after.note.file_path
+    );
     assert!(harness.absolute(&note_after.note.file_path).exists());
 
     // 分类树结构
@@ -643,13 +721,18 @@ fn rebuilds_index_and_reports_status() {
     assert_eq!(rebuilt.indexed_notes, 6);
     assert_eq!(rebuilt.total_notes, 6);
     assert!(rebuilt.last_rebuilt_at.is_some());
-    assert!(harness
-        .search()
-        .search(SearchQuery { keyword: "索引重建".into(), ..Default::default() })
-        .unwrap()
-        .hits
-        .len()
-        >= 1);
+    assert!(
+        harness
+            .search()
+            .search(SearchQuery {
+                keyword: "索引重建".into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .hits
+            .len()
+            >= 1
+    );
 }
 
 #[test]
@@ -669,7 +752,10 @@ fn creates_validates_and_restores_backup_and_exports_markdown() {
 
     let backup = harness
         .backups()
-        .create(BackupCreateInput { target_dir: None, note: None })
+        .create(BackupCreateInput {
+            target_dir: None,
+            note: None,
+        })
         .expect("创建备份");
     assert!(backup.file_name.starts_with("KnowledgeBackup_"));
     assert!(PathBuf::from(&backup.path).exists());
@@ -722,7 +808,13 @@ fn creates_validates_and_restores_backup_and_exports_markdown() {
     let exported_files: Vec<_> = walkdir::WalkDir::new(&export_target)
         .into_iter()
         .flatten()
-        .filter(|entry| entry.path().extension().map(|ext| ext == "md").unwrap_or(false))
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .map(|ext| ext == "md")
+                .unwrap_or(false)
+        })
         .collect();
     assert_eq!(exported_files.len(), 2);
 }
@@ -773,12 +865,14 @@ fn settings_and_path_safety_behave_as_documented() {
 
     let service = WorkspaceService::new(Arc::clone(&harness.app));
     let updated = service
-        .update_settings(personal_knowledge_os_lib::domain::settings::UpdateSettingsInput {
-            autosave_delay_ms: Some(1200),
-            font_size: Some(18),
-            editor_mode: Some("preview".into()),
-            ..Default::default()
-        })
+        .update_settings(
+            personal_knowledge_os_lib::domain::settings::UpdateSettingsInput {
+                autosave_delay_ms: Some(1200),
+                font_size: Some(18),
+                editor_mode: Some("preview".into()),
+                ..Default::default()
+            },
+        )
         .expect("更新设置");
     assert_eq!(updated.autosave_delay_ms, 1200);
     assert_eq!(updated.font_size, 18);
@@ -786,11 +880,13 @@ fn settings_and_path_safety_behave_as_documented() {
 
     // 非法数值被限制在合理范围
     let clamped = service
-        .update_settings(personal_knowledge_os_lib::domain::settings::UpdateSettingsInput {
-            autosave_delay_ms: Some(1),
-            font_size: Some(200),
-            ..Default::default()
-        })
+        .update_settings(
+            personal_knowledge_os_lib::domain::settings::UpdateSettingsInput {
+                autosave_delay_ms: Some(1),
+                font_size: Some(200),
+                ..Default::default()
+            },
+        )
         .expect("边界值设置");
     assert_eq!(clamped.autosave_delay_ms, 200);
     assert_eq!(clamped.font_size, 32);
@@ -799,7 +895,10 @@ fn settings_and_path_safety_behave_as_documented() {
     let context = harness.context();
     assert!(context.storage.read_raw("../../etc/passwd").is_err());
     assert!(context.storage.read_raw("/etc/passwd").is_err());
-    assert!(context.storage.write_atomic("../escape.md", "内容").is_err());
+    assert!(context
+        .storage
+        .write_atomic("../escape.md", "内容")
+        .is_err());
 
     // 文件名非法字符被清理
     let notes = harness.notes();
@@ -877,7 +976,11 @@ fn search_sorting_and_paging_work() {
             ..Default::default()
         })
         .expect("按标题排序");
-    let titles: Vec<String> = by_title.hits.iter().map(|hit| hit.note.title.clone()).collect();
+    let titles: Vec<String> = by_title
+        .hits
+        .iter()
+        .map(|hit| hit.note.title.clone())
+        .collect();
     let mut sorted = titles.clone();
     sorted.sort();
     assert_eq!(titles, sorted);
@@ -908,7 +1011,10 @@ fn ignores_self_writes_and_applies_external_events() {
         directories: Vec::new(),
         attachments_changed: false,
     };
-    let report = harness.index().apply_file_changes(self_batch).expect("处理自身写入事件");
+    let report = harness
+        .index()
+        .apply_file_changes(self_batch)
+        .expect("处理自身写入事件");
     assert_eq!(report.unchanged, 1);
     assert_eq!(report.updated, 0);
 
@@ -927,7 +1033,10 @@ fn ignores_self_writes_and_applies_external_events() {
         directories: Vec::new(),
         attachments_changed: false,
     };
-    let report = harness.index().apply_file_changes(external_batch).expect("处理外部事件");
+    let report = harness
+        .index()
+        .apply_file_changes(external_batch)
+        .expect("处理外部事件");
     assert_eq!(report.updated, 1);
     let reloaded = notes.get(&detail.note.id).expect("重新读取");
     assert!(reloaded.content.contains("外部修改后的内容"));
@@ -943,7 +1052,10 @@ fn ignores_self_writes_and_applies_external_events() {
         directories: Vec::new(),
         attachments_changed: false,
     };
-    let report = harness.index().apply_file_changes(removed_batch).expect("处理删除事件");
+    let report = harness
+        .index()
+        .apply_file_changes(removed_batch)
+        .expect("处理删除事件");
     assert_eq!(report.missing, 1);
     assert_eq!(notes.list_missing().unwrap().len(), 1);
 }
@@ -1021,7 +1133,10 @@ fn layout_settings_round_trip_and_clamp() {
     assert_eq!(updated.editor_mode, "split");
     assert_eq!(updated.list_sort, "manual", "「自定义顺序」应被记住");
     assert_eq!(updated.outline_placement, "side", "大纲位置应被记住");
-    assert!(updated.auto_outline_on_select, "「选中后自动显示大纲」应被记住");
+    assert!(
+        updated.auto_outline_on_select,
+        "「选中后自动显示大纲」应被记住"
+    );
 
     // 未知的**枚举类**设置同样不落库：主题 / 新建位置 / 编辑器模式都只接受已知值。
     // 判据不是「看起来像不像」，而是「界面拿着它查表能不能查到」。
@@ -1036,8 +1151,14 @@ fn layout_settings_round_trip_and_clamp() {
         .expect("未知枚举值应被忽略而不是报错");
     assert_eq!(rejected_enums.editor_theme, "light", "主题保持上一个有效值");
     assert_eq!(rejected_enums.default_new_location, "inbox");
-    assert_eq!(rejected_enums.editor_mode, "split", "编辑器模式保持上一个有效值");
-    assert_eq!(rejected_enums.outline_placement, "side", "大纲位置保持上一个有效值");
+    assert_eq!(
+        rejected_enums.editor_mode, "split",
+        "编辑器模式保持上一个有效值"
+    );
+    assert_eq!(
+        rejected_enums.outline_placement, "side",
+        "大纲位置保持上一个有效值"
+    );
 
     // 未知排序值不落库（避免脏数据写进设置）
     let rejected = service
@@ -1065,9 +1186,18 @@ fn layout_settings_round_trip_and_clamp() {
     assert_eq!(reopened.settings.sidebar_width, 301);
     assert_eq!(reopened.settings.list_width, 432);
     assert_eq!(reopened.settings.editor_mode, "split");
-    assert_eq!(reopened.settings.list_sort, "manual", "重开工作区后排序偏好保留");
-    assert_eq!(reopened.settings.outline_placement, "side", "重开工作区后大纲位置保留");
-    assert!(reopened.settings.auto_outline_on_select, "重开工作区后自动显示开关保留");
+    assert_eq!(
+        reopened.settings.list_sort, "manual",
+        "重开工作区后排序偏好保留"
+    );
+    assert_eq!(
+        reopened.settings.outline_placement, "side",
+        "重开工作区后大纲位置保留"
+    );
+    assert!(
+        reopened.settings.auto_outline_on_select,
+        "重开工作区后自动显示开关保留"
+    );
 }
 
 #[test]
@@ -1080,7 +1210,7 @@ fn applies_note_links_migration() {
     // 007 = notes.parent_id 子文档层级，008 = notes.sort_order 手动排序，009 = notes.pinned 置顶，
     // 010 = notes.declared_parent，011 = note_chunks（N5 分块索引），
     // 012 = decision_cache（D2 决策缓存）
-    assert_eq!(context.db.schema_version().expect("schema 版本"), 13);
+    assert_eq!(context.db.schema_version().expect("schema 版本"), 15);
 
     // 004：来源/时效列与类型化关系表
     let (has_relations, source_column) = context
@@ -1200,5 +1330,8 @@ fn stats_report_words_recent_updates_and_pins() {
     assert!(!stats.activity.is_empty(), "应有活跃度数据");
     let today = &stats.activity[stats.activity.len() - 1];
     assert!(today.count >= 3, "今天应有至少 3 篇更新：{today:?}");
-    assert!(stats.activity.iter().all(|day| day.count > 0), "只返回有更新的日子");
+    assert!(
+        stats.activity.iter().all(|day| day.count > 0),
+        "只返回有更新的日子"
+    );
 }

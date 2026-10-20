@@ -94,6 +94,7 @@ mod tests {
         let model = TemplateGenerativeModel::new();
         let request = GenerationRequest {
             prompt: "生成推测段".into(),
+            instructions: None,
             evidence: vec![chunk("note-1", "第一句。第二句。"), chunk("note-2", "只有一句")],
             max_tokens: None,
             allow_remote: false,
@@ -114,6 +115,7 @@ mod tests {
         let response = model
             .complete(&GenerationRequest {
                 prompt: "生成".into(),
+                instructions: None,
                 evidence: vec![],
                 max_tokens: None,
                 allow_remote: false,

@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { backupService } from '@/services/backupService';
 import { aiService } from '@/services/aiService';
+import { askService } from '@/services/askService';
 import { clipService } from '@/services/clipService';
 import { linkService } from '@/services/linkService';
 import { graphService } from '@/services/graphService';
 import { noteService } from '@/services/noteService';
+import { organizeService } from '@/services/organizeService';
 import { categoryService } from '@/services/categoryService';
 import { searchService } from '@/services/searchService';
 import { tagService } from '@/services/tagService';
@@ -72,6 +74,64 @@ describe('浏览器预览后端', () => {
         baseContentHash: 'outdated-hash',
       }),
     ).rejects.toMatchObject({ code: 'NOTE_CONFLICT' });
+  });
+
+  it('Ask 多轮 / 选中文字 / 答案笔记在浏览器预览端走同一套确认纪律', async () => {
+    await workspaceService.create('Ask 预览库', '/tmp/mock-ask');
+    await aiService.setPolicy({ enabled: true });
+    const source = await noteService.create({
+      title: 'SQLite 索引设计',
+      initialContent: '# 结论\n\nSQLite FTS5 使用倒排索引，中文需要双字短语。',
+    });
+
+    const answer = await askService.ask({
+      question: '这篇笔记讲了什么？',
+      scope: 'note',
+      scopeId: source.note.id,
+      selection: 'SQLite FTS5 使用倒排索引',
+    });
+    expect(answer.evidenceSufficient).toBe(true);
+    expect(answer.citations[0]?.noteId).toBe(source.note.id);
+
+    const preview = await askService.previewAnswerNote({
+      answer,
+      confirm: false,
+    });
+    expect(preview.content).toContain(`[[${source.note.title}]]`);
+    await expect(
+      askService.saveAnswer({ answer, confirm: false }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+
+    const saved = await askService.saveAnswer({
+      answer,
+      title: 'SQLite 问答',
+      confirm: true,
+    });
+    expect(saved.title).toBe('SQLite 问答');
+    expect((await noteService.get(saved.noteId)).content).toContain('## 来源');
+  });
+
+  it('Organize 预览端只生成建议，接受与撤销保持原内容可恢复', async () => {
+    await workspaceService.create('整理预览库', '/tmp/mock-organize');
+    await aiService.setPolicy({ enabled: true });
+    const note = await noteService.create({
+      title: 'SQLite 索引设计',
+      initialContent: '# 结论\n\nSQLite FTS5 使用倒排索引。',
+    });
+    const before = note.content;
+    const suggestion = await organizeService.generate(note.note.id, 'summary');
+    expect(await noteService.get(note.note.id)).toMatchObject({ content: before });
+
+    const accepted = await organizeService.accept(suggestion.id);
+    expect(accepted.undoAvailable).toBe(true);
+    expect((await noteService.get(note.note.id)).content).toContain('## 摘要');
+    await organizeService.undo(suggestion.id);
+    expect((await noteService.get(note.note.id)).content).toBe(before);
+
+    const job = await organizeService.createJob('summary', [note.note.id]);
+    const completed = await organizeService.runJob(job.id);
+    expect(completed.status).toBe('completed');
+    expect(completed.completed).toBe(1);
   });
 
   it('分类支持创建、重命名与删除策略', async () => {

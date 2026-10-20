@@ -10,25 +10,27 @@
 //! 降级路径（§9.6）：没有 Jev 用规则表（`source_grade`），没有 LLM 用模板实现
 //! （`TemplateGenerativeModel`）——推测段永远标注「未接模型」，不冒充模型结论。
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::host::host_of;
+use super::web_search;
+use crate::application::ai::decision_engine::DecisionEngine;
+use crate::application::ai::local_model::OllamaModel;
 use crate::application::ai::policy::{AiPolicyService, HostVerdict};
+use crate::application::ai::remote_model::RemoteModel;
+use crate::application::ai::rule_provider::RuleDecisionProvider;
 use crate::application::ai::source_grade::{self, grade_local_note, Grade};
+use crate::application::ai::system_one::SystemOneDecisionModel;
 use crate::application::ai::template_provider::TemplateGenerativeModel;
 use crate::application::ai::tools::AiTools;
-use crate::application::ai::rule_provider::RuleDecisionProvider;
-use crate::application::ai::local_model::OllamaModel;
-use crate::application::ai::decision_engine::DecisionEngine;
-use crate::application::ai::remote_model::RemoteModel;
-use crate::application::ai::system_one::SystemOneDecisionModel;
 use crate::application::ai::traits::{
-    DecisionCandidate, DecisionKind, DecisionModel, DecisionState,
-    GenerationRequest, GenerativeModel, RetrievalOrigin, RetrievedChunk,
+    DecisionCandidate, DecisionKind, DecisionModel, DecisionState, GenerationRequest,
+    GenerativeModel, RetrievalOrigin, RetrievedChunk,
 };
-use super::web_search;
 use crate::application::context::WorkspaceContext;
 use crate::application::note_service::NoteService;
 use crate::core::error::{AppError, ErrorCode, Result};
@@ -39,16 +41,20 @@ use crate::core::time::{date_offset_days, now_iso, today_date};
 use crate::domain::ai::{DecisionTrace, NetworkMode};
 use crate::domain::note::{CreateNoteInput, NoteListQuery, SaveNoteInput, SetSourceInput};
 use crate::domain::research::{
-    DuplicateNote, KbBaseline, KbRelation, ResearchClaim, ResearchPlan, ResearchProposal,
-    ResearchReport, ResearchRequest, ResearchSession, ResearchSessionSummary, ResearchSource,
-    ResearchStatus, ResearchStepLog, ResearchWarning, SourceLevel, SourceOrigin, SubQuestion,
-    WarningKind, ResearchWriteInput, ResearchWriteResult, WRITE_MODE_ABANDON, WRITE_MODE_APPEND,
-    WRITE_MODE_CREATE, DroppedSource, ResearchOutboundPreview, ResearchOutboundSnippet,
+    DroppedSource, DuplicateNote, KbBaseline, KbRelation, ResearchClaim, ResearchClaimChange,
+    ResearchComparison, ResearchOutboundPreview, ResearchOutboundSnippet, ResearchPlan,
+    ResearchPlanEdit, ResearchPlanTemplate, ResearchProposal, ResearchReport, ResearchRequest,
+    ResearchSession, ResearchSessionSummary, ResearchSource, ResearchSourceChange, ResearchStatus,
+    ResearchStepLog, ResearchWarning, ResearchWriteInput, ResearchWriteResult, SourceLevel,
+    SourceOrigin, SubQuestion, WarningKind, WRITE_MODE_ABANDON, WRITE_MODE_APPEND,
+    WRITE_MODE_CREATE,
 };
-use super::host::host_of;
 
 /// 每个子问题最多采纳的本地材料条数。
 const HITS_PER_SUB_QUESTION: usize = 6;
+/// 单次收集最多执行的外部检索查询数。计划里的子问题会影响这些查询，
+/// 但不会把一次研究扩大成无上限的搜索请求。
+const MAX_WEB_QUERIES: usize = 3;
 /// 一次会话最多采纳的来源总数。
 const MAX_SOURCES: usize = 24;
 /// 默认时间窗（天）：约两年。
@@ -65,8 +71,12 @@ const MAX_KEY_FACTS: usize = 8;
 /// 这是 D1 的降级实现（没有模型做语义归并）；顺序与 `decompose` 的模板一一对应。
 const INTENT_MARKERS: [&[&str]; 5] = [
     &["定义", "概念", "是什么", "概述", "介绍", "原理"],
-    &["方案", "做法", "实现", "对比", "比较", "选型", "用法", "实践"],
-    &["场景", "适用", "限制", "注意", "前提", "边界", "约束", "条件"],
+    &[
+        "方案", "做法", "实现", "对比", "比较", "选型", "用法", "实践",
+    ],
+    &[
+        "场景", "适用", "限制", "注意", "前提", "边界", "约束", "条件",
+    ],
     &["风险", "争议", "问题", "失败", "坑", "缺陷", "缺点", "事故"],
     &["进展", "新版", "更新", "发布", "最近", "趋势", "未来"],
 ];
@@ -98,7 +108,10 @@ pub struct ResearchService {
 
 impl ResearchService {
     pub fn new(ctx: Arc<WorkspaceContext>) -> Self {
-        Self { ctx, decision: Arc::new(RuleDecisionProvider::default()) }
+        Self {
+            ctx,
+            decision: Arc::new(RuleDecisionProvider::default()),
+        }
     }
 
     /// 注入自定义决策模型（用于 A/B：规则档 vs Jev / 本地模型）。
@@ -121,7 +134,14 @@ impl ResearchService {
     ///
     /// **只发元数据**：会话 id / 步骤 / 人读说明 / 已抓页数 / 已采纳来源数——
     /// 不含笔记正文、不含网页内容（与审计同一条隐私口径）。
-    fn emit_progress(&self, session_id: &str, step: &str, detail: &str, pages: usize, sources: usize) {
+    fn emit_progress(
+        &self,
+        session_id: &str,
+        step: &str,
+        detail: &str,
+        pages: usize,
+        sources: usize,
+    ) {
         self.ctx.events.emit(
             event_names::RESEARCH_PROGRESS,
             serde_json::json!({
@@ -177,11 +197,13 @@ impl ResearchService {
             persisted.decision_provider = decision_provider;
         }
         if let Some(plan) = persisted.plan.as_mut() {
-            let counts: std::collections::HashMap<String, usize> =
-                persisted.sources.iter().fold(std::collections::HashMap::new(), |mut acc, source| {
+            let counts: std::collections::HashMap<String, usize> = persisted.sources.iter().fold(
+                std::collections::HashMap::new(),
+                |mut acc, source| {
                     *acc.entry(source.sub_question_id.clone()).or_insert(0) += 1;
                     acc
-                });
+                },
+            );
             for question in plan.sub_questions.iter_mut() {
                 question.local_hits = counts.get(&question.id).copied().unwrap_or(0);
             }
@@ -249,10 +271,20 @@ impl ResearchService {
             if service.outbound_confirmed(confirm_outbound) {
                 candidates.push(Arc::new(SystemOneDecisionModel::new(&config)));
             } else {
-                service.audit("research_score", false, "denied", 0, Some("OUTBOUND_UNCONFIRMED"));
+                service.audit(
+                    "research_score",
+                    false,
+                    "denied",
+                    0,
+                    Some("OUTBOUND_UNCONFIRMED"),
+                );
             }
         }
-        if policy.remote_model_score && service.ensure_remote_model_allowed("research_score").is_ok() {
+        if policy.remote_model_score
+            && service
+                .ensure_remote_model_allowed("research_score")
+                .is_ok()
+        {
             if service.outbound_confirmed(confirm_outbound) {
                 if let Some((base, model, key)) = service.remote_model() {
                     candidates.push(Arc::new(
@@ -261,7 +293,13 @@ impl ResearchService {
                 }
             } else {
                 // Track C2：逐次确认未通过 —— 不构造在线档，**一个请求都不会发**
-                service.audit("research_score", false, "denied", 0, Some("OUTBOUND_UNCONFIRMED"));
+                service.audit(
+                    "research_score",
+                    false,
+                    "denied",
+                    0,
+                    Some("OUTBOUND_UNCONFIRMED"),
+                );
             }
         }
         if policy.local_model_score {
@@ -337,12 +375,17 @@ impl ResearchService {
     ///
     /// 携带完整标识（含模型名）是刻意的：流式事件、降级提示、报告 `composer` 必须
     /// 说同一个名字，否则界面会出现"本地写一半变成 local.ollama，最后又变成 local.ollama:xxx"。
-    fn composer_candidates(&self, confirm_outbound: bool) -> Vec<(String, Arc<dyn GenerativeModel>)> {
+    fn composer_candidates(
+        &self,
+        confirm_outbound: bool,
+    ) -> Vec<(String, Arc<dyn GenerativeModel>)> {
         let policy = self.ctx.settings().ai;
         let service = self.policy();
         let mut candidates: Vec<(String, Arc<dyn GenerativeModel>)> = Vec::new();
         if policy.remote_model_compose
-            && service.ensure_remote_model_allowed("research_compose").is_ok()
+            && service
+                .ensure_remote_model_allowed("research_compose")
+                .is_ok()
         {
             if service.outbound_confirmed(confirm_outbound) {
                 if let Some((base, model, key)) = service.remote_model() {
@@ -356,7 +399,13 @@ impl ResearchService {
                 }
             } else {
                 // Track C2：逐次确认未通过 —— 不构造在线档，**一个请求都不会发**
-                service.audit("research_compose", false, "denied", 0, Some("OUTBOUND_UNCONFIRMED"));
+                service.audit(
+                    "research_compose",
+                    false,
+                    "denied",
+                    0,
+                    Some("OUTBOUND_UNCONFIRMED"),
+                );
             }
         }
         if policy.local_model_compose {
@@ -434,7 +483,10 @@ impl ResearchService {
                 .iter()
                 .find(|attempt| !attempt.ok)
                 .map(|failed| {
-                    format!("{} 打分失败（{}），已退回 {provider}", failed.provider, failed.detail)
+                    format!(
+                        "{} 打分失败（{}），已退回 {provider}",
+                        failed.provider, failed.detail
+                    )
                 })
         });
         for source in sources.iter_mut() {
@@ -458,12 +510,42 @@ impl ResearchService {
         let policy = self.policy().ensure_enabled("research_start")?;
         let topic = validate_topic(&request.topic)?;
         let budget = policy.budget.clamped();
+        let plan_template = request.plan_template_id.as_deref().and_then(|id| {
+            self.list_plan_templates()
+                .ok()
+                .and_then(|items| items.into_iter().find(|item| item.id == id))
+        });
         let time_window_days = request
             .time_window_days
+            .or_else(|| plan_template.as_ref().map(|item| item.time_window_days))
             .unwrap_or(DEFAULT_WINDOW_DAYS)
             .clamp(7, 3650);
+        let language = normalize_language(
+            request
+                .language
+                .as_deref()
+                .or_else(|| plan_template.as_ref().map(|item| item.language.as_str())),
+        );
+        let template_source_types = plan_template
+            .as_ref()
+            .map(|item| item.source_types.clone())
+            .unwrap_or_default();
+        let source_types = normalize_source_types(if request.source_types.is_empty() {
+            &template_source_types
+        } else {
+            &request.source_types
+        });
 
-        let sub_questions = decompose(&topic, budget.max_subquestions as usize);
+        let sub_questions = if let Some(template) = &plan_template {
+            let questions = template
+                .sub_questions
+                .iter()
+                .map(|question| question.replace(&template.topic, &topic))
+                .collect::<Vec<_>>();
+            custom_sub_questions(&topic, &questions, budget.max_subquestions as usize)?
+        } else {
+            decompose(&topic, budget.max_subquestions as usize)
+        };
         let baseline = self.tools().kb_search(&topic, 3)?;
         let local_baseline: Vec<KbBaseline> = baseline
             .into_iter()
@@ -499,12 +581,23 @@ impl ResearchService {
                     .collect::<Vec<_>>()
                     .join("、")
             ),
+            format!(
+                "输出语言：{language} · 期望来源类型：{}。",
+                source_types.join(" / ")
+            ),
             "子问题由模板生成；语义化的查询改写要等模型接入（N5/D4）。".to_string(),
             "来源按 §9.3 规则分级：域名内置表 → 内容自证（标题/作者/日期）→ 兜底「弱」。"
                 .to_string(),
         ];
-        if let Some(scope) = request.scope.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            notes.push(format!("用户给定的范围：{scope}（当前仅作为计划说明记录）。"));
+        if let Some(scope) = request
+            .scope
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            notes.push(format!(
+                "用户给定的范围：{scope}（当前仅作为计划说明记录）。"
+            ));
         }
         if local_baseline.is_empty() {
             notes.push("本地知识库暂无相关笔记：本次没有「已知基线」可复用。".to_string());
@@ -517,9 +610,14 @@ impl ResearchService {
                 topic,
                 scope: request.scope.clone(),
                 time_window_days: Some(time_window_days),
+                language: Some(language.clone()),
+                source_types: source_types.clone(),
+                rerun_of: request.rerun_of.clone(),
+                plan_template_id: request.plan_template_id.clone(),
                 write_back: request.write_back,
                 target_category_id: request.target_category_id.clone(),
             },
+            rerun_of: request.rerun_of.clone(),
             status: ResearchStatus::Planned,
             created_at: now.clone(),
             updated_at: now,
@@ -530,6 +628,8 @@ impl ResearchService {
                 queries,
                 local_baseline,
                 time_window_days,
+                language,
+                source_types,
                 budget,
                 notes,
             }),
@@ -549,7 +649,13 @@ impl ResearchService {
             dropped_sources: Vec::new(),
         };
         self.save(&session)?;
-        self.emit_progress(&session.id, "plan", "已生成研究计划与本地基线", 0, session.sources.len());
+        self.emit_progress(
+            &session.id,
+            "plan",
+            "已生成研究计划与本地基线",
+            0,
+            session.sources.len(),
+        );
         self.policy().audit(
             "research_start",
             false,
@@ -558,6 +664,283 @@ impl ResearchService {
             None,
         );
         Ok(session)
+    }
+
+    /// 编辑一个尚未开始收集的研究计划。
+    pub fn update_plan(&self, session_id: &str, edit: ResearchPlanEdit) -> Result<ResearchSession> {
+        let policy = self.policy().ensure_enabled("research_update_plan")?;
+        let mut session = self.load(session_id)?;
+        if session.status != ResearchStatus::Planned {
+            return Err(AppError::invalid_input(
+                "只有「已立项」的研究计划可以编辑。",
+            ));
+        }
+        let mut plan = session
+            .plan
+            .clone()
+            .ok_or_else(|| AppError::internal("会话缺少研究计划。"))?;
+        if let Some(questions) = edit.sub_questions {
+            plan.sub_questions = custom_sub_questions(
+                &plan.topic,
+                &questions,
+                plan.budget.max_subquestions as usize,
+            )?;
+        }
+        if let Some(days) = edit.time_window_days {
+            plan.time_window_days = days.clamp(7, 3650);
+            session.request.time_window_days = Some(plan.time_window_days);
+        }
+        if let Some(language) = edit.language {
+            plan.language = normalize_language(Some(&language));
+            session.request.language = Some(plan.language.clone());
+        }
+        if let Some(source_types) = edit.source_types {
+            plan.source_types = normalize_source_types(&source_types);
+            session.request.source_types = plan.source_types.clone();
+        }
+        let expanded = crate::application::ai::query_expansion::expand(
+            &plan.topic,
+            &plan.sub_questions,
+            crate::application::ai::query_expansion::MAX_QUERIES,
+        );
+        plan.queries = expanded.into_iter().map(|item| item.text).collect();
+        plan.notes.retain(|note| {
+            !note.starts_with("子问题 ")
+                && !note.starts_with("检索查询 ")
+                && !note.starts_with("输出语言：")
+        });
+        plan.notes.push(format!(
+            "子问题 {} 个 · 时间窗 {} 天 · 语言 {} · 来源类型 {}。",
+            plan.sub_questions.len(),
+            plan.time_window_days,
+            plan.language,
+            plan.source_types.join(" / ")
+        ));
+        plan.notes.push(format!(
+            "检索查询 {} 条，已按编辑后的子问题重算。",
+            plan.queries.len()
+        ));
+        // 计划编辑后预算仍受当前策略硬上限约束。
+        plan.budget = policy.budget.clamped();
+        session.plan = Some(plan);
+        session.updated_at = now_iso();
+        session.steps.push(ResearchStepLog {
+            step: "plan_edit".to_string(),
+            at: now_iso(),
+            detail: "已编辑研究计划".to_string(),
+        });
+        self.save(&session)?;
+        Ok(session)
+    }
+
+    /// 以同一课题创建一次重跑；来源与结论对比由 `compare` 完成。
+    pub fn rerun(&self, session_id: &str) -> Result<ResearchSession> {
+        self.policy().ensure_enabled("research_rerun")?;
+        let previous = self.load(session_id)?;
+        let plan = previous
+            .plan
+            .as_ref()
+            .ok_or_else(|| AppError::internal("会话缺少研究计划。"))?;
+        let questions = plan
+            .sub_questions
+            .iter()
+            .map(|item| item.question.clone())
+            .collect::<Vec<_>>();
+        let rerun = self.start(ResearchRequest {
+            topic: previous.request.topic.clone(),
+            scope: previous.request.scope.clone(),
+            time_window_days: Some(plan.time_window_days),
+            language: Some(plan.language.clone()),
+            source_types: plan.source_types.clone(),
+            rerun_of: Some(previous.id),
+            plan_template_id: None,
+            write_back: false,
+            target_category_id: previous.request.target_category_id.clone(),
+        })?;
+        // 重跑必须复用上一次实际执行的计划（包括用户手改的子问题），
+        // 否则来源与结论对比会悄悄换成另一组问题。
+        self.update_plan(
+            &rerun.id,
+            ResearchPlanEdit {
+                sub_questions: Some(questions),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// 中止后恢复：保留已完成来源，回到可继续收集的计划状态。
+    pub fn resume_aborted(&self, session_id: &str) -> Result<ResearchSession> {
+        self.policy().ensure_enabled("research_resume")?;
+        let mut session = self.load(session_id)?;
+        if session.status != ResearchStatus::Aborted {
+            return Err(AppError::invalid_input("只有已中止的会话可以恢复。"));
+        }
+        session.status = ResearchStatus::Planned;
+        session.report = None;
+        session.proposal = None;
+        session.abort_reason = None;
+        session.updated_at = now_iso();
+        session.steps.push(ResearchStepLog {
+            step: "resume".to_string(),
+            at: now_iso(),
+            detail: format!("已恢复：保留 {} 条已完成来源", session.sources.len()),
+        });
+        self.save(&session)?;
+        Ok(session)
+    }
+
+    /// 两个会话的来源与结论差异。
+    pub fn compare(&self, previous_id: &str, current_id: &str) -> Result<ResearchComparison> {
+        let previous = self.load(previous_id)?;
+        let current = self.load(current_id)?;
+        let previous_sources = source_map(&previous.sources);
+        let current_sources = source_map(&current.sources);
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        let mut unchanged = Vec::new();
+        for (key, source) in &current_sources {
+            if previous_sources.contains_key(key) {
+                unchanged.push(source_change(source));
+            } else {
+                added.push(source_change(source));
+            }
+        }
+        for (key, source) in &previous_sources {
+            if !current_sources.contains_key(key) {
+                removed.push(source_change(source));
+            }
+        }
+        let mut changed_claims = Vec::new();
+        let previous_claims = claim_map(&previous);
+        let current_claims = claim_map(&current);
+        let ids: std::collections::BTreeSet<String> = previous_claims
+            .keys()
+            .chain(current_claims.keys())
+            .cloned()
+            .collect();
+        for id in ids {
+            let before = previous_claims.get(&id).cloned().unwrap_or_default();
+            let after = current_claims.get(&id).cloned().unwrap_or_default();
+            if before != after {
+                changed_claims.push(ResearchClaimChange {
+                    sub_question_id: id,
+                    previous: before,
+                    current: after,
+                });
+            }
+        }
+        Ok(ResearchComparison {
+            previous_session_id: previous.id,
+            current_session_id: current.id,
+            topic: current.request.topic,
+            added_sources: added,
+            removed_sources: removed,
+            unchanged_sources: unchanged,
+            changed_claims,
+            previous_evidence_sufficient: previous.report.map(|report| report.evidence.sufficient),
+            current_evidence_sufficient: current.report.map(|report| report.evidence.sufficient),
+        })
+    }
+
+    pub fn save_plan_template(&self, session_id: &str, name: &str) -> Result<ResearchPlanTemplate> {
+        let session = self.load(session_id)?;
+        let plan = session
+            .plan
+            .ok_or_else(|| AppError::internal("会话缺少研究计划。"))?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::invalid_input("模板名称不能为空。"));
+        }
+        let mut existing = self.list_plan_templates()?;
+        let id = existing
+            .iter()
+            .find(|template| template.name.eq_ignore_ascii_case(name))
+            .map(|template| template.id.clone())
+            .unwrap_or_else(|| format!("research_template_{}", ulid()));
+        let now = now_iso();
+        let template = ResearchPlanTemplate {
+            id: id.clone(),
+            name: crate::core::text::truncate_chars(name, 80),
+            topic: plan.topic.clone(),
+            scope: plan.scope,
+            time_window_days: plan.time_window_days,
+            language: plan.language,
+            source_types: plan.source_types,
+            sub_questions: plan
+                .sub_questions
+                .into_iter()
+                .map(|item| item.question)
+                .collect(),
+            created_at: existing
+                .iter()
+                .find(|item| item.id == id)
+                .map(|item| item.created_at.clone())
+                .unwrap_or_else(|| now.clone()),
+            updated_at: now,
+        };
+        existing.retain(|item| item.id != id);
+        existing.push(template.clone());
+        let dir = self.ctx.paths.research_templates_dir();
+        fs::create_dir_all(&dir)?;
+        let bytes = serde_json::to_vec_pretty(&template)
+            .map_err(|error| AppError::internal(format!("研究计划模板序列化失败：{error}")))?;
+        self.ctx
+            .storage
+            .write_atomic_absolute(&dir.join(format!("{id}.json")), &bytes)?;
+        Ok(template)
+    }
+
+    pub fn list_plan_templates(&self) -> Result<Vec<ResearchPlanTemplate>> {
+        let dir = self.ctx.paths.research_templates_dir();
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return Ok(Vec::new());
+        };
+        let mut templates = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(text) = fs::read_to_string(path) {
+                if let Ok(template) = serde_json::from_str::<ResearchPlanTemplate>(&text) {
+                    templates.push(template);
+                }
+            }
+        }
+        templates.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(templates)
+    }
+
+    fn search_web_queries(
+        &self,
+        session_id: &str,
+        queries: &[String],
+        limit: usize,
+    ) -> Result<(Vec<super::web_search::WebSearchHit>, Vec<String>, bool)> {
+        let mut hits = Vec::new();
+        let mut failures = Vec::new();
+        let mut seen = HashSet::new();
+        for query in queries
+            .iter()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .take(MAX_WEB_QUERIES)
+        {
+            if self.aborted_snapshot(session_id)?.is_some() {
+                return Ok((hits, failures, true));
+            }
+            match self.tools().web_search(query, limit, true) {
+                Ok(found) => {
+                    for hit in found {
+                        if seen.insert(hit.url.clone()) {
+                            hits.push(hit);
+                        }
+                    }
+                }
+                Err(error) => failures.push(format!("「{query}」{}", error.message)),
+            }
+        }
+        Ok((hits, failures, false))
     }
 
     // ---------------------------------------------------------------- ② 收集
@@ -631,15 +1014,38 @@ impl ResearchService {
             hits.len()
         );
 
-        let mut sources: Vec<ResearchSource> = Vec::new();
+        // 恢复的中止会话保留已完成来源；重新收集时只补缺口。
+        let mut sources: Vec<ResearchSource> = session.sources.clone();
         let mut per_question: Vec<usize> = vec![0; plan.sub_questions.len()];
+        for source in &sources {
+            if let Some(index) = plan
+                .sub_questions
+                .iter()
+                .position(|question| question.id == source.sub_question_id)
+            {
+                per_question[index] += 1;
+            }
+        }
         // 长步骤开始前先看一次：用户可能在上一步刚结束时点了中止
         if let Some(persisted) = self.aborted_snapshot(session_id)? {
             return Ok(persisted);
         }
-        let mut seen: Vec<(String, String)> = Vec::new(); // (子问题 id, 笔记 id)
+        let mut seen: Vec<(String, String)> = sources
+            .iter()
+            .filter_map(|source| {
+                source
+                    .note_id
+                    .clone()
+                    .map(|note_id| (source.sub_question_id.clone(), note_id))
+            })
+            .collect(); // (子问题 id, 笔记 id)
         let mut notes_read = 0usize;
-        for hit in hits {
+        let local_allowed = plan.source_types.is_empty()
+            || plan
+                .source_types
+                .iter()
+                .any(|value| value.eq_ignore_ascii_case("local"));
+        for hit in if local_allowed { hits } else { Vec::new() } {
             if sources.len() >= MAX_SOURCES {
                 break;
             }
@@ -679,7 +1085,11 @@ impl ResearchService {
             sources.push(ResearchSource {
                 reference: sources.len() + 1,
                 title: detail.note.title.clone(),
-                url: detail.note.source_ref.clone().filter(|value| value.starts_with("http")),
+                url: detail
+                    .note
+                    .source_ref
+                    .clone()
+                    .filter(|value| value.starts_with("http")),
                 origin: SourceOrigin::Local,
                 note_id: Some(detail.note.id.clone()),
                 sub_question_id: question_id,
@@ -717,124 +1127,150 @@ impl ResearchService {
         } else if web_enabled {
             let budget = plan.budget.clone();
             let deadline = std::time::Duration::from_secs(u64::from(budget.max_duration_secs));
-            match self.tools().web_search(&plan.topic, budget.max_pages as usize, true) {
-                Err(error) => {
-                    web_note = format!("联网检索未成功：{}", error.message);
-                }
-                Ok(hits) => {
-                    let mut web_seen: Vec<String> = Vec::new();
-                    let mut dropped: Vec<DroppedSource> = Vec::new();
-                    for hit in hits {
-                        // 每个候选前都看一次：联网抓取可能跑好几分钟，用户要能随时叫停
-                        if self.aborted_snapshot(session_id)?.is_some() {
-                            return self.finish_aborted_collect(session_id, sources, None, web_fetched);
-                        }
-                        if sources.len() >= MAX_SOURCES || started.elapsed() >= deadline {
-                            break;
-                        }
-                        // 域名策略逐条生效（§9.3「黑名单强制」）：抓正文默认关闭时
-                        // 走的不是 web_fetch，因此候选本身必须在这里判定，
-                        // 否则黑名单域名会以「检索摘要」的形式混进来源列表。
-                        match self.policy().host_verdict(&hit.url) {
-                            HostVerdict::Allowed => {}
-                            verdict => {
-                                let host = source_grade::host_of(&hit.url)
-                                    .unwrap_or_else(|| hit.url.clone());
-                                dropped.push(DroppedSource {
-                                    url: hit.url.clone(),
-                                    host,
-                                    reason: match verdict {
-                                        HostVerdict::DeniedByBlacklist => "denylist".to_string(),
-                                        _ => "notAllowed".to_string(),
-                                    },
-                                });
-                                continue;
-                            }
-                        }
-                        let index = assign_sub_question(&hit.title, &hit.snippet, &plan.sub_questions);
-                        let question_id = plan.sub_questions[index].id.clone();
-                        if per_question[index] >= HITS_PER_SUB_QUESTION {
-                            continue;
-                        }
-                        if web_seen.contains(&hit.url) {
-                            continue;
-                        }
-                        web_seen.push(hit.url.clone());
-
-                        // 抓正文（可关闭）：失败就退回检索摘要，不把整页丢给用户
-                        let mut snippet = hit.snippet.clone();
-                        if policy.allow_fetch_body && web_fetched < budget.max_pages as usize {
-                            if let Ok(page) = self.tools().web_fetch(&hit.url, true) {
-                                web_fetched += 1;
-                                let body = first_sentence(&page.markdown);
-                                snippet = if body.trim().is_empty() { snippet } else { body };
-                                self.emit_progress(
-                                    session_id,
-                                    "collect",
-                                    &format!("已抓取正文 {web_fetched} 页（预算 ≤{} 页）", budget.max_pages),
-                                    web_fetched,
-                                    sources.len() + 1,
-                                );
-                            }
-                        }
-                        if web_search::looks_like_injection(&format!("{} {}", hit.title, snippet)) {
-                            web_injected += 1;
-                            tracing::debug!(target: "ai", "丢弃疑似注入页面：{}", hit.host);
-                            continue;
-                        }
-                        let grade = source_grade::grade_web(&hit.url, &hit.title, &snippet);
-                        let stale = source_grade::is_stale(hit.published_at.as_deref(), plan.time_window_days)
-                            .unwrap_or(false);
-                        per_question[index] += 1;
-                        web_collected += 1;
-                        sources.push(ResearchSource {
-                            reference: sources.len() + 1,
-                            title: hit.title.clone(),
-                            url: Some(hit.url.clone()),
-                            origin: SourceOrigin::Web,
-                            note_id: None,
-                            sub_question_id: question_id,
-                            level: grade.level,
-                            reliability: grade.level.reliability(),
-                            grade_reason: grade.reason,
-                            published_at: hit.published_at.clone(),
-                            fetched_at: now_iso(),
-                            applicable_version: None,
-                            snippet,
-                            // 外部来源没有"原文字符区间"这回事（正文是抓来的，不落库）
-                            char_start: None,
-                            char_end: None,
-                            heading: None,
-                            stale,
-                            credibility: grade.level.reliability() as f32 / 5.0,
-                        });
+            let (hits, failures, aborted) =
+                self.search_web_queries(session_id, &queries, budget.max_pages as usize)?;
+            if aborted {
+                return self.finish_aborted_collect(session_id, sources, None, web_fetched);
+            }
+            if hits.is_empty() {
+                web_note = if failures.is_empty() {
+                    "联网检索没有返回候选来源".to_string()
+                } else {
+                    format!("联网检索未成功：{}", failures.join("；"))
+                };
+            } else {
+                let mut web_seen: Vec<String> = sources
+                    .iter()
+                    .filter_map(|source| source.url.clone())
+                    .collect();
+                let mut dropped: Vec<DroppedSource> = Vec::new();
+                for hit in hits {
+                    // 每个候选前都看一次：联网抓取可能跑好几分钟，用户要能随时叫停
+                    if self.aborted_snapshot(session_id)?.is_some() {
+                        return self.finish_aborted_collect(session_id, sources, None, web_fetched);
                     }
-                    if web_collected == 0 {
-                        web_note = "联网检索没有返回可用来源".to_string();
-                    } else {
-                        web_note = format!(
+                    if sources.len() >= MAX_SOURCES || started.elapsed() >= deadline {
+                        break;
+                    }
+                    // 域名策略逐条生效（§9.3「黑名单强制」）：抓正文默认关闭时
+                    // 走的不是 web_fetch，因此候选本身必须在这里判定，
+                    // 否则黑名单域名会以「检索摘要」的形式混进来源列表。
+                    match self.policy().host_verdict(&hit.url) {
+                        HostVerdict::Allowed => {}
+                        verdict => {
+                            let host =
+                                source_grade::host_of(&hit.url).unwrap_or_else(|| hit.url.clone());
+                            dropped.push(DroppedSource {
+                                url: hit.url.clone(),
+                                host,
+                                reason: match verdict {
+                                    HostVerdict::DeniedByBlacklist => "denylist".to_string(),
+                                    _ => "notAllowed".to_string(),
+                                },
+                            });
+                            continue;
+                        }
+                    }
+                    let index = assign_sub_question(&hit.title, &hit.snippet, &plan.sub_questions);
+                    let question_id = plan.sub_questions[index].id.clone();
+                    if per_question[index] >= HITS_PER_SUB_QUESTION {
+                        continue;
+                    }
+                    if web_seen.contains(&hit.url) {
+                        continue;
+                    }
+                    web_seen.push(hit.url.clone());
+
+                    // 抓正文（可关闭）：失败就退回检索摘要，不把整页丢给用户
+                    let mut snippet = hit.snippet.clone();
+                    if policy.allow_fetch_body && web_fetched < budget.max_pages as usize {
+                        if let Ok(page) = self.tools().web_fetch(&hit.url, true) {
+                            web_fetched += 1;
+                            let body = first_sentence(&page.markdown);
+                            snippet = if body.trim().is_empty() {
+                                snippet
+                            } else {
+                                body
+                            };
+                            self.emit_progress(
+                                session_id,
+                                "collect",
+                                &format!(
+                                    "已抓取正文 {web_fetched} 页（预算 ≤{} 页）",
+                                    budget.max_pages
+                                ),
+                                web_fetched,
+                                sources.len() + 1,
+                            );
+                        }
+                    }
+                    if web_search::looks_like_injection(&format!("{} {}", hit.title, snippet)) {
+                        web_injected += 1;
+                        tracing::debug!(target: "ai", "丢弃疑似注入页面：{}", hit.host);
+                        continue;
+                    }
+                    let grade = source_grade::grade_web(&hit.url, &hit.title, &snippet);
+                    if !source_type_allowed(&plan.source_types, grade.level, &hit.url) {
+                        continue;
+                    }
+                    let stale =
+                        source_grade::is_stale(hit.published_at.as_deref(), plan.time_window_days)
+                            .unwrap_or(false);
+                    per_question[index] += 1;
+                    web_collected += 1;
+                    sources.push(ResearchSource {
+                        reference: sources.len() + 1,
+                        title: hit.title.clone(),
+                        url: Some(hit.url.clone()),
+                        origin: SourceOrigin::Web,
+                        note_id: None,
+                        sub_question_id: question_id,
+                        level: grade.level,
+                        reliability: grade.level.reliability(),
+                        grade_reason: grade.reason,
+                        published_at: hit.published_at.clone(),
+                        fetched_at: now_iso(),
+                        applicable_version: None,
+                        snippet,
+                        // 外部来源没有"原文字符区间"这回事（正文是抓来的，不落库）
+                        char_start: None,
+                        char_end: None,
+                        heading: None,
+                        stale,
+                        credibility: grade.level.reliability() as f32 / 5.0,
+                    });
+                }
+                if web_collected == 0 {
+                    web_note = "联网检索没有返回可用来源".to_string();
+                } else {
+                    web_note = format!(
                             "外部来源 {web_collected} 条（实际抓取正文 {web_fetched} 页；预算：≤{} 页 / ≤{} 秒）",
                             budget.max_pages, budget.max_duration_secs
                         );
-                    }
-                    if web_injected > 0 {
-                        web_note.push_str(&format!(
-                            "；丢弃疑似注入页面 {web_injected} 个（网页内容是数据，不是指令）"
-                        ));
-                    }
-                    if !dropped.is_empty() {
-                        let blacklisted = dropped
-                            .iter()
-                            .filter(|item| item.reason == "denylist")
-                            .count();
-                        web_note.push_str(&format!(
+                }
+                if web_injected > 0 {
+                    web_note.push_str(&format!(
+                        "；丢弃疑似注入页面 {web_injected} 个（网页内容是数据，不是指令）"
+                    ));
+                }
+                if !dropped.is_empty() {
+                    let blacklisted = dropped
+                        .iter()
+                        .filter(|item| item.reason == "denylist")
+                        .count();
+                    web_note.push_str(&format!(
                             "；丢弃域名策略命中的来源 {} 个（黑名单 {blacklisted} 个 / 不在白名单 {} 个）",
                             dropped.len(),
                             dropped.len() - blacklisted
                         ));
-                    }
-                    session.dropped_sources = dropped;
                 }
+                if !failures.is_empty() {
+                    web_note.push_str(&format!(
+                        "；{} 条计划查询未成功，已使用其余查询结果",
+                        failures.len()
+                    ));
+                }
+                session.dropped_sources = dropped;
             }
         }
 
@@ -897,7 +1333,11 @@ impl ResearchService {
             web_collected > 0 || web_fetched > 0,
             "ok",
             started.elapsed().as_millis() as u64,
-            Some(if web_enabled { "with_web" } else { "local_only" }),
+            Some(if web_enabled {
+                "with_web"
+            } else {
+                "local_only"
+            }),
         );
         Ok(session)
     }
@@ -943,10 +1383,8 @@ impl ResearchService {
                 .filter(|source| source.level != SourceLevel::E)
                 .collect();
             if evidence.is_empty() {
-                let clues: Vec<usize> = all_evidence
-                    .iter()
-                    .map(|source| source.reference)
-                    .collect();
+                let clues: Vec<usize> =
+                    all_evidence.iter().map(|source| source.reference).collect();
                 claims.push(ResearchClaim {
                     sub_question_id: question.id.clone(),
                     text: if clues.is_empty() {
@@ -988,7 +1426,10 @@ impl ResearchService {
                 conflicting.push(question.id.clone());
             }
             let confidence = claim_confidence(
-                &evidence.iter().map(|source| source.credibility).collect::<Vec<f32>>(),
+                &evidence
+                    .iter()
+                    .map(|source| source.credibility)
+                    .collect::<Vec<f32>>(),
                 independent.len(),
             );
             claims.push(ResearchClaim {
@@ -1079,7 +1520,13 @@ impl ResearchService {
             );
         }
         self.save(&session)?;
-        self.emit_progress(&session.id, "verify", "验证完成：交叉验证与冲突判定已写入报告草稿", 0, session.sources.len());
+        self.emit_progress(
+            &session.id,
+            "verify",
+            "验证完成：交叉验证与冲突判定已写入报告草稿",
+            0,
+            session.sources.len(),
+        );
         self.policy().audit(
             "research_verify",
             false,
@@ -1121,7 +1568,10 @@ impl ResearchService {
             return Ok(blocked("在线模型尚未授权：内容不会外发。"));
         }
 
-        let host = service.remote_diagnosis().0.and_then(|(base, _)| host_of(&base));
+        let host = service
+            .remote_diagnosis()
+            .0
+            .and_then(|(base, _)| host_of(&base));
         let snippets: Vec<ResearchOutboundSnippet> = session
             .sources
             .iter()
@@ -1136,7 +1586,12 @@ impl ResearchService {
         } else {
             "在线模型已开启，本次会把下列片段交给它。".to_string()
         };
-        Ok(ResearchOutboundPreview { will_send: true, host, snippets, reason })
+        Ok(ResearchOutboundPreview {
+            will_send: true,
+            host,
+            snippets,
+            reason,
+        })
     }
 
     /// ④ 汇总：渲染六段报告。
@@ -1171,7 +1626,10 @@ impl ResearchService {
             .take(5)
             .enumerate()
             .map(|(index, source)| RetrievedChunk {
-                note_id: source.note_id.clone().unwrap_or_else(|| format!("ref{}", index + 1)),
+                note_id: source
+                    .note_id
+                    .clone()
+                    .unwrap_or_else(|| format!("ref{}", index + 1)),
                 chunk_index: index as i64,
                 // 有分块标题路径就用它（真实分块），否则退回笔记标题
                 heading_path: source
@@ -1204,6 +1662,7 @@ impl ResearchService {
             // 外发标记只对在线这一档为真：本地模型不需要，模板更不需要
             let request = GenerationRequest {
                 prompt: format!("为课题「{}」写推测段", plan.topic),
+                instructions: None,
                 evidence: evidence.clone(),
                 max_tokens: Some(512),
                 allow_remote: !model.is_local(),
@@ -1239,6 +1698,7 @@ impl ResearchService {
         }
         let request = GenerationRequest {
             prompt: format!("为课题「{}」写推测段", plan.topic),
+            instructions: None,
             evidence,
             max_tokens: Some(512),
             allow_remote: false,
@@ -1359,7 +1819,13 @@ impl ResearchService {
             );
         }
         self.save(&session)?;
-        self.emit_progress(&session.id, "compose", "汇总完成：六段报告已生成", 0, session.sources.len());
+        self.emit_progress(
+            &session.id,
+            "compose",
+            "汇总完成：六段报告已生成",
+            0,
+            session.sources.len(),
+        );
         self.policy().audit(
             "research_compose",
             false,
@@ -1379,7 +1845,10 @@ impl ResearchService {
         let mut session = self.load(session_id)?;
         // 允许「已汇总」或「已提案」时重算：同标题冲突可能在两次提案之间出现，
         // 用户需要看到最新的 diff 与同标题提示。
-        if !matches!(session.status, ResearchStatus::Composed | ResearchStatus::Proposed) {
+        if !matches!(
+            session.status,
+            ResearchStatus::Composed | ResearchStatus::Proposed
+        ) {
             return Err(AppError::invalid_input(format!(
                 "会话当前状态是 {}，只有「已汇总」的会话可以生成写入提案。",
                 session.status.as_str()
@@ -1435,7 +1904,13 @@ impl ResearchService {
             );
         }
         self.save(&session)?;
-        self.emit_progress(&session.id, "proposal", "写入提案已生成，等待确认", 0, session.sources.len());
+        self.emit_progress(
+            &session.id,
+            "proposal",
+            "写入提案已生成，等待确认",
+            0,
+            session.sources.len(),
+        );
         self.policy().audit(
             "research_proposal",
             false,
@@ -1484,8 +1959,13 @@ impl ResearchService {
                 0,
                 session.sources.len(),
             );
-            self.policy()
-                .audit("research_write", false, "ok", started.elapsed().as_millis() as u64, Some("abandoned"));
+            self.policy().audit(
+                "research_write",
+                false,
+                "ok",
+                started.elapsed().as_millis() as u64,
+                Some("abandoned"),
+            );
             return Ok(ResearchWriteResult {
                 session_id: session.id,
                 outcome: "abandoned".to_string(),
@@ -1545,7 +2025,10 @@ impl ResearchService {
         } else {
             let created = notes.create(CreateNoteInput {
                 title: title.clone(),
-                category_id: input.category_id.clone().or_else(|| proposal.category_id.clone()),
+                category_id: input
+                    .category_id
+                    .clone()
+                    .or_else(|| proposal.category_id.clone()),
                 initial_content: Some(body.clone()),
                 tags: Some(proposal.tags.clone()),
                 parent_id: None,
@@ -1578,10 +2061,21 @@ impl ResearchService {
                 });
             }
             (
-                existing.source_type.clone().or_else(|| Some(proposal.source_type.clone())),
-                existing.source_ref.clone().or_else(|| Some(proposal.source_ref.clone())),
-                existing.source_reliability.or(Some(proposal.source_reliability)),
-                existing.valid_until.clone().or_else(|| proposal.valid_until.clone()),
+                existing
+                    .source_type
+                    .clone()
+                    .or_else(|| Some(proposal.source_type.clone())),
+                existing
+                    .source_ref
+                    .clone()
+                    .or_else(|| Some(proposal.source_ref.clone())),
+                existing
+                    .source_reliability
+                    .or(Some(proposal.source_reliability)),
+                existing
+                    .valid_until
+                    .clone()
+                    .or_else(|| proposal.valid_until.clone()),
             )
         } else {
             (
@@ -1626,15 +2120,29 @@ impl ResearchService {
             at: now_iso(),
             detail: format!(
                 "已{}：{}（来源等级 {} · 复核 {}）{}",
-                if outcome == "appended" { "追加" } else { "新建" },
+                if outcome == "appended" {
+                    "追加"
+                } else {
+                    "新建"
+                },
                 note_title,
                 proposal.source_reliability,
                 proposal.valid_until.as_deref().unwrap_or("未设置"),
-                if input.include_speculation { " · 含推测段" } else { "" }
+                if input.include_speculation {
+                    " · 含推测段"
+                } else {
+                    ""
+                }
             ),
         });
         self.save(&session)?;
-        self.emit_progress(&session.id, "write", "已按你的确认写入知识库", 0, session.sources.len());
+        self.emit_progress(
+            &session.id,
+            "write",
+            "已按你的确认写入知识库",
+            0,
+            session.sources.len(),
+        );
         self.policy().audit(
             "research_write",
             false,
@@ -1675,7 +2183,13 @@ impl ResearchService {
             detail: "已中止：已有材料保留为草稿".to_string(),
         });
         self.save(&session)?;
-        self.emit_progress(&session.id, "abort", "已中止：已有材料保留为草稿", 0, session.sources.len());
+        self.emit_progress(
+            &session.id,
+            "abort",
+            "已中止：已有材料保留为草稿",
+            0,
+            session.sources.len(),
+        );
         self.policy()
             .audit("research_abort", false, "ok", 0, Some("aborted"));
         Ok(session)
@@ -1738,7 +2252,11 @@ impl ResearchService {
         if !safe {
             return Err(AppError::invalid_input("研究会话 id 不合法。"));
         }
-        Ok(self.ctx.paths.research_dir().join(format!("{trimmed}.json")))
+        Ok(self
+            .ctx
+            .paths
+            .research_dir()
+            .join(format!("{trimmed}.json")))
     }
 
     fn save(&self, session: &ResearchSession) -> Result<()> {
@@ -1753,8 +2271,12 @@ impl ResearchService {
 
     fn load(&self, session_id: &str) -> Result<ResearchSession> {
         let path = self.session_path(session_id)?;
-        let text = fs::read_to_string(&path)
-            .map_err(|_| AppError::new(ErrorCode::InvalidInput, format!("找不到研究会话 {session_id}。")))?;
+        let text = fs::read_to_string(&path).map_err(|_| {
+            AppError::new(
+                ErrorCode::InvalidInput,
+                format!("找不到研究会话 {session_id}。"),
+            )
+        })?;
         serde_json::from_str(&text)
             .map_err(|error| AppError::internal(format!("研究会话解析失败：{error}")))
     }
@@ -1806,7 +2328,9 @@ pub fn validate_topic(topic: &str) -> Result<String> {
         )));
     }
     if chars > 200 {
-        return Err(AppError::invalid_input("课题过长（上限 200 字），请精简后再试。"));
+        return Err(AppError::invalid_input(
+            "课题过长（上限 200 字），请精简后再试。",
+        ));
     }
     Ok(trimmed.to_string())
 }
@@ -1834,12 +2358,145 @@ fn decompose(topic: &str, max: usize) -> Vec<SubQuestion> {
         .collect()
 }
 
+fn normalize_language(value: Option<&str>) -> String {
+    let trimmed = value.unwrap_or("zh-CN").trim();
+    if trimmed.is_empty() {
+        "zh-CN".to_string()
+    } else {
+        crate::core::text::truncate_chars(trimmed, 32)
+    }
+}
+
+fn normalize_source_types(values: &[String]) -> Vec<String> {
+    const ALLOWED: [&str; 6] = ["local", "official", "docs", "paper", "blog", "community"];
+    let mut result = Vec::new();
+    for value in values {
+        let normalized = value.trim().to_lowercase();
+        if ALLOWED.contains(&normalized.as_str()) && !result.contains(&normalized) {
+            result.push(normalized);
+        }
+    }
+    if result.is_empty() {
+        vec![
+            "local".to_string(),
+            "official".to_string(),
+            "docs".to_string(),
+            "paper".to_string(),
+            "blog".to_string(),
+            "community".to_string(),
+        ]
+    } else {
+        result
+    }
+}
+
+fn source_type_allowed(types: &[String], level: SourceLevel, url: &str) -> bool {
+    if types.is_empty() {
+        return true;
+    }
+    let host = source_grade::host_of(url).unwrap_or_default();
+    let has = |value: &str| types.iter().any(|item| item.eq_ignore_ascii_case(value));
+    match level {
+        SourceLevel::A => {
+            has("official")
+                || has("paper")
+                || (has("docs")
+                    && (host.ends_with(".rs")
+                        || host.contains("docs.")
+                        || host.contains("developer.")))
+        }
+        SourceLevel::B => has("official") || has("docs") || has("blog"),
+        SourceLevel::C => has("blog") || has("docs"),
+        SourceLevel::D | SourceLevel::E => has("community"),
+    }
+}
+
+fn custom_sub_questions(topic: &str, questions: &[String], max: usize) -> Result<Vec<SubQuestion>> {
+    let values: Vec<String> = questions
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .take(max.clamp(1, 5))
+        .collect();
+    if values.is_empty() {
+        return Err(AppError::invalid_input("研究计划至少保留一个子问题。"));
+    }
+    Ok(values
+        .into_iter()
+        .enumerate()
+        .map(|(index, question)| SubQuestion {
+            id: format!("q{}", index + 1),
+            keywords: vec![topic.to_string(), question.clone()],
+            question,
+            local_hits: 0,
+        })
+        .collect())
+}
+
+fn source_key(source: &ResearchSource) -> String {
+    source
+        .url
+        .clone()
+        .or_else(|| source.note_id.clone())
+        .unwrap_or_else(|| source.title.to_lowercase())
+}
+
+fn source_map(sources: &[ResearchSource]) -> HashMap<String, &ResearchSource> {
+    sources
+        .iter()
+        .map(|source| (source_key(source), source))
+        .collect()
+}
+
+fn source_change(source: &ResearchSource) -> ResearchSourceChange {
+    ResearchSourceChange {
+        key: source_key(source),
+        title: source.title.clone(),
+        url: source.url.clone(),
+        note_id: source.note_id.clone(),
+    }
+}
+
+fn claim_map(session: &ResearchSession) -> HashMap<String, Vec<String>> {
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    if let Some(report) = &session.report {
+        for claim in report.conclusions.iter().chain(report.key_facts.iter()) {
+            map.entry(claim.sub_question_id.clone())
+                .or_default()
+                .push(claim.text.clone());
+        }
+    }
+    for values in map.values_mut() {
+        values.sort();
+        values.dedup();
+    }
+    map
+}
+
 /// 「冲突」判定的正/负面词表（D4 规则档；模型/Jev 接入后换成语义比对）。
 const POSITIVE_MARKERS: [&str; 9] = [
-    "支持", "可以", "推荐", "适用", "可行", "优势", "有效", "最佳", "建议使用",
+    "支持",
+    "可以",
+    "推荐",
+    "适用",
+    "可行",
+    "优势",
+    "有效",
+    "最佳",
+    "建议使用",
 ];
 const NEGATIVE_MARKERS: [&str; 11] = [
-    "不支持", "不能", "无法", "禁止", "避免", "不要", "风险", "缺陷", "失败", "限制", "问题",
+    "不支持",
+    "不能",
+    "无法",
+    "禁止",
+    "避免",
+    "不要",
+    "风险",
+    "缺陷",
+    "失败",
+    "限制",
+    "问题",
 ];
 
 /// 表述极性：>0 偏正面，<0 偏负面，0 中立。
@@ -2141,7 +2798,11 @@ pub(crate) fn model_generated_message(composer: &str) -> String {
 }
 
 /// 渲染固定六段的 Markdown（顺序不可变，便于测试与用户形成预期）。
-fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &ResearchReport) -> String {
+fn render_markdown(
+    session: &ResearchSession,
+    plan: &ResearchPlan,
+    report: &ResearchReport,
+) -> String {
     let mut out = String::new();
     out.push_str(&format!("# 调研报告：{}\n\n", plan.topic));
     // 只有真的没接模型时才写「未接入模型」——不能让一份模型写的报告顶着模板的名头
@@ -2167,7 +2828,11 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
         let evidence = &report.evidence;
         out.push_str(&format!(
             "> **证据充分性：{}** · 覆盖 {}/{} 个子问题 · 独立来源 {} 个 · 可用来源 {} 条\n",
-            if evidence.sufficient { "充分" } else { "不足" },
+            if evidence.sufficient {
+                "充分"
+            } else {
+                "不足"
+            },
             evidence.covered_sub_questions,
             evidence.total_sub_questions,
             evidence.independent_sources,
@@ -2248,7 +2913,11 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
                 escape_table(&claim.text),
                 escape_table(&levels),
                 if claim.cross_verified { "是" } else { "否" },
-                if claim.fresh { "时间内" } else { "可能已过时" },
+                if claim.fresh {
+                    "时间内"
+                } else {
+                    "可能已过时"
+                },
                 confidence_label(claim.confidence),
                 claim.confidence
             ));
@@ -2273,7 +2942,10 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
         out.push_str("_没有关联的本地笔记。_\n\n");
     } else {
         for relation in &report.kb_relations {
-            out.push_str(&format!("- [[{}]] —— {}\n", relation.title, relation.relation));
+            out.push_str(&format!(
+                "- [[{}]] —— {}\n",
+                relation.title, relation.relation
+            ));
         }
         out.push('\n');
     }
@@ -2297,7 +2969,12 @@ fn render_markdown(session: &ResearchSession, plan: &ResearchPlan, report: &Rese
             } else {
                 "只有单一来源，未交叉验证".to_string()
             };
-            out.push_str(&format!("- {} {} —— {}\n", claim.text, citations_of(claim), why));
+            out.push_str(&format!(
+                "- {} {} —— {}\n",
+                claim.text,
+                citations_of(claim),
+                why
+            ));
         }
         out.push('\n');
     }
@@ -2339,10 +3016,18 @@ fn citations_of(claim: &ResearchClaim) -> String {
 /// - 外部来源写**裸 URL**：Markdown 预览会自动识别成链接；
 /// - 都没有（理论上不该出现）时退回「本地」。
 fn source_location(source: &ResearchSource) -> String {
-    if let Some(url) = source.url.as_deref().filter(|value| !value.trim().is_empty()) {
+    if let Some(url) = source
+        .url
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         return url.to_string();
     }
-    if let Some(_note_id) = source.note_id.as_deref().filter(|value| !value.trim().is_empty()) {
+    if let Some(_note_id) = source
+        .note_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         return format!("[[{}]]", escape_wikilink_text(&source.title));
     }
     "本地".to_string()
@@ -2350,7 +3035,10 @@ fn source_location(source: &ResearchSource) -> String {
 
 /// 写进 `[[…]]` 的标题要转义 wikilink 的保留字符（与 `core/text.rs` 的解析规则对称）。
 fn escape_wikilink_text(value: &str) -> String {
-    value.replace('|', "\\|").replace('#', "\\#").replace(']', "\\]")
+    value
+        .replace('|', "\\|")
+        .replace('#', "\\#")
+        .replace(']', "\\]")
 }
 
 fn escape_table(value: &str) -> String {
@@ -2358,7 +3046,11 @@ fn escape_table(value: &str) -> String {
 }
 
 fn normalize_title_key(title: &str) -> String {
-    title.split_whitespace().collect::<Vec<_>>().join("").to_lowercase()
+    title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("")
+        .to_lowercase()
 }
 
 /// 落库正文：提案正文 +（可选）附录形式的「模型推测」段。
@@ -2403,7 +3095,10 @@ fn write_body(
 
 /// 新建模式的 diff 预览：全部是新增行。
 fn create_diff(body: &str) -> String {
-    body.lines().map(|line| format!("+{line}")).collect::<Vec<_>>().join("\n")
+    body.lines()
+        .map(|line| format!("+{line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// 追加模式的 diff 预览：最后 3 行上下文（空格前缀）+ 新增行。
@@ -2451,7 +3146,12 @@ pub fn source_ref_of(report: &ResearchReport) -> String {
         .iter()
         .map(|source| match source.url.clone() {
             Some(url) => format!("[{}] {} {}", source.reference, source.title, url),
-            None => format!("[{}] {} ({} 笔记)", source.reference, source.title, source.level.label()),
+            None => format!(
+                "[{}] {} ({} 笔记)",
+                source.reference,
+                source.title,
+                source.level.label()
+            ),
         })
         .collect::<Vec<_>>()
         .join("；")
@@ -2464,8 +3164,14 @@ mod tests {
     #[test]
     fn topic_validation_rejects_broad_or_empty_topics() {
         assert!(validate_topic("").is_err());
-        assert!(validate_topic("AI").is_err(), "少于 4 个字符必须要求补充范围");
-        assert!(validate_topic("知识库").is_err(), "宽泛词表内的课题要追问范围");
+        assert!(
+            validate_topic("AI").is_err(),
+            "少于 4 个字符必须要求补充范围"
+        );
+        assert!(
+            validate_topic("知识库").is_err(),
+            "宽泛词表内的课题要追问范围"
+        );
         assert!(validate_topic(&"字".repeat(201)).is_err());
         assert_eq!(
             validate_topic("  Rust 异步运行时调度  ").expect("正常课题应通过"),
@@ -2506,10 +3212,20 @@ mod tests {
         assert_eq!(polarity("本章介绍调度器的实现细节"), 0);
 
         let positive = source("https://docs.rs/a", "调度方案推荐", "推荐使用工作窃取队列");
-        let negative = source("https://example.dev/b", "调度方案的风险", "存在风险，避免阻塞调用");
+        let negative = source(
+            "https://example.dev/b",
+            "调度方案的风险",
+            "存在风险，避免阻塞调用",
+        );
         let neutral = source("https://example.dev/c", "调度器简介", "本章介绍实现细节");
-        assert!(has_polarity_conflict(&[&positive, &negative]), "正负对立要判为冲突");
-        assert!(!has_polarity_conflict(&[&positive, &neutral]), "只有一面不判冲突");
+        assert!(
+            has_polarity_conflict(&[&positive, &negative]),
+            "正负对立要判为冲突"
+        );
+        assert!(
+            !has_polarity_conflict(&[&positive, &neutral]),
+            "只有一面不判冲突"
+        );
         assert!(!has_polarity_conflict(&[&positive]), "单条来源不可能冲突");
     }
 
@@ -2541,7 +3257,10 @@ mod tests {
         // 模型分与级别分各取一半：级别 5/5 → 1.0，模型 0 分也保底 0.5
         assert!((blended_credibility(Some(0.0), 5) - 0.5).abs() < 1e-6);
         assert!((blended_credibility(Some(1.0), 5) - 1.0).abs() < 1e-6);
-        assert!((blended_credibility(None, 1) - 0.2).abs() < 1e-6, "无模型分时按级别折算");
+        assert!(
+            (blended_credibility(None, 1) - 0.2).abs() < 1e-6,
+            "无模型分时按级别折算"
+        );
         // 越界输入夹取到 0–1
         assert!((blended_credibility(Some(9.0), 5) - 1.0).abs() < 1e-6);
         assert!((blended_credibility(Some(-3.0), 1) - 0.1).abs() < 1e-6);
@@ -2551,7 +3270,10 @@ mod tests {
     fn claim_confidence_rewards_independent_sources() {
         let single = claim_confidence(&[0.9], 1);
         let cross = claim_confidence(&[0.9, 0.9], 2);
-        assert!(cross > single, "交叉验证应当提高置信度：{single} vs {cross}");
+        assert!(
+            cross > single,
+            "交叉验证应当提高置信度：{single} vs {cross}"
+        );
         assert!((single - 0.54).abs() < 1e-6, "单一来源打 6 折");
         assert!((cross - 0.9).abs() < 1e-6);
         assert_eq!(claim_confidence(&[], 0), 0.0, "没有来源就没有置信度");

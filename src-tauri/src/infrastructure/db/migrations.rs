@@ -80,9 +80,19 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "chunk_embeddings",
         sql: include_str!("../../../migrations/013_chunk_embeddings.sql"),
     },
+    Migration {
+        version: 14,
+        name: "ai_organize",
+        sql: include_str!("../../../migrations/014_ai_organize.sql"),
+    },
+    Migration {
+        version: 15,
+        name: "organize_undo_hash",
+        sql: include_str!("../../../migrations/015_organize_undo_hash.sql"),
+    },
 ];
 
-pub const SCHEMA_VERSION: i64 = 13;
+pub const SCHEMA_VERSION: i64 = 15;
 
 /// 创建迁移记录表。
 fn ensure_migration_table(conn: &Connection) -> Result<()> {

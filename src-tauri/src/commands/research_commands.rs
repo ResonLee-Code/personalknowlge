@@ -8,8 +8,9 @@ use tauri::State;
 use crate::application::ai::research::ResearchService;
 use crate::core::error::Result;
 use crate::domain::research::{
-    ResearchOutboundPreview, ResearchRequest, ResearchSession, ResearchSessionSummary,
-    ResearchWriteInput, ResearchWriteResult,
+    ResearchComparison, ResearchOutboundPreview, ResearchPlanEdit, ResearchPlanTemplate,
+    ResearchRequest, ResearchSession, ResearchSessionSummary, ResearchWriteInput,
+    ResearchWriteResult,
 };
 use crate::state::AppState;
 
@@ -27,7 +28,10 @@ pub async fn research_start(
 
 /// 读取一个会话（刷新页面后恢复现场）。
 #[tauri::command]
-pub async fn research_get(state: State<'_, AppState>, session_id: String) -> Result<ResearchSession> {
+pub async fn research_get(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<ResearchSession> {
     let context = state.inner.context()?;
     run(move || ResearchService::new(context).get(&session_id)).await
 }
@@ -40,6 +44,62 @@ pub async fn research_list(
 ) -> Result<Vec<ResearchSessionSummary>> {
     let context = state.inner.context()?;
     run(move || ResearchService::new(context).list(limit)).await
+}
+
+#[tauri::command]
+pub async fn research_update_plan(
+    state: State<'_, AppState>,
+    session_id: String,
+    edit: ResearchPlanEdit,
+) -> Result<ResearchSession> {
+    let context = state.inner.context()?;
+    run(move || ResearchService::new(context).update_plan(&session_id, edit)).await
+}
+
+#[tauri::command]
+pub async fn research_rerun(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<ResearchSession> {
+    let context = state.inner.context()?;
+    run(move || ResearchService::new(context).rerun(&session_id)).await
+}
+
+#[tauri::command]
+pub async fn research_resume(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<ResearchSession> {
+    let context = state.inner.context()?;
+    run(move || ResearchService::new(context).resume_aborted(&session_id)).await
+}
+
+#[tauri::command]
+pub async fn research_compare(
+    state: State<'_, AppState>,
+    previous_id: String,
+    current_id: String,
+) -> Result<ResearchComparison> {
+    let context = state.inner.context()?;
+    run(move || ResearchService::new(context).compare(&previous_id, &current_id)).await
+}
+
+#[tauri::command]
+pub async fn research_template_save(
+    state: State<'_, AppState>,
+    session_id: String,
+    name: String,
+) -> Result<ResearchPlanTemplate> {
+    let context = state.inner.context()?;
+    run(move || ResearchService::new(context).save_plan_template(&session_id, &name)).await
+}
+
+#[tauri::command]
+pub async fn research_template_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<ResearchPlanTemplate>> {
+    let context = state.inner.context()?;
+    run(move || ResearchService::new(context).list_plan_templates()).await
 }
 
 /// ② 收集：本地 FTS5 + 可选外部检索。

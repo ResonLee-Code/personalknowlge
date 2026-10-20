@@ -7,6 +7,7 @@ import { ResearchPage } from '@/features/research/ResearchPage';
 import { aiService } from '@/services/aiService';
 import { subscribe } from '@/services/api';
 import { researchService } from '@/services/researchService';
+import { useUiStore } from '@/stores/uiStore';
 import type { AiPolicy, ResearchSession } from '@/types';
 
 vi.mock('sonner', () => ({
@@ -52,6 +53,8 @@ function planned(): ResearchSession {
     plan: {
       topic: 'Rust 异步运行时调度',
       timeWindowDays: 730,
+      language: 'zh-CN',
+      sourceTypes: ['local', 'official', 'docs'],
       budget: enabledPolicy.budget,
       subQuestions: [
         { id: 'q1', question: '「Rust 异步运行时调度」的核心概念与定义是什么？', keywords: ['Rust'], localHits: 0 },
@@ -182,7 +185,9 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     vi.restoreAllMocks();
     vi.spyOn(aiService, 'policy').mockResolvedValue(enabledPolicy);
     vi.spyOn(researchService, 'list').mockResolvedValue([]);
+    vi.spyOn(researchService, 'listTemplates').mockResolvedValue([]);
     vi.spyOn(researchService, 'get').mockResolvedValue(proposed());
+    useUiStore.setState({ researchSeed: null });
   });
 
   it('AI 关闭时明确提示「不会自行打开或联网」并给出设置入口', async () => {
@@ -195,6 +200,55 @@ describe('ResearchPage（V1.2.1 D2）', () => {
       'href',
       '/settings',
     );
+  });
+
+  it('可在收集前编辑子问题、时间窗、语言与来源类型', async () => {
+    vi.spyOn(researchService, 'start').mockResolvedValue(planned());
+    const updated = planned();
+    updated.plan!.subQuestions = [
+      { id: 'q1', question: '核心机制是什么？', keywords: ['机制'], localHits: 0 },
+    ];
+    updated.plan!.timeWindowDays = 365;
+    updated.plan!.language = 'en-US';
+    updated.plan!.sourceTypes = ['official', 'paper'];
+    const updatePlan = vi.spyOn(researchService, 'updatePlan').mockResolvedValue(updated);
+    renderPage();
+
+    await userEvent.type(screen.getByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+    await userEvent.click(await screen.findByRole('button', { name: '编辑计划' }));
+    await userEvent.clear(screen.getByLabelText('子问题（一行一个）'));
+    await userEvent.type(screen.getByLabelText('子问题（一行一个）'), '核心机制是什么？');
+    await userEvent.clear(screen.getByLabelText('时间窗（天）'));
+    await userEvent.type(screen.getByLabelText('时间窗（天）'), '365');
+    await userEvent.clear(screen.getByLabelText('语言'));
+    await userEvent.type(screen.getByLabelText('语言'), 'en-US');
+    await userEvent.clear(screen.getByLabelText('来源类型'));
+    await userEvent.type(screen.getByLabelText('来源类型'), 'official, paper');
+    await userEvent.click(screen.getByRole('button', { name: '保存计划' }));
+
+    await waitFor(() =>
+      expect(updatePlan).toHaveBeenCalledWith('research_1', {
+        subQuestions: ['核心机制是什么？'],
+        timeWindowDays: 365,
+        language: 'en-US',
+        sourceTypes: ['official', 'paper'],
+      }),
+    );
+  });
+
+  it('从选中文字 / 命令面板 / Ask 带入的 seed 会预填课题与范围', async () => {
+    useUiStore.setState({
+      researchSeed: {
+        topic: 'SQLite FTS5 生产风险',
+        scope: '从笔记发起的调研',
+      },
+    });
+    renderPage();
+
+    expect(screen.getByTestId('research-topic')).toHaveValue('SQLite FTS5 生产风险');
+    expect(screen.getByTestId('research-scope')).toHaveValue('从笔记发起的调研');
+    await waitFor(() => expect(useUiStore.getState().researchSeed).toBeNull());
   });
 
   it('宽泛课题会显示后端给出的补充范围提示', async () => {

@@ -7,9 +7,11 @@ import {
   Italic,
   IndentDecrease,
   IndentIncrease,
+  FlaskConical,
   Link2,
   List,
   ListOrdered,
+  MessageCircleQuestion,
   Minus,
   MoreHorizontal,
   Quote,
@@ -50,12 +52,17 @@ export function MarkdownFormatBar({
   onLinePrefix,
   onHeading,
   onIndent,
+  onAskSelection,
+  onResearchSelection,
 }: {
   disabled?: boolean;
   onWrap: (before: string, after?: string, placeholder?: string) => void;
   onLinePrefix: (prefix: string) => void;
   onHeading: (level: 0 | 1 | 2 | 3) => void;
   onIndent: (delta: 1 | -1) => void;
+  /** 用编辑器当前选区发起 Ask；没有选区时由调用方提示。 */
+  onAskSelection?: () => void;
+  onResearchSelection?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [available, setAvailable] = useState(0);
@@ -124,6 +131,26 @@ export function MarkdownFormatBar({
       data-testid="format-bar"
       className="flex min-w-0 flex-1 items-center justify-end gap-0.5"
     >
+      <button
+        type="button"
+        title="就选中文字提问"
+        aria-label="就选中文字提问"
+        disabled={disabled || !onAskSelection}
+        onClick={onAskSelection}
+        className="flex h-6.5 w-6.5 shrink-0 items-center justify-center rounded text-[var(--ink-subtle)] transition-colors hover:bg-[var(--brand-soft)] hover:text-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <MessageCircleQuestion className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        title="就选中文字调研"
+        aria-label="就选中文字调研"
+        disabled={disabled || !onResearchSelection}
+        onClick={onResearchSelection}
+        className="flex h-6.5 w-6.5 shrink-0 items-center justify-center rounded text-[var(--ink-subtle)] transition-colors hover:bg-[var(--brand-soft)] hover:text-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <FlaskConical className="h-3.5 w-3.5" />
+      </button>
       {commands.slice(0, visibleCount).map(button)}
       {hidden.length > 0 ? (
         <DropdownMenu>

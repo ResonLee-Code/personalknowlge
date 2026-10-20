@@ -4,42 +4,22 @@
 
 use tauri::State;
 
-use crate::application::ai::policy::AiPolicyService;
 use crate::application::ai::diagnose::{self, AiDiagnosis, DiagnoseInputs, HttpLocalModelProbe};
+use crate::application::ai::embeddings::embedding_provider;
+use crate::application::ai::policy::AiPolicyService;
 use crate::application::ai::presets::{LocalModelPreset, LOCAL_MODEL_PRESETS};
-use crate::application::ai::retrieval::{self, Bm25Retriever};
-use crate::application::ai::embeddings::{EmbeddingProvider, RemoteEmbeddingProvider};
 use crate::application::ai::retrieval::VectorRetriever;
-use crate::application::ai::vector_index::VectorIndexService;
-use crate::domain::ai::{VectorIndexPreview, VectorIndexReport, VectorIndexStatus};
+use crate::application::ai::retrieval::{self, Bm25Retriever};
 use crate::application::ai::tools::{AiTools, KbHit};
+use crate::application::ai::vector_index::VectorIndexService;
 use crate::application::clip_service::ClippedPage;
 use crate::core::error::Result;
 use crate::domain::ai::{AiAuditEntry, AiPolicy, UpdateAiPolicyInput};
+use crate::domain::ai::{VectorIndexPreview, VectorIndexReport, VectorIndexStatus};
 use crate::infrastructure::credential_store;
 use crate::state::AppState;
 
 use super::run;
-
-/// 按策略构造向量档的嵌入 Provider。
-///
-/// **任何一项不就绪就返回 `None`**——"不构造 = 不外发"是靠结构保证的，
-/// 不靠调用时记得判断（与在线模型同一套纪律）。
-fn embedding_provider(
-    context: &std::sync::Arc<crate::application::context::WorkspaceContext>,
-) -> Option<std::sync::Arc<dyn EmbeddingProvider>> {
-    let policy = context.settings().ai;
-    if !policy.enabled || !policy.vector_enabled || policy.vector_authorized_at.is_none() {
-        return None;
-    }
-    let embedding_model = policy.remote_embedding_model.clone()?;
-    let service = AiPolicyService::new(std::sync::Arc::clone(context));
-    let (base, _chat_model, key) = service.remote_model()?;
-    Some(std::sync::Arc::new(
-        RemoteEmbeddingProvider::new(&base, &embedding_model, &key)
-            .with_proxy(service.outbound_proxy()),
-    ))
-}
 
 /// 读取当前 AI 策略（默认最保守）。
 #[tauri::command]
@@ -121,7 +101,9 @@ pub async fn ai_retrieval_search(
     run(move || {
         let keyword = keyword.trim().to_string();
         if keyword.is_empty() {
-            return Err(crate::core::error::AppError::invalid_input("检索关键词不能为空。"));
+            return Err(crate::core::error::AppError::invalid_input(
+                "检索关键词不能为空。",
+            ));
         }
         let retriever = Bm25Retriever::new(std::sync::Arc::clone(&context));
         // 向量档：配好并授权了才参与；否则**如实标"不可用"并跳过**，BM25 照常
@@ -146,14 +128,13 @@ pub async fn ai_decision_probe(
     state: State<'_, AppState>,
 ) -> Result<crate::application::ai::decision_probe::DecisionProbeReport> {
     let context = state.inner.context()?;
-    run(move || crate::application::ai::decision_probe::DecisionProbeService::new(context).run()).await
+    run(move || crate::application::ai::decision_probe::DecisionProbeService::new(context).run())
+        .await
 }
 
 /// `ai_vector_index_status`：向量索引状态（建了多少、用的哪个模型、为什么不可用）。
 #[tauri::command]
-pub async fn ai_vector_index_status(
-    state: State<'_, AppState>,
-) -> Result<VectorIndexStatus> {
+pub async fn ai_vector_index_status(state: State<'_, AppState>) -> Result<VectorIndexStatus> {
     let context = state.inner.context()?;
     run(move || {
         let provider_id = embedding_provider(&context).map(|provider| provider.id());
@@ -164,9 +145,7 @@ pub async fn ai_vector_index_status(
 
 /// `ai_vector_index_preview`：构建**之前**的预览（要发多少、发给谁）——只读，不发请求。
 #[tauri::command]
-pub async fn ai_vector_index_preview(
-    state: State<'_, AppState>,
-) -> Result<VectorIndexPreview> {
+pub async fn ai_vector_index_preview(state: State<'_, AppState>) -> Result<VectorIndexPreview> {
     let context = state.inner.context()?;
     run(move || {
         let provider_id = embedding_provider(&context).map(|provider| provider.id());

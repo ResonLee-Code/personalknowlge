@@ -1,5 +1,8 @@
 import type {
   ResearchOutboundPreview,
+  ResearchComparison,
+  ResearchPlanEdit,
+  ResearchPlanTemplate,
   ResearchRequest,
   ResearchSession,
   ResearchSessionSummary,
@@ -24,6 +27,24 @@ export const researchService = {
 
   /** 最近的会话（新的在前） */
   list: (limit = 20) => call<ResearchSessionSummary[]>('research_list', { limit }),
+
+  updatePlan: (sessionId: string, edit: ResearchPlanEdit) =>
+    call<ResearchSession>('research_update_plan', { sessionId, edit }),
+
+  rerun: (sessionId: string) =>
+    call<ResearchSession>('research_rerun', { sessionId }),
+
+  resume: (sessionId: string) =>
+    call<ResearchSession>('research_resume', { sessionId }),
+
+  compare: (previousId: string, currentId: string) =>
+    call<ResearchComparison>('research_compare', { previousId, currentId }),
+
+  saveTemplate: (sessionId: string, name: string) =>
+    call<ResearchPlanTemplate>('research_template_save', { sessionId, name }),
+
+  listTemplates: () =>
+    call<ResearchPlanTemplate[]>('research_template_list'),
 
   /** ② 收集：本地 FTS5（外部检索属 D3，`confirmed` 只影响联网路径） */
   collect: (sessionId: string, confirmed = false) =>

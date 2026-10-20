@@ -21,6 +21,7 @@ pub const TEMPLATES_DIR: &str = "templates";
 pub const HISTORY_DIR: &str = "history";
 /// 研究会话目录：`.knowledge/research/<session_id>.json`（V1.2.1 阶段 D1）
 pub const RESEARCH_DIR: &str = "research";
+pub const RESEARCH_TEMPLATES_DIR: &str = "research-templates";
 pub const DATABASE_FILE: &str = "database.sqlite";
 pub const CONFIG_FILE: &str = "config.json";
 pub const TEMP_PREFIX: &str = ".pkos-tmp-";
@@ -79,6 +80,11 @@ impl WorkspacePaths {
         self.knowledge_dir().join(RESEARCH_DIR)
     }
 
+    /// 研究计划模板：`.knowledge/research-templates/`。
+    pub fn research_templates_dir(&self) -> PathBuf {
+        self.knowledge_dir().join(RESEARCH_TEMPLATES_DIR)
+    }
+
     pub fn note_history_dir(&self, note_id: &str) -> PathBuf {
         self.history_dir().join(note_id)
     }
@@ -121,11 +127,17 @@ impl WorkspacePaths {
     /// 校验根目录：必须是绝对路径且可写。
     pub fn validate_root(root: &Path) -> Result<PathBuf> {
         if !root.is_absolute() {
-            return Err(AppError::new(ErrorCode::PathInvalid, "工作区路径必须是绝对路径。"));
+            return Err(AppError::new(
+                ErrorCode::PathInvalid,
+                "工作区路径必须是绝对路径。",
+            ));
         }
         if root.exists() {
             if !root.is_dir() {
-                return Err(AppError::new(ErrorCode::PathInvalid, "工作区路径已存在且不是目录。"));
+                return Err(AppError::new(
+                    ErrorCode::PathInvalid,
+                    "工作区路径已存在且不是目录。",
+                ));
             }
             return Ok(std::fs::canonicalize(root)?);
         }
@@ -143,7 +155,10 @@ impl WorkspacePaths {
             }
             parent = candidate.parent();
         }
-        Err(AppError::new(ErrorCode::PathInvalid, "无法解析工作区路径。"))
+        Err(AppError::new(
+            ErrorCode::PathInvalid,
+            "无法解析工作区路径。",
+        ))
     }
 
     /// 把相对路径解析为工作区内的绝对路径，并阻止路径穿越。
@@ -153,7 +168,10 @@ impl WorkspacePaths {
         }
         let candidate = Path::new(relative);
         if candidate.is_absolute() {
-            return Err(AppError::new(ErrorCode::PathInvalid, "不允许使用绝对路径。"));
+            return Err(AppError::new(
+                ErrorCode::PathInvalid,
+                "不允许使用绝对路径。",
+            ));
         }
         let mut clean = PathBuf::new();
         for component in candidate.components() {
@@ -170,14 +188,21 @@ impl WorkspacePaths {
         }
         let joined = self.root.join(clean);
         if !joined.starts_with(&self.root) {
-            return Err(AppError::new(ErrorCode::PathInvalid, "路径越出工作区范围。"));
+            return Err(AppError::new(
+                ErrorCode::PathInvalid,
+                "路径越出工作区范围。",
+            ));
         }
         // 已存在的路径再做一次真实路径校验，防止符号链接逃逸
         if joined.exists() {
-            let canonical_root = std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
+            let canonical_root =
+                std::fs::canonicalize(&self.root).unwrap_or_else(|_| self.root.clone());
             let canonical = std::fs::canonicalize(&joined)?;
             if !canonical.starts_with(&canonical_root) {
-                return Err(AppError::new(ErrorCode::PathInvalid, "路径越出工作区范围。"));
+                return Err(AppError::new(
+                    ErrorCode::PathInvalid,
+                    "路径越出工作区范围。",
+                ));
             }
         }
         Ok(joined)
@@ -185,9 +210,9 @@ impl WorkspacePaths {
 
     /// 绝对路径 -> 工作区相对路径（统一使用 `/` 分隔）。
     pub fn to_relative(&self, absolute: &Path) -> Result<String> {
-        let relative = absolute.strip_prefix(&self.root).map_err(|_| {
-            AppError::new(ErrorCode::PathInvalid, "路径不属于当前工作区。")
-        })?;
+        let relative = absolute
+            .strip_prefix(&self.root)
+            .map_err(|_| AppError::new(ErrorCode::PathInvalid, "路径不属于当前工作区。"))?;
         Ok(normalize_relative(&relative.to_string_lossy()))
     }
 
@@ -226,7 +251,10 @@ impl WorkspacePaths {
 
 /// 统一相对路径分隔符为 `/`。
 pub fn normalize_relative(value: &str) -> String {
-    value.replace('\\', "/").trim_start_matches("./").to_string()
+    value
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .to_string()
 }
 
 /// 计算 `target` 相对目录 `from_dir` 的相对路径（两侧都是工作区相对路径）。
@@ -298,9 +326,17 @@ pub fn is_temporary_file_name(name: &str) -> bool {
         return true;
     }
     let lower = name.to_ascii_lowercase();
-    [".tmp", ".temp", ".swp", ".swx", ".part", ".crdownload", ".bak"]
-        .iter()
-        .any(|suffix| lower.ends_with(suffix))
+    [
+        ".tmp",
+        ".temp",
+        ".swp",
+        ".swx",
+        ".part",
+        ".crdownload",
+        ".bak",
+    ]
+    .iter()
+    .any(|suffix| lower.ends_with(suffix))
 }
 
 /// 目录名 -> 分类名（去掉 `00_` 之类的排序前缀）。
@@ -364,14 +400,20 @@ mod tests {
 
     #[test]
     fn ignored_paths_cover_internal_directories() {
-        assert!(WorkspacePaths::is_ignored_relative(".knowledge/database.sqlite"));
+        assert!(WorkspacePaths::is_ignored_relative(
+            ".knowledge/database.sqlite"
+        ));
         assert!(WorkspacePaths::is_ignored_relative(".trash/00_Inbox/a.md"));
         assert!(WorkspacePaths::is_ignored_relative("00_Inbox/.hidden.md"));
         assert!(WorkspacePaths::is_ignored_relative("00_Inbox/a.md.tmp"));
-        assert!(WorkspacePaths::is_ignored_relative("00_Inbox/.pkos-tmp-1.tmp"));
+        assert!(WorkspacePaths::is_ignored_relative(
+            "00_Inbox/.pkos-tmp-1.tmp"
+        ));
         assert!(WorkspacePaths::is_ignored_relative("00_Inbox/~a.md"));
         assert!(!WorkspacePaths::is_ignored_relative("00_Inbox/a.md"));
-        assert!(!WorkspacePaths::is_ignored_relative("01_技术/数据库/索引.md"));
+        assert!(!WorkspacePaths::is_ignored_relative(
+            "01_技术/数据库/索引.md"
+        ));
     }
 
     #[test]
@@ -412,7 +454,10 @@ mod tests {
         assert_eq!(dir_name_to_category_name("99_Archive"), "Archive");
         assert_eq!(dir_name_to_category_name("技术"), "技术");
         assert_eq!(category_name_to_dir_name("技术", 1), "01_技术");
-        assert_eq!(category_name_to_dir_name("数据库 设计", 12), "12_数据库-设计");
+        assert_eq!(
+            category_name_to_dir_name("数据库 设计", 12),
+            "12_数据库-设计"
+        );
     }
 
     #[test]
@@ -439,7 +484,10 @@ mod tests {
             "../attachments/2026-10/shot.png"
         );
         // 同一目录下只保留文件名
-        assert_eq!(relative_from("attachments/2026-10", "attachments/2026-10/a.png"), "a.png");
+        assert_eq!(
+            relative_from("attachments/2026-10", "attachments/2026-10/a.png"),
+            "a.png"
+        );
         assert_eq!(relative_from("", "attachments/a.png"), "attachments/a.png");
     }
 

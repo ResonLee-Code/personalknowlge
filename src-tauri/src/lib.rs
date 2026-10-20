@@ -23,6 +23,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             use tauri::Manager;
             let events = TauriEventSink::new(app.handle().clone());
@@ -41,6 +42,10 @@ pub fn run() {
             commands::app_commands::app_ready,
             commands::app_commands::app_log_path,
             commands::app_commands::app_log,
+            commands::app_commands::app_diagnostic_export,
+            commands::update_commands::app_update_check,
+            commands::update_commands::app_update_install,
+            commands::update_commands::app_restart,
             commands::app_commands::workspace_root_path,
             commands::workspace_commands::workspace_create,
             commands::workspace_commands::workspace_open,
@@ -96,9 +101,33 @@ pub fn run() {
             commands::ai_commands::ai_kb_search,
             commands::ai_commands::ai_web_fetch,
             commands::ai_commands::ai_web_search,
+            commands::ask_commands::ask_question,
+            commands::ask_commands::ask_answer_note_preview,
+            commands::ask_commands::ask_answer_save,
+            commands::organize_commands::organize_generate,
+            commands::organize_commands::organize_suggestions,
+            commands::organize_commands::organize_accept,
+            commands::organize_commands::organize_accept_many,
+            commands::organize_commands::organize_reject,
+            commands::organize_commands::organize_undo,
+            commands::organize_commands::organize_job_create,
+            commands::organize_commands::organize_job_get,
+            commands::organize_commands::organize_job_list,
+            commands::organize_commands::organize_job_run,
+            commands::organize_commands::organize_job_pause,
+            commands::organize_commands::organize_job_resume,
+            commands::organize_commands::organize_job_cancel,
+            commands::organize_commands::organize_job_retry,
+            commands::organize_commands::organize_recover,
             commands::research_commands::research_start,
             commands::research_commands::research_get,
             commands::research_commands::research_list,
+            commands::research_commands::research_update_plan,
+            commands::research_commands::research_rerun,
+            commands::research_commands::research_resume,
+            commands::research_commands::research_compare,
+            commands::research_commands::research_template_save,
+            commands::research_commands::research_template_list,
             commands::research_commands::research_collect,
             commands::research_commands::research_verify,
             commands::research_commands::research_compose,

@@ -30,6 +30,18 @@ export type NoteActionKind =
   | 'restore'
   | 'purge';
 
+/** 打开 Ask 面板时可带的一小段起始上下文（不持久化）。 */
+export interface AskSeed {
+  noteId?: string | null;
+  question?: string;
+  selection?: string | null;
+}
+
+export interface ResearchSeed {
+  topic: string;
+  scope?: string | null;
+}
+
 /** 与工作区设置对应的界面偏好（用于从磁盘恢复上次的布局）。 */
 export interface UiPreferences {
   sidebarWidth?: number;
@@ -80,6 +92,10 @@ interface UiState {
   commandPaletteOpen: boolean;
   newNoteDialogOpen: boolean;
   quickSwitcherOpen: boolean;
+  /** 「问知识库」右侧面板（V2.0 Ask） */
+  askPanelOpen: boolean;
+  askSeed: AskSeed | null;
+  researchSeed: ResearchSeed | null;
   setSidebarWidth: (width: number) => void;
   setListWidth: (width: number) => void;
   setOutlinePlacement: (placement: OutlinePlacement) => void;
@@ -100,6 +116,10 @@ interface UiState {
   setCommandPaletteOpen: (open: boolean) => void;
   setNewNoteDialogOpen: (open: boolean) => void;
   setQuickSwitcherOpen: (open: boolean) => void;
+  setAskPanelOpen: (open: boolean) => void;
+  openAskPanel: (seed?: AskSeed | null) => void;
+  openResearchDraft: (seed: ResearchSeed) => void;
+  clearResearchSeed: () => void;
   /**
    * N5：从**搜索结果**跳进编辑器时要高亮的精确区间（码点下标）。
    * 编辑器消费一次后清空；只活在内存里，不落库。
@@ -130,6 +150,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   commandPaletteOpen: false,
   newNoteDialogOpen: false,
   quickSwitcherOpen: false,
+  askPanelOpen: false,
+  askSeed: null,
+  researchSeed: null,
   setSidebarWidth: (sidebarWidth) => {
     // 取整：Retina 屏上 clientX 可能是小数，后端按整数像素存储
     const clamped = Math.round(Math.min(420, Math.max(180, sidebarWidth)));
@@ -169,6 +192,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
   setNewNoteDialogOpen: (newNoteDialogOpen) => set({ newNoteDialogOpen }),
   setQuickSwitcherOpen: (quickSwitcherOpen) => set({ quickSwitcherOpen }),
+  setAskPanelOpen: (askPanelOpen) =>
+    set({ askPanelOpen, ...(askPanelOpen ? {} : { askSeed: null }) }),
+  openAskPanel: (askSeed = null) => set({ askPanelOpen: true, askSeed }),
+  openResearchDraft: (researchSeed) => set({ researchSeed }),
+  clearResearchSeed: () => set({ researchSeed: null }),
   pendingHighlight: null,
   setPendingHighlight: (pendingHighlight) => set({ pendingHighlight }),
   applyThemeToDocument: () => {

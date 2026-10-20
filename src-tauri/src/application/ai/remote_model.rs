@@ -369,6 +369,7 @@ mod tests {
     fn request(allow_remote: bool) -> GenerationRequest {
         GenerationRequest {
             prompt: "写推测段".to_string(),
+            instructions: None,
             evidence: vec![RetrievedChunk {
                 note_id: "note_a".to_string(),
                 chunk_index: 0,

@@ -5,6 +5,7 @@ import {
   FileText,
   FlaskConical,
   Loader2,
+  RotateCcw,
   Sparkles,
   TriangleAlert,
 } from 'lucide-react';
@@ -23,8 +24,11 @@ import { cn } from '@/lib/utils';
 import { aiService } from '@/services/aiService';
 import { subscribe } from '@/services/api';
 import { researchService } from '@/services/researchService';
+import { useUiStore } from '@/stores/uiStore';
 import type {
   AiPolicy,
+  ResearchComparison,
+  ResearchPlanTemplate,
   ResearchSession,
   ResearchProgress,
   ResearchComposeDelta,
@@ -93,11 +97,24 @@ function averageConfidence(report: ResearchReport): { label: string; value: numb
  */
 export function ResearchPage() {
   const navigate = useNavigate();
+  const researchSeed = useUiStore((state) => state.researchSeed);
+  const clearResearchSeed = useUiStore((state) => state.clearResearchSeed);
   const [policy, setPolicy] = useState<AiPolicy | null>(null);
-  const [topic, setTopic] = useState('');
-  const [scope, setScope] = useState('');
+  const [topic, setTopic] = useState(researchSeed?.topic ?? '');
+  const [scope, setScope] = useState(researchSeed?.scope ?? '');
   const [session, setSession] = useState<ResearchSession | null>(null);
   const [sessions, setSessions] = useState<ResearchSessionSummary[]>([]);
+  const [templates, setTemplates] = useState<ResearchPlanTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [templateName, setTemplateName] = useState('');
+  const [comparison, setComparison] = useState<ResearchComparison | null>(null);
+  const [editingPlan, setEditingPlan] = useState(false);
+  const [planQuestions, setPlanQuestions] = useState<string[]>([]);
+  const [planWindow, setPlanWindow] = useState(730);
+  const [planLanguage, setPlanLanguage] = useState('zh-CN');
+  const [planSourceTypes, setPlanSourceTypes] = useState(
+    'local, official, docs, paper, blog, community',
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [writeOpen, setWriteOpen] = useState(false);
@@ -144,10 +161,22 @@ export function ResearchPage() {
       .catch(() => {
         if (!cancelled) setSessions([]);
       });
+    researchService
+      .listTemplates()
+      .then((items) => {
+        if (!cancelled) setTemplates(items);
+      })
+      .catch(() => {
+        if (!cancelled) setTemplates([]);
+      });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (researchSeed) clearResearchSeed();
+  }, [researchSeed, clearResearchSeed]);
 
   // 订阅研究进度事件：长步骤（联网抓取可达数分钟）时让用户看得见「进行到哪了」。
   // 事件通道不可用（浏览器预览 / 测试环境）时静默降级，不影响主流程。
@@ -232,10 +261,98 @@ export function ResearchPage() {
       const created = await researchService.start({
         topic,
         scope: scope.trim() ? scope.trim() : null,
+        planTemplateId: selectedTemplateId || null,
         writeBack: true,
       });
       setSession(created);
       await refreshHistory();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openPlanEditor = () => {
+    if (!session?.plan) return;
+    setPlanQuestions(session.plan.subQuestions.map((item) => item.question));
+    setPlanWindow(session.plan.timeWindowDays);
+    setPlanLanguage(session.plan.language ?? 'zh-CN');
+    setPlanSourceTypes(
+      (
+        session.plan.sourceTypes ?? [
+          'local',
+          'official',
+          'docs',
+          'paper',
+          'blog',
+          'community',
+        ]
+      ).join(', '),
+    );
+    setEditingPlan(true);
+  };
+
+  const savePlan = async () => {
+    if (!session) return;
+    setBusy('research-plan-save');
+    setError(null);
+    try {
+      const updated = await researchService.updatePlan(session.id, {
+        subQuestions: planQuestions,
+        timeWindowDays: planWindow,
+        language: planLanguage,
+        sourceTypes: planSourceTypes
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      });
+      setSession(updated);
+      setEditingPlan(false);
+      await refreshHistory();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveTemplate = async () => {
+    if (!session || !templateName.trim()) return;
+    setBusy('research-template-save');
+    setError(null);
+    try {
+      const template = await researchService.saveTemplate(session.id, templateName);
+      setTemplates((current) => [
+        template,
+        ...current.filter((item) => item.id !== template.id),
+      ]);
+      setTemplateName('');
+      toast.success('研究计划已保存为模板');
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const rerun = async () => {
+    if (!session) return;
+    await run('research-rerun', () => researchService.rerun(session.id));
+    setComparison(null);
+  };
+
+  const resume = async () => {
+    if (!session) return;
+    await run('research-resume', () => researchService.resume(session.id));
+  };
+
+  const compareWithPrevious = async () => {
+    if (!session?.rerunOf) return;
+    setBusy('research-compare');
+    setError(null);
+    try {
+      setComparison(await researchService.compare(session.rerunOf, session.id));
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -434,6 +551,22 @@ export function ResearchPage() {
                   onChange={(event) => setScope(event.target.value)}
                 />
               </div>
+              <div>
+                <Label htmlFor="research-template-select">计划模板（可选）</Label>
+                <select
+                  id="research-template-select"
+                  value={selectedTemplateId}
+                  onChange={(event) => setSelectedTemplateId(event.target.value)}
+                  className="h-9 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-sm"
+                >
+                  <option value="">不使用模板</option>
+                  {templates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <Button
                 data-testid="research-start"
                 disabled={!topic.trim() || busy !== null}
@@ -515,6 +648,36 @@ export function ResearchPage() {
                     </span>
                   );
                 })}
+                {session.status !== 'planned' && session.status !== 'aborted' ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy !== null}
+                    onClick={() => void rerun()}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    同课题重跑
+                  </Button>
+                ) : null}
+                {session.rerunOf ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy !== null}
+                    onClick={() => void compareWithPrevious()}
+                  >
+                    与上次对比
+                  </Button>
+                ) : null}
+                {session.status === 'aborted' ? (
+                  <Button
+                    size="sm"
+                    disabled={busy !== null}
+                    onClick={() => void resume()}
+                  >
+                    恢复并继续
+                  </Button>
+                ) : null}
                 {nextAction ? (
                   <Button
                     className="ml-auto"
@@ -600,24 +763,83 @@ export function ResearchPage() {
                 >
                   <div className="flex items-center justify-between">
                     <h2 className="text-sm font-medium text-[var(--ink)]">研究计划</h2>
-                    <span className="text-xs text-[var(--ink-subtle)]">
-                      时间窗 {session.plan.timeWindowDays} 天 ·{' '}
-                      {formatDateTime(session.createdAt)}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-[var(--ink-subtle)]">
+                        时间窗 {session.plan.timeWindowDays} 天 ·{' '}
+                        {session.plan.language ?? 'zh-CN'} ·{' '}
+                        {formatDateTime(session.createdAt)}
+                      </span>
+                      {session.status === 'planned' && !editingPlan ? (
+                        <Button variant="outline" size="sm" onClick={openPlanEditor}>
+                          编辑计划
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
-                  <ol className="mt-3 grid gap-1.5 text-sm text-[var(--ink)]">
-                    {session.plan.subQuestions.map((question) => (
-                      <li key={question.id} className="flex items-start gap-2">
-                        <span className="mt-0.5 text-xs text-[var(--ink-subtle)]">
-                          {question.id}
-                        </span>
-                        <span className="flex-1">{question.question}</span>
-                        <span className="text-xs text-[var(--ink-subtle)]">
-                          {question.localHits} 条本地材料
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
+                  {editingPlan ? (
+                    <div className="mt-3 space-y-3 rounded-lg bg-[var(--surface-muted)] p-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="research-plan-questions">子问题（一行一个）</Label>
+                        <textarea
+                          id="research-plan-questions"
+                          value={planQuestions.join('\n')}
+                          onChange={(event) => setPlanQuestions(event.target.value.split('\n'))}
+                          className="min-h-32 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] p-2 text-sm"
+                        />
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="research-plan-window">时间窗（天）</Label>
+                          <Input
+                            id="research-plan-window"
+                            type="number"
+                            min={7}
+                            max={3650}
+                            value={planWindow}
+                            onChange={(event) => setPlanWindow(Number(event.target.value))}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="research-plan-language">语言</Label>
+                          <Input
+                            id="research-plan-language"
+                            value={planLanguage}
+                            onChange={(event) => setPlanLanguage(event.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="research-plan-types">来源类型</Label>
+                          <Input
+                            id="research-plan-types"
+                            value={planSourceTypes}
+                            onChange={(event) => setPlanSourceTypes(event.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setEditingPlan(false)}>
+                          取消
+                        </Button>
+                        <Button size="sm" disabled={busy !== null} onClick={() => void savePlan()}>
+                          保存计划
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <ol className="mt-3 grid gap-1.5 text-sm text-[var(--ink)]">
+                      {session.plan.subQuestions.map((question) => (
+                        <li key={question.id} className="flex items-start gap-2">
+                          <span className="mt-0.5 text-xs text-[var(--ink-subtle)]">
+                            {question.id}
+                          </span>
+                          <span className="flex-1">{question.question}</span>
+                          <span className="text-xs text-[var(--ink-subtle)]">
+                            {question.localHits} 条本地材料
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                   <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-[var(--ink-muted)]">
                     {session.plan.notes.map((note) => (
                       <li key={note}>{note}</li>
@@ -629,6 +851,64 @@ export function ResearchPage() {
                       {session.plan.localBaseline.map((item) => `《${item.title}》`).join('、')}
                     </p>
                   ) : null}
+                  <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-[var(--border-subtle)] pt-3">
+                    <div className="min-w-48 flex-1 space-y-1">
+                      <Label htmlFor="research-template-name">保存为计划模板</Label>
+                      <Input
+                        id="research-template-name"
+                        placeholder="例如：技术选型调研"
+                        value={templateName}
+                        onChange={(event) => setTemplateName(event.target.value)}
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!templateName.trim() || busy !== null}
+                      onClick={() => void saveTemplate()}
+                    >
+                      保存模板
+                    </Button>
+                  </div>
+                </section>
+              ) : null}
+
+              {comparison ? (
+                <section className="rounded-xl border border-[var(--border-subtle)] p-4">
+                  <h2 className="text-sm font-medium text-[var(--ink)]">与上次调研的差异</h2>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-lg bg-emerald-500/10 p-3">
+                      <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                        新增来源 {comparison.addedSources.length}
+                      </p>
+                      {comparison.addedSources.map((source) => (
+                        <p key={source.key} className="mt-1 text-xs text-[var(--ink-muted)]">
+                          {source.title}
+                        </p>
+                      ))}
+                    </div>
+                    <div className="rounded-lg bg-rose-500/10 p-3">
+                      <p className="text-xs text-rose-700 dark:text-rose-300">
+                        消失来源 {comparison.removedSources.length}
+                      </p>
+                      {comparison.removedSources.map((source) => (
+                        <p key={source.key} className="mt-1 text-xs text-[var(--ink-muted)]">
+                          {source.title}
+                        </p>
+                      ))}
+                    </div>
+                    <div className="rounded-lg bg-amber-500/10 p-3">
+                      <p className="text-xs text-amber-700 dark:text-amber-300">
+                        结论变化 {comparison.changedClaims.length}
+                      </p>
+                      {comparison.changedClaims.map((claim) => (
+                        <p key={claim.subQuestionId} className="mt-1 text-xs text-[var(--ink-muted)]">
+                          {claim.subQuestionId} · 上次 {claim.previous.length} 条 → 本次{' '}
+                          {claim.current.length} 条
+                        </p>
+                      ))}
+                    </div>
+                  </div>
                 </section>
               ) : null}
 
@@ -667,6 +947,9 @@ export function ResearchPage() {
                           )}
                           <span className="block text-xs text-[var(--ink-subtle)]">
                             {source.gradeReason}
+                          {source.applicableVersion
+                            ? ` · 适用版本 ${source.applicableVersion}`
+                            : ''}
                             {source.stale ? ' · 可能已过时' : ''}
                             {typeof source.credibility === 'number'
                               ? ` · 可信度 ${Math.round(source.credibility * 100)}%`

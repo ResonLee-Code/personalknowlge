@@ -3,6 +3,7 @@
 //! 约定：仓储方法接收 `&Connection`，由应用服务统一获取连接并在必要时开启事务。
 //! 这样既保证「UI 不直接访问数据库」，也避免同一连接被重复加锁。
 
+pub mod ai_organize_repository;
 pub mod category_repository;
 pub mod chunk_repository;
 pub mod link_repository;
@@ -12,6 +13,7 @@ pub mod settings_repository;
 pub mod tag_repository;
 pub mod workspace_repository;
 
+pub use ai_organize_repository::{AiOrganizeRepository, SqliteAiOrganizeRepository, SuggestionRow};
 pub use category_repository::{CategoryRepository, SqliteCategoryRepository};
 pub use chunk_repository::{ChunkRepository, SqliteChunkRepository, StoredChunk};
 pub use link_repository::{

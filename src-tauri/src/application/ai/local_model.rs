@@ -244,13 +244,15 @@ impl DecisionModel for OllamaModel {
 /// 本地与在线模型**共用同一份提示词**：否则「换模型后报告口径变了」会变成
 /// 一件说不清的事（同一份材料，两个模型两套规则）。
 pub(crate) fn build_generation_prompt(request: &GenerationRequest) -> String {
-    let mut prompt = String::from(
+    let mut prompt = request.instructions.clone().unwrap_or_else(|| {
         "你在一个「本地优先」的个人知识库里撰写调研材料。要求：\n\
          1) 只根据给定材料说话，不要编造事实或来源；\n\
-         2) 每条事实后面用 [n] 标注它来自第几条材料；\n\
+         2) 每条事实后面用 [n] 标注它来自第几条材料，n 必须是材料列表里实际出现的编号；\n\
          3) 材料之间矛盾时并列呈现、不要替读者选边；\n\
-         4) 用简体中文、Markdown，控制在 400 字以内。\n\n",
-    );
+         4) 用简体中文、Markdown，控制在 400 字以内。\n"
+            .to_string()
+    });
+    prompt.push_str("\n\n");
     prompt.push_str(&format!("任务：{}\n\n", request.prompt));
     if request.evidence.is_empty() {
         prompt.push_str("材料：（无）\n");
@@ -477,6 +479,7 @@ mod tests {
     fn generation_prompt_lists_evidence_with_reference_numbers() {
         let request = GenerationRequest {
             prompt: "写推测段".to_string(),
+            instructions: None,
             evidence: vec![crate::application::ai::traits::RetrievedChunk {
                 note_id: "note_a".to_string(),
                 chunk_index: 0,

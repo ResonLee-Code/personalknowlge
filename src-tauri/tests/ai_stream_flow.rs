@@ -211,6 +211,7 @@ fn sse_lines() -> Vec<String> {
 fn request(prompt: &str, allow_remote: bool) -> GenerationRequest {
     GenerationRequest {
         prompt: prompt.to_string(),
+        instructions: None,
         evidence: Vec::new(),
         max_tokens: Some(64),
         allow_remote,

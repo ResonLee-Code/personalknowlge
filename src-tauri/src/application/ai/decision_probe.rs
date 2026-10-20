@@ -570,7 +570,7 @@ pub const UNDERDETERMINED_ITEMS: &[ProbeItemSpec] = &[
     ProbeItemSpec { name: "hidden_pyobjc_no", question: "材料之外：这台评测机上没有装 pyobjc（Quartz 不可用）—— 对吗？", expected_yes: Some(true) },
     ProbeItemSpec { name: "hidden_version_yes", question: "材料之外：仓库 package.json 里的 version 是 1.3.7 —— 对吗？", expected_yes: Some(true) },
     ProbeItemSpec { name: "hidden_version_no", question: "材料之外：仓库 package.json 里的 version 是 0.9.0 —— 对吗？", expected_yes: Some(false) },
-    ProbeItemSpec { name: "hidden_schema_yes", question: "材料之外：数据库迁移到的最新 schema 版本是 13 —— 对吗？", expected_yes: Some(true) },
+    ProbeItemSpec { name: "hidden_schema_yes", question: "材料之外：数据库迁移到的最新 schema 版本是 15 —— 对吗？", expected_yes: Some(true) },
     ProbeItemSpec { name: "hidden_schema_no", question: "材料之外：数据库迁移到的最新 schema 版本是 8 —— 对吗？", expected_yes: Some(false) },
     ProbeItemSpec { name: "hidden_battery_yes", question: "材料之外：这个决策探针的可判分题库有 100 道题 —— 对吗？", expected_yes: Some(true) },
     ProbeItemSpec { name: "hidden_battery_no", question: "材料之外：这个决策探针的可判分题库有 30 道题 —— 对吗？", expected_yes: Some(false) },
@@ -878,12 +878,12 @@ mod tests {
             })
             .max()
             .unwrap_or(0);
-        assert_eq!(max, 13, "迁移目录的最大编号变了");
+        assert_eq!(max, 15, "迁移目录的最大编号变了");
         let db = std::fs::read_to_string(
             root.join("src-tauri/src/infrastructure/db/migrations.rs"),
         )
         .expect("读 migrations.rs");
-        assert!(db.contains("SCHEMA_VERSION: i64 = 13"), "SCHEMA_VERSION 变了");
+        assert!(db.contains("SCHEMA_VERSION: i64 = 15"), "SCHEMA_VERSION 变了");
         let policy =
             std::fs::read_to_string(root.join("src-tauri/src/application/ai/policy.rs")).expect("读 policy.rs");
         assert!(policy.contains("api.perplexity.ai"), "决策档默认端点变了");

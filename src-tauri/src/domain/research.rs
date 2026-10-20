@@ -151,6 +151,18 @@ pub struct ResearchRequest {
     pub scope: Option<String>,
     /// 时间窗（天）；缺省用 730（约两年）
     pub time_window_days: Option<u32>,
+    /// 输出与来源语言；默认 `zh-CN`。
+    #[serde(default)]
+    pub language: Option<String>,
+    /// 期望的来源类型：official / docs / paper / blog / community / local 等。
+    #[serde(default)]
+    pub source_types: Vec<String>,
+    /// 本次研究是哪个历史会话的重跑。
+    #[serde(default)]
+    pub rerun_of: Option<String>,
+    /// 新建计划时套用的模板 id。
+    #[serde(default)]
+    pub plan_template_id: Option<String>,
     /// 用户是否表达了「结果写入知识库」的意图（**必须显式**，AI 不自行决定）
     pub write_back: bool,
     /// 写回目标分类；为空表示 Inbox（未分类）
@@ -194,10 +206,72 @@ pub struct ResearchPlan {
     pub local_baseline: Vec<KbBaseline>,
     /// 时间窗（天）
     pub time_window_days: u32,
+    #[serde(default)]
+    pub language: String,
+    #[serde(default)]
+    pub source_types: Vec<String>,
     /// 本次预算快照（取自 AI 策略）
     pub budget: ResearchBudget,
     /// 计划说明（含降级路径与局限，如实告知用户）
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ResearchPlanEdit {
+    /// 只传子问题正文；空数组表示不改，最多受预算限制。
+    pub sub_questions: Option<Vec<String>>,
+    pub time_window_days: Option<u32>,
+    pub language: Option<String>,
+    pub source_types: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchPlanTemplate {
+    pub id: String,
+    pub name: String,
+    /// 保存模板时的原课题，用于复用到新课题时替换文本。
+    pub topic: String,
+    pub scope: Option<String>,
+    pub time_window_days: u32,
+    pub language: String,
+    pub source_types: Vec<String>,
+    pub sub_questions: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 一次重跑对比。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchSourceChange {
+    pub key: String,
+    pub title: String,
+    pub url: Option<String>,
+    pub note_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchClaimChange {
+    pub sub_question_id: String,
+    pub previous: Vec<String>,
+    pub current: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchComparison {
+    pub previous_session_id: String,
+    pub current_session_id: String,
+    pub topic: String,
+    pub added_sources: Vec<ResearchSourceChange>,
+    pub removed_sources: Vec<ResearchSourceChange>,
+    pub unchanged_sources: Vec<ResearchSourceChange>,
+    pub changed_claims: Vec<ResearchClaimChange>,
+    pub previous_evidence_sufficient: Option<bool>,
+    pub current_evidence_sufficient: Option<bool>,
 }
 
 /// 一条来源（本地笔记或外部网页）。
@@ -522,6 +596,9 @@ pub struct ResearchStepLog {
 pub struct ResearchSession {
     pub id: String,
     pub request: ResearchRequest,
+    /// 本会话重跑自哪个历史会话。
+    #[serde(default)]
+    pub rerun_of: Option<String>,
     pub status: ResearchStatus,
     pub created_at: String,
     pub updated_at: String,
@@ -555,7 +632,10 @@ impl ResearchSession {
         format!(
             "{} · {} 个子问题 · {} 条来源",
             self.request.topic,
-            self.plan.as_ref().map(|plan| plan.sub_questions.len()).unwrap_or(0),
+            self.plan
+                .as_ref()
+                .map(|plan| plan.sub_questions.len())
+                .unwrap_or(0),
             self.sources.len()
         )
     }
@@ -605,14 +685,22 @@ mod tests {
         }
         assert!(SourceLevel::D.is_weak() && SourceLevel::E.is_weak());
         assert!(!SourceLevel::C.is_weak());
-        assert_eq!(SourceLevel::from_reliability(999), SourceLevel::A, "越界夹取到 5");
+        assert_eq!(
+            SourceLevel::from_reliability(999),
+            SourceLevel::A,
+            "越界夹取到 5"
+        );
     }
 
     #[test]
     fn session_summary_counts_plan_and_sources() {
         let session = ResearchSession {
             id: "r1".into(),
-            request: ResearchRequest { topic: "Rust 异步".into(), ..Default::default() },
+            request: ResearchRequest {
+                topic: "Rust 异步".into(),
+                ..Default::default()
+            },
+            rerun_of: None,
             status: ResearchStatus::Planned,
             created_at: "2026-10-11T10:00:00+08:00".into(),
             updated_at: "2026-10-11T10:00:00+08:00".into(),
@@ -623,6 +711,8 @@ mod tests {
                 queries: vec![],
                 local_baseline: vec![],
                 time_window_days: 730,
+                language: "zh-CN".to_string(),
+                source_types: vec!["local".to_string()],
                 budget: ResearchBudget::default(),
                 notes: vec![],
             }),

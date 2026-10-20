@@ -14,8 +14,7 @@ use crate::core::time::now_iso;
 use crate::domain::note::CreateNoteInput;
 use crate::domain::search::IndexStatus;
 use crate::domain::settings::{AppSettings, UpdateSettingsInput};
-use crate::domain::workspace::{
-    ActivityDay,Workspace, WorkspaceStats, WorkspaceSummary};
+use crate::domain::workspace::{ActivityDay, Workspace, WorkspaceStats, WorkspaceSummary};
 use crate::infrastructure::db::Db;
 use crate::infrastructure::markdown_storage::{MarkdownStorage, RecentWrites};
 use crate::infrastructure::watcher::{start_best_watcher, FileChangeBatch, WatchMode};
@@ -24,6 +23,7 @@ use crate::repositories::{
 };
 use crate::state::AppInner;
 
+use super::ai::organize::OrganizeService;
 use super::category_service::CategoryService;
 use super::context::WorkspaceContext;
 use super::index_service::{IndexService, ScanReport};
@@ -194,6 +194,13 @@ impl WorkspaceService {
         };
 
         let context = self.build_context(workspace, db, paths)?;
+        match OrganizeService::new(Arc::clone(&context)).recover_interrupted() {
+            Ok(count) if count > 0 => warnings.push(format!(
+                "{count} 个 Organize 后台任务在退出时未完成，已暂停；可在整理队列中继续。"
+            )),
+            Ok(_) => {}
+            Err(error) => warnings.push(format!("恢复 Organize 后台任务失败：{}", error.message)),
+        }
         self.adopt_directories(&context, &mut warnings);
         self.write_config(&context)?;
 
@@ -212,7 +219,9 @@ impl WorkspaceService {
 
         let index_status = match index_service.status() {
             // 缺笔记索引、或**缺分块索引**（N5：老库升级上来的典型情况）都要重建
-            Ok(status) if status.indexed_notes < status.total_notes || index_service.chunks_missing() => {
+            Ok(status)
+                if status.indexed_notes < status.total_notes || index_service.chunks_missing() =>
+            {
                 index_service.rebuild().unwrap_or(status)
             }
             Ok(status) => status,
@@ -296,7 +305,12 @@ impl WorkspaceService {
             return Ok(None);
         };
         let index_status = IndexService::new(Arc::clone(&context)).status()?;
-        Ok(Some(self.finish_open(&context, index_status, Vec::new(), false)?))
+        Ok(Some(self.finish_open(
+            &context,
+            index_status,
+            Vec::new(),
+            false,
+        )?))
     }
 
     pub fn stats(&self) -> Result<WorkspaceStats> {
@@ -573,7 +587,13 @@ pub fn apply_settings(settings: &mut AppSettings, input: &UpdateSettingsInput) {
     }
     if let Some(value) = &input.list_sort {
         // 只接受已知排序，避免把脏数据写进设置
-        const ALLOWED: [&str; 5] = ["updatedDesc", "updatedAsc", "createdDesc", "titleAsc", "manual"];
+        const ALLOWED: [&str; 5] = [
+            "updatedDesc",
+            "updatedAsc",
+            "createdDesc",
+            "titleAsc",
+            "manual",
+        ];
         if ALLOWED.contains(&value.as_str()) {
             settings.list_sort = value.clone();
         }
