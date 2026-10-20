@@ -375,6 +375,14 @@ fn relation_suggestion_applies_typed_relation_with_reason_and_undoes_exactly() {
         "# 对比\n\nSQLite 索引需要评估写入放大与查询性能。",
     );
     let target_id = fixture.note("SQLite 索引优化", "# 优化\n\n覆盖索引可以减少回表查询。");
+    let link_targets = (1..=3)
+        .map(|index| {
+            fixture.note(
+                &format!("SQLite 索引设计补充 {index}"),
+                "# 索引\n\nSQLite 索引需要评估写入放大与查询性能。",
+            )
+        })
+        .collect::<Vec<_>>();
     let service = fixture.organize();
     let suggestion = service
         .generate(&source_id, SuggestionKind::Relations)
@@ -385,6 +393,12 @@ fn relation_suggestion_applies_typed_relation_with_reason_and_undoes_exactly() {
     assert!(relations
         .iter()
         .any(|item| item.target_note_id == target_id));
+    assert!(
+        relations
+            .iter()
+            .any(|item| item.relation_type == "WIKILINK"),
+        "关联建议应同时覆盖普通 Wiki 链接形态：{relations:?}"
+    );
     let before = fixture
         .context()
         .storage
@@ -404,7 +418,22 @@ fn relation_suggestion_applies_typed_relation_with_reason_and_undoes_exactly() {
     assert!(view
         .outgoing
         .iter()
-        .any(|item| item.target_note_id == target_id && item.relation_type == "RELATED_TO"));
+        .any(|item| item.relation_type == "RELATED_TO" && item.note.is_some()));
+    let source_after_accept = NoteService::new(fixture.context())
+        .get(&source_id)
+        .expect("接受后的来源笔记");
+    let target_titles = link_targets
+        .iter()
+        .filter_map(|target| NoteService::new(fixture.context()).get(target).ok())
+        .map(|note| note.note.title)
+        .collect::<Vec<_>>();
+    assert!(
+        target_titles
+            .iter()
+            .any(|title| source_after_accept.content.contains(&format!("[[{title}]]"))),
+        "接受普通链接建议后必须写入目标 Wiki 链接：{}",
+        source_after_accept.content
+    );
     service.undo(&suggestion.id).expect("撤销关联");
     let restored = fixture
         .context()
@@ -556,6 +585,15 @@ fn reject_never_writes_and_batch_accept_reports_partial_failure() {
         .generate(&first, SuggestionKind::Summary)
         .expect("生成第一篇建议");
     service.reject(&rejected.id).expect("拒绝建议");
+    let audit = AiPolicyService::new(fixture.context())
+        .audit_tail(5)
+        .expect("读取审计");
+    assert!(
+        audit
+            .iter()
+            .any(|entry| entry.capability == "organize_reject"),
+        "拒绝建议也必须留下审计：{audit:?}"
+    );
     let first_after = fixture
         .context()
         .storage

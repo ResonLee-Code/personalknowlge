@@ -47,8 +47,15 @@ test('latest.json maps the signed updater artifacts for all shipped targets', ()
     ]);
     assert.match(
       manifest.platforms['linux-x86_64'].url,
-      /Personal%20Knowledge%20OS_2\.0\.0_amd64\.AppImage\.tar\.gz$/,
+      /Personal\.Knowledge\.OS_2\.0\.0_amd64\.AppImage\.tar\.gz$/,
     );
+    for (const entry of Object.values(manifest.platforms)) {
+      assert.doesNotMatch(
+        entry.url,
+        /%20/,
+        'GitHub Release 资产名中的空格必须归一化为点',
+      );
+    }
     assert.equal(
       manifest.platforms['linux-x86_64'].signature,
       'signature:Personal Knowledge OS_2.0.0_amd64.AppImage.tar.gz',

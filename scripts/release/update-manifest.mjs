@@ -57,13 +57,16 @@ for (const platform of platforms) {
     throw new Error(`找不到签名文件：${signaturePath}`);
   }
   const name = path.basename(artifact);
+  // GitHub Releases 会把上传资产名里的空格替换成点；清单 URL 必须跟随这个
+  // 实际可下载名称，不能保留本地构建产物的空格（%20 会直接 404）。
+  const assetName = name.replaceAll(' ', '.');
   const signature = fs.readFileSync(signaturePath, 'utf8').trim();
   if (!signature) {
     throw new Error(`签名文件为空：${signaturePath}`);
   }
   result[platform.key] = {
     signature,
-    url: `${baseUrl.replace(/\/+$/, '')}/${encodeURIComponent(name)}`,
+    url: `${baseUrl.replace(/\/+$/, '')}/${encodeURIComponent(assetName)}`,
   };
 }
 

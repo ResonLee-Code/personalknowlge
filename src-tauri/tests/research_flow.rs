@@ -454,11 +454,24 @@ fn write_back_creates_an_inbox_note_with_metadata_and_an_optional_source_note() 
         detail.content.contains("附：模型推测（未验证）"),
         "勾选后才追加推测附录"
     );
+    assert!(
+        detail
+            .content
+            .contains("[[来源清单：Rust 异步运行时调度]]"),
+        "报告正文必须链接来源清单"
+    );
 
     // 来源清单子文档：父文档指向报告
     let source_note_id = result.source_note_id.clone().expect("来源清单");
     let source_note = notes.get(&source_note_id).expect("读回来源清单");
     assert_eq!(source_note.note.parent_id.as_deref(), Some(note_id.as_str()));
+    assert!(
+        source_note
+            .content
+            .contains(&format!("[[{}]]", detail.note.title)),
+        "来源清单必须反向链接报告，形成双链：{}",
+        source_note.content
+    );
     assert!(source_note.content.contains("分级依据") || source_note.content.contains("级别"));
 
     // 会话状态推进为 written，且审计里仍然没有任何外发

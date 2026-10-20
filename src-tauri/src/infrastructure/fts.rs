@@ -16,6 +16,13 @@ use rusqlite::{params_from_iter, Connection};
 use crate::core::error::Result;
 use crate::core::text::cjk_search_tokens;
 
+/// 超过这个命中数时不再对整个结果集计算 BM25 全排序。
+///
+/// 10 万篇库中的“查询优化”这类高频词会命中几乎全库；此时 BM25 对首页的区分度
+/// 很低，却要求 SQLite 为全部命中算分并排序。保留小结果集的完整相关度排序，
+/// 高频结果改为按 FTS rowid 流式分页，以稳定控制交互延迟。
+const MAX_RANKED_MATCHES: i64 = 5_000;
+
 /// 写入索引的文档。
 #[derive(Debug, Clone)]
 pub struct SearchDocument {
@@ -88,7 +95,7 @@ pub trait SearchIndex {
     fn clear(&self, conn: &Connection) -> Result<()>;
     fn optimize(&self, conn: &Connection) -> Result<()>;
     fn count(&self, conn: &Connection) -> Result<i64>;
-    fn search(&self, conn: &Connection, request: &FtsRequest<'_>) -> Result<Vec<FtsHit>>;
+    fn search(&self, conn: &Connection, request: &FtsRequest<'_>) -> Result<(Vec<FtsHit>, i64)>;
     fn count_matches(&self, conn: &Connection, request: &FtsRequest<'_>) -> Result<i64>;
 }
 
@@ -96,6 +103,15 @@ pub trait SearchIndex {
 pub struct SqliteSearchIndex;
 
 impl SqliteSearchIndex {
+    fn has_note_filters(request: &FtsRequest<'_>) -> bool {
+        request.category_id.is_some()
+            || request.tag_id.is_some()
+            || request.favorite_only
+            || request.updated_after.is_some()
+            || request.updated_before.is_some()
+            || request.scope_note_id.is_some()
+    }
+
     fn build_where(request: &FtsRequest<'_>, params: &mut Vec<Value>) -> String {
         let mut conditions = vec!["search_documents_fts MATCH ?".to_string()];
         params.push(Value::Text(request.match_expression.to_string()));
@@ -134,12 +150,84 @@ impl SqliteSearchIndex {
     fn order_clause(request: &FtsRequest<'_>) -> &'static str {
         // 与笔记列表一致：追加 id 作为次级键，保证分页在「同分同时间」时也是确定的
         if request.by_relevance {
-            "score ASC, n.updated_at DESC, n.id DESC"
+            "score ASC, updated_at DESC, note_id DESC"
         } else if request.sort_by_updated_desc {
-            "n.updated_at DESC, n.id DESC"
+            "updated_at DESC, note_id DESC"
         } else {
-            "n.updated_at ASC, n.id ASC"
+            "updated_at ASC, note_id ASC"
         }
+    }
+
+    fn count_matches_fast(conn: &Connection, request: &FtsRequest<'_>) -> Result<i64> {
+        if !Self::has_note_filters(request) {
+            // 正常索引只包含 active 笔记，且删除路径同步移除 FTS 行；高频热路径
+            // 因此无需为 COUNT 再对 10 万篇 notes 做一次 JOIN。
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM search_documents_fts
+                 WHERE search_documents_fts MATCH ?1",
+                [Value::Text(request.match_expression.to_string())],
+                |row| row.get(0),
+            )?;
+            return Ok(count);
+        }
+        let mut params: Vec<Value> = Vec::new();
+        let where_clause = Self::build_where(request, &mut params);
+        let sql = format!(
+            "SELECT COUNT(*)
+             FROM search_documents_fts f
+             JOIN notes n ON n.id = f.note_id
+             WHERE {where_clause}"
+        );
+        let mut statement = conn.prepare(&sql)?;
+        let count: i64 = statement.query_row(params_from_iter(params.iter()), |row| row.get(0))?;
+        Ok(count)
+    }
+
+    fn search_by_rowid(
+        &self,
+        conn: &Connection,
+        request: &FtsRequest<'_>,
+        total: i64,
+    ) -> Result<(Vec<FtsHit>, i64)> {
+        let mut params: Vec<Value> = Vec::new();
+        let sql = if !Self::has_note_filters(request) {
+            params.push(Value::Text(request.match_expression.to_string()));
+            "SELECT note_id, 0.0 AS score
+             FROM search_documents_fts
+             WHERE search_documents_fts MATCH ?
+             ORDER BY rowid ASC
+             LIMIT ? OFFSET ?"
+                .to_string()
+        } else {
+            let where_clause = Self::build_where(request, &mut params);
+            format!(
+                "SELECT f.note_id AS note_id, 0.0 AS score
+                 FROM search_documents_fts f
+                 JOIN notes n ON n.id = f.note_id
+                 WHERE {where_clause}
+                 ORDER BY {}
+                 LIMIT ? OFFSET ?",
+                Self::order_clause(&FtsRequest {
+                    by_relevance: false,
+                    sort_by_updated_desc: true,
+                    ..request.clone()
+                }),
+            )
+        };
+        params.push(Value::Integer(request.limit));
+        params.push(Value::Integer(request.offset));
+        let mut statement = conn.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(params.iter()), |row| {
+            Ok(FtsHit {
+                note_id: row.get(0)?,
+                score: row.get(1)?,
+            })
+        })?;
+        let mut hits = Vec::new();
+        for row in rows {
+            hits.push(row?);
+        }
+        Ok((hits, total))
     }
 }
 
@@ -231,7 +319,11 @@ impl SearchIndex for SqliteSearchIndex {
         Ok(count)
     }
 
-    fn search(&self, conn: &Connection, request: &FtsRequest<'_>) -> Result<Vec<FtsHit>> {
+    fn search(&self, conn: &Connection, request: &FtsRequest<'_>) -> Result<(Vec<FtsHit>, i64)> {
+        let total = Self::count_matches_fast(conn, request)?;
+        if !request.by_relevance || total > MAX_RANKED_MATCHES {
+            return self.search_by_rowid(conn, request, total);
+        }
         let mut params: Vec<Value> = Vec::new();
         let where_clause = Self::build_where(request, &mut params);
         let sql = format!(
@@ -242,33 +334,26 @@ impl SearchIndex for SqliteSearchIndex {
              WHERE {where_clause}
              ORDER BY {}
              LIMIT ? OFFSET ?",
-            Self::order_clause(request)
+            Self::order_clause(request),
         );
         params.push(Value::Integer(request.limit));
         params.push(Value::Integer(request.offset));
 
         let mut statement = conn.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(params.iter()), |row| {
-            Ok(FtsHit { note_id: row.get(0)?, score: row.get(1)? })
+            Ok(FtsHit {
+                note_id: row.get(0)?,
+                score: row.get(1)?,
+            })
         })?;
         let mut hits = Vec::new();
         for row in rows {
             hits.push(row?);
         }
-        Ok(hits)
+        Ok((hits, total))
     }
 
     fn count_matches(&self, conn: &Connection, request: &FtsRequest<'_>) -> Result<i64> {
-        let mut params: Vec<Value> = Vec::new();
-        let where_clause = Self::build_where(request, &mut params);
-        let sql = format!(
-            "SELECT COUNT(*)
-             FROM search_documents_fts f
-             JOIN notes n ON n.id = f.note_id
-             WHERE {where_clause}"
-        );
-        let mut statement = conn.prepare(&sql)?;
-        let count: i64 = statement.query_row(params_from_iter(params.iter()), |row| row.get(0))?;
-        Ok(count)
+        Self::count_matches_fast(conn, request)
     }
 }

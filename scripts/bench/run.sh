@@ -63,7 +63,12 @@ run_case() {
   started="$(date +%s)"
 
   set +e
-  env BENCH_NOTES="${notes}" "$@" \
+  # 基准用同步 `scan_workspace` 摆好数据；文件监听器不属于被测路径，
+  # 10 万篇时还会与查询争用、在 TempDir 收尾时留下 join panic 噪声。
+  env BENCH_NOTES="${notes}" \
+    BENCH_STOP_WATCHER="${BENCH_STOP_WATCHER:-1}" \
+    BENCH_SCALE_GATE="$([[ "${notes}" -ge 100000 ]] && echo 1 || echo 0)" \
+    "$@" \
     cargo test --offline --manifest-path "${MANIFEST}" --test "${target}" \
     -- --ignored --nocapture 2>&1 | tee -a "${LOG}"
   local status="${PIPESTATUS[0]}"

@@ -5,6 +5,7 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { useCallback, useMemo, type RefObject } from 'react';
 
+import { handleSelectionContextMenu } from './selectionContext';
 import { wikilinkCompletionSource } from './wikilinkCompletion';
 
 interface MarkdownEditorProps {
@@ -23,6 +24,8 @@ interface MarkdownEditorProps {
   viewRef?: RefObject<ReactCodeMirrorRef | null>;
   /** 提供 `[[` 补全的候选标题（不传则不启用自动补全） */
   getWikilinkTitles?: () => readonly string[];
+  /** 选中文字后右键：由页面决定 Ask / Research 菜单。 */
+  onSelectionContextMenu?: (event: MouseEvent, text: string) => void;
 }
 
 /** CodeMirror 6 Markdown 编辑器（设计文档 7.1 / 16.5）。 */
@@ -36,6 +39,7 @@ export function MarkdownEditor({
   onAttachFiles,
   viewRef,
   getWikilinkTitles,
+  onSelectionContextMenu,
 }: MarkdownEditorProps) {
   const insertSnippet = useCallback((view: EditorView, snippet: string, at?: number) => {
     const position = at ?? view.state.selection.main.head;
@@ -74,6 +78,9 @@ export function MarkdownEditor({
           const at = view.posAtCoords({ x: event.clientX, y: event.clientY });
           return handleFiles(files, view, at ?? undefined);
         },
+        contextmenu: (event, view) => {
+          return handleSelectionContextMenu(view, event, onSelectionContextMenu);
+        },
       }),
       ...(getWikilinkTitles
         ? [
@@ -84,7 +91,7 @@ export function MarkdownEditor({
           ]
         : []),
     ],
-    [handleFiles, getWikilinkTitles],
+    [getWikilinkTitles, handleFiles, onSelectionContextMenu],
   );
 
   return (

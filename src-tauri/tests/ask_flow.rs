@@ -1,6 +1,10 @@
 //! Ask M1 集成测试：作用域、证据不足、精确引用区间与默认零外发。
 
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::thread;
 
 use personal_knowledge_os_lib::application::ai::ask::AskService;
 use personal_knowledge_os_lib::application::ai::policy::AiPolicyService;
@@ -10,7 +14,9 @@ use personal_knowledge_os_lib::core::events::NoopEventSink;
 use personal_knowledge_os_lib::domain::ai::{
     AskHistoryTurn, AskQuestionInput, AskSaveInput, AskScope, UpdateAiPolicyInput,
 };
-use personal_knowledge_os_lib::domain::note::{CreateNoteInput, NoteListQuery, SaveNoteInput};
+use personal_knowledge_os_lib::domain::note::{
+    CreateNoteInput, NoteListQuery, SaveNoteInput, SetSourceInput,
+};
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -66,6 +72,58 @@ impl Fixture {
     fn ask(&self) -> AskService {
         AskService::new(self.context())
     }
+
+    fn configure_local_model(&self, endpoint: &str) {
+        AiPolicyService::new(self.context())
+            .update(UpdateAiPolicyInput {
+                enabled: Some(true),
+                local_model_endpoint: Some(endpoint.to_string()),
+                local_model_name: Some("stub:latest".to_string()),
+                local_model_compose: Some(true),
+                ..Default::default()
+            })
+            .expect("配置本地模型");
+    }
+}
+
+fn spawn_model_server(reply: &'static str) -> (String, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("绑定模型端口");
+    let port = listener.local_addr().expect("模型端口").port();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&calls);
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let _ = handle_model_request(&mut stream, reply);
+            let _ = counter.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    (format!("http://localhost:{port}"), calls)
+}
+
+fn handle_model_request(stream: &mut TcpStream, reply: &str) -> std::io::Result<()> {
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    let mut length = 0usize;
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header)? == 0 || header == "\r\n" {
+            break;
+        }
+        if let Some(value) = header.to_ascii_lowercase().strip_prefix("content-length:") {
+            length = value.trim().parse().unwrap_or(0);
+        }
+    }
+    let mut body = vec![0u8; length];
+    reader.read_exact(&mut body)?;
+    let payload = serde_json::json!({ "model": "stub:latest", "response": reply }).to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+        payload.len()
+    );
+    stream.write_all(response.as_bytes())?;
+    stream.flush()
 }
 
 fn request(question: &str, scope: AskScope, scope_id: Option<String>) -> AskQuestionInput {
@@ -329,6 +387,89 @@ fn selected_text_is_used_to_locate_evidence() {
         .citations
         .iter()
         .any(|citation| citation.snippet.contains("不能证明因果关系")));
+}
+
+#[test]
+fn oversized_context_falls_back_to_template_without_calling_the_model() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    let note = fixture.note(
+        "SQLite 索引设计",
+        "# 结论\n\nSQLite FTS5 使用倒排索引，并对中文采用双字短语。",
+    );
+    let (endpoint, calls) = spawn_model_server("不应被调用 [1]");
+    fixture.configure_local_model(&endpoint);
+    let history = (0..6)
+        .map(|index| AskHistoryTurn {
+            question: format!("第 {index} 轮：{}", "问".repeat(500)),
+            answer: format!("{} [1]", "答".repeat(800)),
+        })
+        .collect();
+
+    let answer = fixture
+        .ask()
+        .answer(AskQuestionInput {
+            history,
+            ..request("SQLite 索引有什么结论？", AskScope::Note, Some(note))
+        })
+        .expect("超预算时仍用模板回答");
+    assert_eq!(answer.tier, "template");
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "超预算前不能调用模型");
+    assert!(
+        answer
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("输入上限")),
+        "必须明确提示预算超限：{:?}",
+        answer.warnings
+    );
+}
+
+#[test]
+fn ask_refuses_weak_only_and_stale_only_evidence() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    let note = fixture.note(
+        "SQLite 索引设计",
+        "# 结论\n\nSQLite FTS5 使用倒排索引。",
+    );
+    let notes = NoteService::new(fixture.context());
+    notes
+        .set_source(SetSourceInput {
+            id: note.clone(),
+            source_type: Some("personal".to_string()),
+            source_reliability: Some(1),
+            ..Default::default()
+        })
+        .expect("标为不可用线索");
+    let weak = fixture
+        .ask()
+        .answer(request(
+            "SQLite 索引有什么结论？",
+            AskScope::Note,
+            Some(note.clone()),
+        ))
+        .expect("弱线索也正常返回");
+    assert!(!weak.evidence_sufficient);
+    assert!(weak.text.contains("不可用线索"));
+    assert!(weak.citations.is_empty());
+
+    notes
+        .set_source(SetSourceInput {
+            id: note.clone(),
+            source_type: Some("official".to_string()),
+            source_reliability: Some(5),
+            valid_until: Some("2020-01-01".to_string()),
+            ..Default::default()
+        })
+        .expect("标为过期");
+    let stale = fixture
+        .ask()
+        .answer(request("SQLite 索引有什么结论？", AskScope::Note, Some(note)))
+        .expect("过期材料正常返回");
+    assert!(!stale.evidence_sufficient);
+    assert!(stale.text.contains("过时"));
+    assert!(stale.citations.is_empty());
 }
 
 #[test]

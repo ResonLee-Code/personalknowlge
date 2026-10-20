@@ -14,6 +14,7 @@
 //! `PKOS_BENCH search …`，脚本靠它确认「基准真的跑了」，避免空跑变绿灯。
 
 use std::sync::Arc;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use personal_knowledge_os_lib::application::category_service::CategoryService;
@@ -65,6 +66,22 @@ fn dir_size(path: &std::path::Path) -> u64 {
 /// 稳定的十六进制短码（用于生成「独特术语」，不引入随机性便于复现）
 fn code_of(index: usize) -> String {
     format!("{:04X}", (index * 2654435761) % 0xFFFF)
+}
+
+fn current_rss_bytes() -> Option<u64> {
+    let pid = std::process::id().to_string();
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|kb| kb * 1024)
 }
 
 #[test]
@@ -221,6 +238,30 @@ fn bench_search_with_10k_notes() {
     let recall_at1_pct = recall_at_1 as f64 * 100.0 / probe_total as f64;
     let recall_at5_pct = recall_at_5 as f64 * 100.0 / probe_total as f64;
 
+    let scale_gate = std::env::var("BENCH_SCALE_GATE").as_deref() == Ok("1");
+    let max_startup_ms = env_f64("BENCH_MAX_STARTUP_MS", 2_000.0);
+    let max_rss_mb = env_f64("BENCH_MAX_RSS_MB", 1_536.0);
+    let (reopen_ms, rss_mb) = if scale_gate {
+        let workspace_service = WorkspaceService::new(Arc::clone(&app));
+        workspace_service.close().expect("关闭基准工作区");
+        let reopen_started = Instant::now();
+        workspace_service
+            .open(&root.to_string_lossy())
+            .expect("重新打开 10 万篇工作区");
+        let reopen_ms = reopen_started.elapsed().as_secs_f64() * 1000.0;
+        if let Ok(reopened) = app.context() {
+            if let Ok(mut guard) = reopened.watcher.lock() {
+                *guard = None;
+            }
+        }
+        let rss_mb = current_rss_bytes()
+            .map(|bytes| bytes as f64 / 1024.0 / 1024.0)
+            .unwrap_or(0.0);
+        (reopen_ms, rss_mb)
+    } else {
+        (0.0, 0.0)
+    };
+
     let db_bytes = std::fs::metadata(root.join(".knowledge/database.sqlite"))
         .map(|meta| meta.len())
         .unwrap_or(0);
@@ -267,13 +308,19 @@ fn bench_search_with_10k_notes() {
         probes
     );
     println!("护栏（发布前必跑）      : p95 < {max_p95_ms:.0} ms、recall@5 ≥ {min_recall_pct:.1}%");
+    if scale_gate {
+        println!(
+            "10 万扩展门禁           : 重新打开 {reopen_ms:.0} ms（≤{max_startup_ms:.0}）/ RSS {rss_mb:.1} MB（≤{max_rss_mb:.0}）"
+        );
+    }
     println!("=================================================\n");
 
     // 机器可读摘要：`scripts/bench/run.sh` 靠这一行确认基准真的跑完（防「空跑变绿灯」）
     println!(
         "PKOS_BENCH search notes={total_notes} avg_ms={avg_ms:.2} p95_ms={p95_ms:.2} \
          recall_at1_pct={recall_at1_pct:.1} recall_at5_pct={recall_at5_pct:.1} \
-         db_mb={:.2} db_kb_per_note={:.1} scan_s={:.2} fts_s={:.2} writes_s={:.2}",
+         db_mb={:.2} db_kb_per_note={:.1} scan_s={:.2} fts_s={:.2} writes_s={:.2} \
+         reopen_ms={reopen_ms:.2} rss_mb={rss_mb:.2}",
         db_bytes as f64 / 1024.0 / 1024.0,
         db_bytes as f64 / 1024.0 / total_notes as f64,
         scan_elapsed.as_secs_f64(),
@@ -302,5 +349,17 @@ fn bench_search_with_10k_notes() {
             "⚠️ recall@5 = {}/{}：混合中英文写法（术语XXXX）存在召回缺口，详见 CHANGELOG 结论",
             recall_at_5, probe_total
         );
+    }
+    if scale_gate {
+        assert!(
+            reopen_ms < max_startup_ms,
+            "10 万篇重新打开耗时过高：{reopen_ms:.1} ms（红线 {max_startup_ms:.0} ms）"
+        );
+        if rss_mb > 0.0 {
+            assert!(
+                rss_mb < max_rss_mb,
+                "10 万篇 RSS 过高：{rss_mb:.1} MB（红线 {max_rss_mb:.0} MB）"
+            );
+        }
     }
 }

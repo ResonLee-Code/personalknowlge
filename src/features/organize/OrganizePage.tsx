@@ -54,7 +54,10 @@ function suggestionAdditions(suggestion: OrganizeSuggestion): string[] {
       return suggestion.payload.tags.map((tag) => `+ 标签：${tag.tag} — ${tag.reason}`);
     case 'relations':
       return suggestion.payload.relations.map(
-        (relation) => `+ ${relation.relationType} → ${relation.targetTitle} — ${relation.reason}`,
+        (relation) =>
+          `+ ${
+            relation.relationType === 'WIKILINK' ? '普通链接' : relation.relationType
+          } → ${relation.targetTitle} — ${relation.reason}`,
       );
     case 'duplicate':
       return suggestion.payload.candidates.map(

@@ -26,6 +26,7 @@ import { RelationsPanel } from '@/components/editor/RelationsPanel';
 import { HistoryDialog } from '@/components/editor/HistoryDialog';
 import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
 import { SaveTemplateDialog } from '@/components/editor/SaveTemplateDialog';
+import { SelectionContextMenu } from '@/components/editor/SelectionContextMenu';
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { SourceDialog } from '@/components/editor/SourceDialog';
 import { reportAction, reportFailure } from '@/lib/actionFeedback';
@@ -152,6 +153,7 @@ export function NoteEditorPage() {
   const [outlineHover, setOutlineHover] = useState(false);
   /** 当前光标所在标题的偏移，用于大纲高亮 */
   const [activeHeadingOffset, setActiveHeadingOffset] = useState<number | null>(null);
+  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number } | null>(null);
   const editorViewRef = useRef<ReactCodeMirrorRef | null>(null);
 
   const signature = `${content}\u0000${title}\u0000${tags.join(',')}`;
@@ -351,6 +353,10 @@ export function NoteEditorPage() {
     });
     navigate(ROUTES.research);
   }, [detail, navigate, openResearchDraft]);
+
+  const openSelectionContextMenu = useCallback((event: MouseEvent) => {
+    setSelectionMenu({ x: event.clientX, y: event.clientY });
+  }, []);
 
   /** 插入菜单里的「图片…」「附件…」：走隐藏的文件选择框 + 应用自己的附件流程 */
   const attachInputRef = useRef<HTMLInputElement | null>(null);
@@ -973,6 +979,7 @@ export function NoteEditorPage() {
               readOnly={readOnly}
               onAttachFiles={readOnly ? undefined : handleAttachFiles}
               getWikilinkTitles={readOnly ? undefined : getWikilinkTitles}
+              onSelectionContextMenu={readOnly ? undefined : openSelectionContextMenu}
                 onChange={(value) => {
                   setContent(value);
                   markDirty();
@@ -1191,6 +1198,21 @@ export function NoteEditorPage() {
       ) : null}
       {noteActionRequest === 'export' ? (
         <ExportNoteDialog noteId={note.id} title={note.title} onClose={closeDialog} />
+      ) : null}
+      {selectionMenu ? (
+        <SelectionContextMenu
+          x={selectionMenu.x}
+          y={selectionMenu.y}
+          onAsk={() => {
+            setSelectionMenu(null);
+            askAboutSelection();
+          }}
+          onResearch={() => {
+            setSelectionMenu(null);
+            researchAboutSelection();
+          }}
+          onClose={() => setSelectionMenu(null)}
+        />
       ) : null}
     </div>
   );

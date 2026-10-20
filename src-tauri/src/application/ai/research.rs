@@ -1075,6 +1075,34 @@ impl ResearchService {
                 None => source_grade::is_stale(Some(&fetched_at), plan.time_window_days)
                     .unwrap_or(false),
             };
+            let applicable_version = self
+                .ctx
+                .storage
+                .read_note(&detail.note.file_path)
+                .ok()
+                .and_then(|stored| {
+                    stored
+                        .frontmatter
+                        .extra
+                        .into_iter()
+                        .find_map(|(key, value)| {
+                            if !matches!(
+                                key.as_str(),
+                                "applicable_version"
+                                    | "applicableVersion"
+                                    | "applicable-version"
+                            ) {
+                                return None;
+                            }
+                            value
+                                .as_str()
+                                .map(str::trim)
+                                .filter(|text| !text.is_empty())
+                                .map(str::to_string)
+                                .or_else(|| value.as_i64().map(|version| version.to_string()))
+                                .or_else(|| value.as_f64().map(|version| version.to_string()))
+                        })
+                });
             let snippet = if hit.snippet.trim().is_empty() {
                 first_sentence(&detail.content)
             } else {
@@ -1098,7 +1126,7 @@ impl ResearchService {
                 grade_reason: grade.reason,
                 published_at: None,
                 fetched_at,
-                applicable_version: None,
+                applicable_version,
                 snippet,
                 char_start: hit.char_start,
                 char_end: hit.char_end,
@@ -1991,7 +2019,16 @@ impl ResearchService {
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| proposal.title.clone());
-        let body = write_body(&proposal, &session, input.include_speculation);
+        let mut body = write_body(&proposal, &session, input.include_speculation);
+        let source_note_title = input
+            .create_source_note
+            .then(|| format!("来源清单：{}", session.request.topic));
+        if let Some(source_title) = &source_note_title {
+            body.push_str(&format!(
+                "\n\n## 来源清单\n\n[[{}]]\n",
+                escape_wikilink_text(source_title)
+            ));
+        }
         let appended = mode == WRITE_MODE_APPEND;
         let notes = NoteService::new(Arc::clone(&self.ctx));
 
@@ -2097,10 +2134,12 @@ impl ResearchService {
             let report = session.report.clone();
             let content = report
                 .as_ref()
-                .map(source_note_markdown)
+                .map(|report| source_note_markdown(report, &note_title))
                 .unwrap_or_else(|| "_本次没有来源。_".to_string());
             let child = notes.create(CreateNoteInput {
-                title: format!("来源清单：{}", session.request.topic),
+                title: source_note_title
+                    .clone()
+                    .unwrap_or_else(|| format!("来源清单：{}", session.request.topic)),
                 category_id: None,
                 initial_content: Some(content),
                 tags: Some(vec!["来源清单".to_string()]),
@@ -2985,12 +3024,14 @@ fn render_markdown(
     } else {
         for source in &report.references {
             let published = source.published_at.as_deref().unwrap_or("时效未知");
+            let applicable = source.applicable_version.as_deref().unwrap_or("未知");
             out.push_str(&format!(
-                "[{}] {} · {} · published {} · 获取 {} · {}（{}）\n",
+                "[{}] {} · {} · published {} · 适用版本 {} · 获取 {} · {}（{}）\n",
                 source.reference,
                 source.title,
                 source.level.label(),
                 published,
+                applicable,
                 source.fetched_at,
                 source_location(source),
                 source.grade_reason
@@ -3120,17 +3161,19 @@ fn append_diff(existing: &str, body: &str) -> String {
 }
 
 /// 「来源清单」子文档的正文：每行一条来源（级别 + 获取时间 + 定位 + 分级理由）。
-fn source_note_markdown(report: &ResearchReport) -> String {
-    let mut out = String::from(
-        "> 本清单由研究助手生成：每行是报告中引用过的一条来源，含分级依据与获取时间。\n\n",
+fn source_note_markdown(report: &ResearchReport, report_title: &str) -> String {
+    let mut out = format!(
+        "> 上级报告：[[{}]]\n>\n> 本清单由研究助手生成：每行是报告中引用过的一条来源，含分级依据与获取时间。\n\n",
+        escape_wikilink_text(report_title)
     );
     out.push_str(&format!("> 资料截至 {}。\n\n", report.data_cutoff));
     for source in &report.references {
         out.push_str(&format!(
-            "- [{}] {} · {} · 获取 {} · {} · {}\n",
+            "- [{}] {} · {} · 适用版本 {} · 获取 {} · {} · {}\n",
             source.reference,
             source.title,
             source.level.label(),
+            source.applicable_version.as_deref().unwrap_or("未知"),
             source.fetched_at,
             source_location(source),
             source.grade_reason

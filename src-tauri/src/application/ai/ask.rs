@@ -24,12 +24,14 @@ use crate::domain::ai::{
     AskScope, AskSourcePreview, RetrievalChannelStatus,
 };
 use crate::domain::note::{CreateNoteInput, NoteListQuery};
+use crate::domain::research::SourceLevel;
 use crate::domain::search::{SearchHit, SearchQuery};
 use crate::repositories::chunk_repository::{ChunkRepository, SqliteChunkRepository};
 
 use super::model_gateway::generation_candidates;
 use super::policy::AiPolicyService;
 use super::query_expansion;
+use super::source_grade::{grade_local_note, is_stale};
 use super::traits::{GenerationRequest, GenerativeModel, RetrievalOrigin, RetrievedChunk};
 use crate::application::WorkspaceContext;
 
@@ -41,6 +43,8 @@ const MAX_ANSWER_CHARS: usize = 50_000;
 const MAX_ASK_QUERIES: usize = 8;
 const MAX_HISTORY_TURNS: usize = 6;
 const MAX_HISTORY_ANSWER_CHARS: usize = 800;
+const MAX_ASK_INPUT_TOKENS: usize = 6_000;
+const ASK_MAX_OUTPUT_TOKENS: u32 = 700;
 
 /// 问句里常见、但不该单独占据检索预算的双字组合。
 const QUESTION_STOP_BIGRAMS: &[&str] = &[
@@ -52,6 +56,8 @@ const QUESTION_STOP_BIGRAMS: &[&str] = &[
 struct Evidence {
     chunk: RetrievedChunk,
     title: String,
+    level: SourceLevel,
+    stale: bool,
 }
 
 struct Retrieval {
@@ -93,20 +99,48 @@ impl AskService {
 
         let policy_service = AiPolicyService::new(Arc::clone(&self.ctx));
         policy_service.ensure_enabled("ask_answer")?;
-        let retrieval = self.retrieve(&input)?;
+        let mut retrieval = self.retrieve(&input)?;
+        let found_count = retrieval.evidence.len();
+        let weak_count = retrieval
+            .evidence
+            .iter()
+            .filter(|item| item.level == SourceLevel::E)
+            .count();
+        retrieval
+            .evidence
+            .retain(|item| item.level != SourceLevel::E);
+        let stale_count = retrieval.evidence.iter().filter(|item| item.stale).count();
+        let evidence_gap = if retrieval.evidence.is_empty() {
+            Some(if weak_count > 0 {
+                format!(
+                    "找到 {weak_count} 条材料，但全部只是不可用线索（E 级），不能支撑事实性结论。"
+                )
+            } else {
+                "当前作用域内没有找到可以回答这个问题的材料。".to_string()
+            })
+        } else if stale_count == retrieval.evidence.len() {
+            Some(format!(
+                "找到 {} 条材料，但全部可能已经过时，不能只靠这些材料给出事实性结论。",
+                retrieval.evidence.len()
+            ))
+        } else {
+            None
+        };
 
-        if retrieval.evidence.is_empty() {
+        if let Some(gap) = evidence_gap {
             let answer = AskAnswer {
                 question,
-                text: "证据不足：当前作用域内没有找到可以回答这个问题的材料。请补充相关笔记、调整作用域或换一种问法。".to_string(),
+                text: format!(
+                    "证据不足：{gap} 请补充相关笔记、核对时效、调整作用域或换一种问法。"
+                ),
                 citations: Vec::new(),
                 provider: "template.ask".to_string(),
                 tier: "template".to_string(),
                 evidence_sufficient: false,
-                evidence_note: "没有找到可引用材料，因此不生成事实性结论。".to_string(),
+                evidence_note: gap,
                 warnings: retrieval.warnings,
                 channels: retrieval.channels,
-                retrieved_count: 0,
+                retrieved_count: found_count,
                 took_ms: started.elapsed().as_millis() as u64,
             };
             policy_service.audit(
@@ -143,17 +177,37 @@ impl AskService {
                 .iter()
                 .map(|item| item.chunk.clone())
                 .collect(),
-            max_tokens: Some(700),
+            max_tokens: Some(ASK_MAX_OUTPUT_TOKENS),
             allow_remote: false,
         };
 
         let mut warnings = retrieval.warnings;
-        let candidates = generation_candidates(
-            &self.ctx,
-            "ask_answer",
-            input.confirm_outbound,
-            &mut warnings,
-        );
+        if weak_count > 0 {
+            warnings.push(format!(
+                "已忽略 {weak_count} 条 E 级不可用线索；答案只使用剩余可用来源。"
+            ));
+        }
+        if stale_count > 0 {
+            warnings.push(format!(
+                "{stale_count} 条来源可能已过时；回答这些部分时需要人工核对。"
+            ));
+        }
+        let estimated_input_tokens = estimate_request_tokens(&request);
+        let candidates = if estimated_input_tokens > MAX_ASK_INPUT_TOKENS {
+            warnings.push(format!(
+                "本次上下文预估 {estimated_input_tokens} tokens，超过单次问答输入上限 \
+                 {MAX_ASK_INPUT_TOKENS} tokens；已跳过在线 / 本地模型，改用模板整理，\
+                 未发起模型请求。请缩短问题、选中文字或减少追问历史。"
+            ));
+            Vec::new()
+        } else {
+            generation_candidates(
+                &self.ctx,
+                "ask_answer",
+                input.confirm_outbound,
+                &mut warnings,
+            )
+        };
         // 只要构造了在线档，本次就可能已经发出请求；即使随后失败降级，审计也必须如实标记。
         let outbound_attempted = candidates.iter().any(|(_, tier, _, _)| tier == "online");
         let chosen = select_generated_answer(
@@ -372,6 +426,16 @@ impl AskService {
         let note_id =
             note_id.ok_or_else(|| AppError::invalid_input("当前笔记作用域缺少笔记 id。"))?;
         let detail = NoteService::new(Arc::clone(&self.ctx)).get(note_id)?;
+        let grade = grade_local_note(
+            detail.note.source_reliability,
+            detail.note.source_type.as_deref(),
+        );
+        let stale = detail
+            .note
+            .valid_until
+            .as_deref()
+            .and_then(|valid_until| is_stale(Some(valid_until), 0))
+            .unwrap_or(false);
         let chunks = chunk_markdown(&detail.content);
         let source_chars: Vec<char> = detail.content.chars().collect();
         let evidence = chunks
@@ -396,6 +460,8 @@ impl AskService {
                         origin: RetrievalOrigin::Bm25,
                     },
                     title: detail.note.title.clone(),
+                    level: grade.level,
+                    stale,
                 })
             })
             .collect::<Vec<_>>();
@@ -499,6 +565,16 @@ impl AskService {
         let detail = NoteService::new(Arc::clone(&self.ctx))
             .get(&hit.note.id)
             .ok()?;
+        let grade = grade_local_note(
+            detail.note.source_reliability,
+            detail.note.source_type.as_deref(),
+        );
+        let stale = detail
+            .note
+            .valid_until
+            .as_deref()
+            .and_then(|valid_until| is_stale(Some(valid_until), 0))
+            .unwrap_or(false);
         let source_chars: Vec<char> = detail.content.chars().collect();
         let stored = self
             .ctx
@@ -546,6 +622,8 @@ impl AskService {
                 origin: RetrievalOrigin::Bm25,
             },
             title: hit.note.title,
+            level: grade.level,
+            stale,
         })
     }
 }
@@ -678,6 +756,43 @@ fn ask_queries(question: &str) -> Vec<String> {
     }
     queries.truncate(MAX_ASK_QUERIES);
     queries
+}
+
+fn estimate_text_tokens(text: &str) -> usize {
+    let mut cjk = 0usize;
+    let mut other = 0usize;
+    for ch in text.chars().filter(|ch| !ch.is_whitespace()) {
+        if crate::core::text::is_cjk(ch) {
+            cjk += 1;
+        } else {
+            other += 1;
+        }
+    }
+    cjk + other.div_ceil(4)
+}
+
+fn estimate_request_tokens(request: &GenerationRequest) -> usize {
+    let evidence = request
+        .evidence
+        .iter()
+        .map(|item| {
+            estimate_text_tokens(&item.snippet)
+                + item
+                    .heading_path
+                    .iter()
+                    .map(|heading| estimate_text_tokens(heading))
+                    .sum::<usize>()
+                + 16
+        })
+        .sum::<usize>();
+    estimate_text_tokens(&request.prompt)
+        + request
+            .instructions
+            .as_deref()
+            .map(estimate_text_tokens)
+            .unwrap_or(0)
+        + evidence
+        + 32
 }
 
 fn template_answer(evidence: &[Evidence], question: &str) -> String {
@@ -882,6 +997,8 @@ mod tests {
                 origin: RetrievalOrigin::Bm25,
             },
             title: "索引设计".to_string(),
+            level: SourceLevel::D,
+            stale: false,
         }];
         let text = template_answer(&evidence, "SQLite FTS5 索引有什么结论？");
         assert_eq!(citation_numbers(&text, evidence.len()).unwrap(), vec![1]);
@@ -902,6 +1019,8 @@ mod tests {
                     origin: RetrievalOrigin::Bm25,
                 },
                 title: "一".to_string(),
+                level: SourceLevel::D,
+                stale: false,
             },
             Evidence {
                 chunk: RetrievedChunk {
@@ -915,6 +1034,8 @@ mod tests {
                     origin: RetrievalOrigin::Bm25,
                 },
                 title: "二".to_string(),
+                level: SourceLevel::D,
+                stale: false,
             },
         ];
         let citations = build_citations(vec![2], &evidence);
@@ -965,5 +1086,17 @@ mod tests {
                 .any(|warning| warning.contains("未通过引用校验")),
             "降级原因必须可见：{warnings:?}"
         );
+    }
+
+    #[test]
+    fn oversized_ask_context_is_estimated_before_generation() {
+        let request = GenerationRequest {
+            prompt: "问".repeat(MAX_ASK_INPUT_TOKENS + 1),
+            instructions: None,
+            evidence: Vec::new(),
+            max_tokens: Some(ASK_MAX_OUTPUT_TOKENS),
+            allow_remote: false,
+        };
+        assert!(estimate_request_tokens(&request) > MAX_ASK_INPUT_TOKENS);
     }
 }

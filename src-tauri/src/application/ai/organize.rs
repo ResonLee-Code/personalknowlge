@@ -309,7 +309,15 @@ impl OrganizeService {
         if !changed {
             return Err(AppError::invalid_input("建议不存在或已不是待确认状态。"));
         }
-        self.get(id)
+        let rejected = self.get(id)?;
+        AiPolicyService::new(Arc::clone(&self.ctx)).audit(
+            "organize_reject",
+            false,
+            "ok",
+            0,
+            Some(rejected.kind.as_str()),
+        );
+        Ok(rejected)
     }
 
     /// 批量接受：逐条应用并如实报告部分失败，不把整批失败伪装成成功。
@@ -518,13 +526,45 @@ impl OrganizeService {
                 Ok(())
             }
             AiSuggestionPayload::Relations { relations } => {
+                let mut wiki_links = Vec::new();
                 for relation in relations {
+                    if relation.relation_type.eq_ignore_ascii_case("WIKILINK") {
+                        wiki_links.push(relation);
+                        continue;
+                    }
                     RelationService::new(Arc::clone(&self.ctx)).add(AddRelationInput {
                         source_id: detail.note.id.clone(),
                         target_id: relation.target_note_id.clone(),
                         relation_type: relation.relation_type.clone(),
                         note: Some(relation.reason.clone()),
                     })?;
+                }
+                if !wiki_links.is_empty() {
+                    let notes = NoteService::new(Arc::clone(&self.ctx));
+                    let current = notes.get(&detail.note.id)?;
+                    let stored = self.ctx.storage.read_note(&current.note.file_path)?;
+                    let mut additions = Vec::new();
+                    for relation in wiki_links {
+                        let link = format!("[[{}]]", escape_wikilink_text(&relation.target_title));
+                        if stored.body.contains(&link) {
+                            continue;
+                        }
+                        additions.push(format!("- {link} — {}", relation.reason));
+                    }
+                    if !additions.is_empty() {
+                        notes.save(SaveNoteInput {
+                            id: detail.note.id.clone(),
+                            content: format!(
+                                "{}\n\n## 相关笔记\n\n{}",
+                                stored.body.trim_end(),
+                                additions.join("\n")
+                            ),
+                            base_content_hash: Some(stored.content_hash.clone()),
+                            title: None,
+                            category_id: None,
+                            tags: None,
+                        })?;
+                    }
                 }
                 Ok(())
             }
@@ -683,10 +723,16 @@ impl OrganizeService {
                 let relations = scored
                     .into_iter()
                     .take(MAX_RELATION_SUGGESTIONS)
-                    .map(|(_, summary, title_score, body_score)| SuggestedRelation {
+                    .enumerate()
+                    .map(|(index, (_, summary, title_score, body_score))| SuggestedRelation {
                         target_note_id: summary.id,
                         target_title: summary.title,
-                        relation_type: "RELATED_TO".to_string(),
+                        relation_type: if index < 2 {
+                            "RELATED_TO"
+                        } else {
+                            "WIKILINK"
+                        }
+                        .to_string(),
                         reason: format!(
                             "标题相似度 {:.0}%，正文相似度 {:.0}%",
                             title_score * 100.0,
@@ -1010,6 +1056,13 @@ fn char_bigrams(text: &str) -> HashSet<String> {
         .windows(2)
         .map(|window| window.iter().collect::<String>())
         .collect()
+}
+
+fn escape_wikilink_text(value: &str) -> String {
+    value
+        .replace('|', "\\|")
+        .replace('#', "\\#")
+        .replace(']', "\\]")
 }
 
 fn jaccard(left: &HashSet<String>, right: &HashSet<String>) -> f32 {

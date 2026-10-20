@@ -150,26 +150,30 @@ impl IndexService {
 
     /// 当前索引状态。
     pub fn status(&self) -> Result<IndexStatus> {
-        let indexed_notes = self
-            .ctx
-            .db
-            .with_conn(|conn| self.index.count(conn))
-            .unwrap_or(0);
-        let total_notes = self
+        // 三个计数放进同一条只读查询：搜索每次都要报告 indexStale，分开取会反复
+        // 争用连接并重复遍历大表，10 万篇时这部分会进入查询热路径。
+        let (indexed_notes, total_notes, chunk_rows) = self
             .ctx
             .db
             .with_conn(|conn| {
-                SqliteNoteRepository.count_by_status(conn, self.workspace_id(), NoteStatus::Active)
+                conn.query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM search_documents_fts),
+                        (SELECT COUNT(*) FROM notes
+                          WHERE workspace_id = ?1 AND status = 'active'),
+                        (SELECT COUNT(*) FROM note_chunks)",
+                    rusqlite::params![self.workspace_id()],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .map_err(Into::into)
             })
-            .unwrap_or(0);
-        // 分块索引（N5）是索引的一部分：**有笔记却没分块**说明这批派生数据缺了
-        // （典型场景：从更早的版本升级上来），
-        // 这时同样报「落后」，让界面提示重建、并让打开工作区时的自动重建把它补上。
-        let chunk_rows = self
-            .ctx
-            .db
-            .with_conn(|conn| SqliteChunkRepository.count(conn))
-            .unwrap_or(0);
+            .unwrap_or((0, 0, 0));
 
         let state = if self.ctx.is_index_rebuilding() {
             IndexState::Rebuilding

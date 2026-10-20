@@ -276,6 +276,52 @@ fn source_type_plan_filters_out_local_material_when_local_is_not_requested() {
 }
 
 #[test]
+fn local_note_applicable_version_reaches_source_and_report() {
+    let fixture = Fixture::new();
+    let note_id = fixture.note(
+        "Rust 异步调度版本说明",
+        "tokio 的工作窃取调度在目标版本中可用。",
+    );
+    let context = fixture.context();
+    let notes = NoteService::new(Arc::clone(&context));
+    let detail = notes.get(&note_id).expect("读取笔记");
+    let raw = context
+        .storage
+        .read_raw(&detail.note.file_path)
+        .expect("读取原文");
+    let raw = raw.replacen(
+        "---\n",
+        "---\napplicable_version: 1.82\n",
+        1,
+    );
+    context
+        .storage
+        .write_atomic(&detail.note.file_path, &raw)
+        .expect("写入适用版本");
+
+    let research = fixture.research();
+    let session = research
+        .start(request("Rust 异步调度"))
+        .expect("立项");
+    let collected = research.collect(&session.id, false).expect("收集");
+    let source = collected
+        .sources
+        .iter()
+        .find(|source| source.note_id.as_deref() == Some(note_id.as_str()))
+        .expect("本地来源");
+    assert_eq!(source.applicable_version.as_deref(), Some("1.82"));
+
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
+    let report = composed.report.expect("报告");
+    assert!(
+        report.markdown.contains("适用版本 1.82"),
+        "报告必须记录来源适用版本：{}",
+        report.markdown
+    );
+}
+
+#[test]
 fn web_collection_uses_the_edited_plan_queries() {
     let fixture = Fixture::new();
     let queries = Arc::new(Mutex::new(Vec::new()));

@@ -11,7 +11,7 @@ use crate::core::ids::workspace_id;
 use crate::core::logging;
 use crate::core::paths::{WorkspacePaths, ARCHIVE_DIR, DEFAULT_CATEGORY_DIRS, INBOX_DIR};
 use crate::core::time::now_iso;
-use crate::domain::note::CreateNoteInput;
+use crate::domain::note::{CreateNoteInput, NoteStatus};
 use crate::domain::search::IndexStatus;
 use crate::domain::settings::{AppSettings, UpdateSettingsInput};
 use crate::domain::workspace::{ActivityDay, Workspace, WorkspaceStats, WorkspaceSummary};
@@ -19,7 +19,8 @@ use crate::infrastructure::db::Db;
 use crate::infrastructure::markdown_storage::{MarkdownStorage, RecentWrites};
 use crate::infrastructure::watcher::{start_best_watcher, FileChangeBatch, WatchMode};
 use crate::repositories::{
-    SettingsRepository, SqliteSettingsRepository, SqliteWorkspaceRepository, WorkspaceRepository,
+    NoteRepository, SettingsRepository, SqliteNoteRepository, SqliteSettingsRepository,
+    SqliteWorkspaceRepository, WorkspaceRepository,
 };
 use crate::state::AppInner;
 
@@ -29,6 +30,9 @@ use super::context::WorkspaceContext;
 use super::index_service::{IndexService, ScanReport};
 use super::note_service::NoteService;
 use super::search_service::SearchService;
+
+/// 大型且已有索引的工作区，启动时先把持久化状态交给界面，再后台核对文件变化。
+const DEFERRED_SCAN_MIN_NOTES: i64 = 20_000;
 
 /// 打开工作区的返回值。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -204,16 +208,36 @@ impl WorkspaceService {
         self.adopt_directories(&context, &mut warnings);
         self.write_config(&context)?;
 
-        // 扫描 Markdown 文件，采纳新增与外部修改（设计文档 13.3）
+        // 扫描 Markdown 文件，采纳新增与外部修改（设计文档 13.3）。
+        // 10 万篇时同步遍历全部文件本身已超过启动预算；已有持久化索引的大型库
+        // 先快速恢复界面，再由后台扫描补齐离线期间的外部变更。首次导入仍同步扫描。
         let index_service = IndexService::new(Arc::clone(&context));
-        let scan = match index_service.scan_workspace() {
-            Ok(scan) => {
-                warnings.extend(scan.warnings.iter().cloned());
-                scan
-            }
-            Err(error) => {
-                warnings.push(format!("扫描工作区失败：{}", error.message));
-                ScanReport::default()
+        let active_notes = context
+            .db
+            .with_conn(|conn| {
+                SqliteNoteRepository.count_by_status(
+                    conn,
+                    &context.workspace.id,
+                    NoteStatus::Active,
+                )
+            })
+            .unwrap_or(0);
+        let deferred_scan = should_defer_scan(!initialized, active_notes);
+        let scan = if deferred_scan {
+            warnings.push(format!(
+                "大型知识库（{active_notes} 篇）已先恢复界面；正在后台核对离线期间的文件变化。"
+            ));
+            ScanReport::default()
+        } else {
+            match index_service.scan_workspace() {
+                Ok(scan) => {
+                    warnings.extend(scan.warnings.iter().cloned());
+                    scan
+                }
+                Err(error) => {
+                    warnings.push(format!("扫描工作区失败：{}", error.message));
+                    ScanReport::default()
+                }
             }
         };
 
@@ -234,6 +258,25 @@ impl WorkspaceService {
 
         let mut result = self.finish_open(&context, index_status, warnings, initialized)?;
         result.scan = scan;
+        if deferred_scan {
+            let background = Arc::clone(&context);
+            std::thread::spawn(move || {
+                match IndexService::new(background).scan_workspace() {
+                    Ok(report) => {
+                        for warning in report.warnings {
+                            tracing::warn!(target: "workspace", "{warning}");
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            target: "workspace",
+                            "大型知识库后台扫描失败：{}",
+                            error.message
+                        );
+                    }
+                }
+            });
+        }
         Ok(result)
     }
 
@@ -614,6 +657,10 @@ pub fn default_workspace_name(root: &Path) -> String {
         .unwrap_or_else(|| "我的知识库".to_string())
 }
 
+fn should_defer_scan(existing_workspace: bool, active_notes: i64) -> bool {
+    existing_workspace && active_notes >= DEFERRED_SCAN_MIN_NOTES
+}
+
 /// 首次创建时写入的欢迎内容。
 pub fn welcome_note_body(name: &str) -> String {
     format!(
@@ -632,4 +679,16 @@ pub fn welcome_note_body(name: &str) -> String {
         name = name,
         inbox = INBOX_DIR
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_existing_large_workspaces_defer_the_startup_scan() {
+        assert!(!should_defer_scan(false, DEFERRED_SCAN_MIN_NOTES));
+        assert!(should_defer_scan(true, DEFERRED_SCAN_MIN_NOTES));
+        assert!(!should_defer_scan(true, DEFERRED_SCAN_MIN_NOTES - 1));
+    }
 }

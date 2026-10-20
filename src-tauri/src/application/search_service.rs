@@ -92,9 +92,7 @@ impl SearchService {
         };
 
         let (fts_hits, total) = self.ctx.db.with_conn(|conn| {
-            let hits = self.index.search(conn, &request)?;
-            let total = self.index.count_matches(conn, &request)?;
-            Ok((hits, total))
+            self.index.search(conn, &request)
         })?;
 
         if fts_hits.is_empty() {
