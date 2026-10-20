@@ -272,6 +272,7 @@ dist-windows/                           # Windows 安装包与便携版（NSIS �
 ```bash
 pnpm bench                                     # 发布规格：1 万篇检索 + 3 万篇图谱
 pnpm bench --only search --search-notes 100000 # 10 万篇扩展门禁
+scripts/bench/prepare-scale-fixture.sh /private/tmp/pkos-100k # 持久化真机验收库
 pnpm bench -- --search-notes 2000 --graph-notes 3000   # 冒烟（约 10 s）
 pnpm bench -- --only search                    # 只跑检索（或 --only graph）
 ```
@@ -308,6 +309,9 @@ pnpm bench -- --only search                    # 只跑检索（或 --only graph
 
 这里的重开与 RSS 是后端基准进程口径；完整 App 的窗口 + WebView 首屏与整机内存
 仍需按人工清单在真实设备上抽样。
+
+`prepare-scale-fixture.sh` 会拒绝覆盖非空目录，生成一个可长期复用的 10 万篇工作区；
+启动应用并手动打开该路径后，可记录完整窗口首屏与整机峰值 RSS。
 
 ## 8. 相关文档
 

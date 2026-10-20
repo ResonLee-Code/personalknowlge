@@ -13,6 +13,7 @@
 //! `BENCH_SCAN_TIMEOUT_S`（默认 600）。基准最后会打印一行机器可读的
 //! `PKOS_BENCH search …`，脚本靠它确认「基准真的跑了」，避免空跑变绿灯。
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -84,6 +85,40 @@ fn current_rss_bytes() -> Option<u64> {
         .map(|kb| kb * 1024)
 }
 
+enum BenchWorkspace {
+    Temporary(TempDir),
+    Persistent(PathBuf),
+}
+
+impl BenchWorkspace {
+    fn path(&self) -> &Path {
+        match self {
+            Self::Temporary(dir) => dir.path(),
+            Self::Persistent(path) => path,
+        }
+    }
+}
+
+fn prepare_workspace() -> BenchWorkspace {
+    let Some(path) = std::env::var_os("BENCH_WORKSPACE").map(PathBuf::from) else {
+        return BenchWorkspace::Temporary(
+            tempfile::tempdir().expect("工作区临时目录"),
+        );
+    };
+    if path.exists()
+        && std::fs::read_dir(&path)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(true)
+    {
+        panic!(
+            "BENCH_WORKSPACE 必须是不存在或空目录，拒绝覆盖已有数据：{}",
+            path.display()
+        );
+    }
+    std::fs::create_dir_all(&path).expect("创建持久化基准工作区");
+    BenchWorkspace::Persistent(path)
+}
+
 #[test]
 #[ignore = "性能基准，手动执行：BENCH_NOTES=10000 cargo test --offline --test search_bench -- --ignored --nocapture"]
 fn bench_search_with_10k_notes() {
@@ -92,7 +127,7 @@ fn bench_search_with_10k_notes() {
     let min_recall_pct = env_f64("BENCH_MIN_RECALL_PCT", 100.0);
     let scan_timeout_s = env_f64("BENCH_SCAN_TIMEOUT_S", 600.0);
     let data = tempfile::tempdir().expect("应用数据目录");
-    let workspace: TempDir = tempfile::tempdir().expect("工作区目录");
+    let workspace = prepare_workspace();
     let root = workspace.path().to_path_buf();
     let app = AppInner::new(data.path().to_path_buf(), Arc::new(NoopEventSink)).expect("应用状态");
     WorkspaceService::new(Arc::clone(&app))
@@ -173,6 +208,21 @@ fn bench_search_with_10k_notes() {
     let rebuild_started = Instant::now();
     let status = index_service.rebuild().expect("重建索引");
     let rebuild_elapsed = rebuild_started.elapsed();
+
+    if std::env::var("BENCH_PREPARE_ONLY").as_deref() == Ok("1") {
+        println!(
+            "PKOS_SCALE_FIXTURE workspace={} notes={} db_mb={:.2} prepare_s={:.2}",
+            root.display(),
+            total_notes,
+            std::fs::metadata(root.join(".knowledge/database.sqlite"))
+                .map(|meta| meta.len() as f64 / 1024.0 / 1024.0)
+                .unwrap_or(0.0),
+            write_elapsed.as_secs_f64()
+                + scan_elapsed.as_secs_f64()
+                + rebuild_elapsed.as_secs_f64(),
+        );
+        return;
+    }
 
     let search = SearchService::new(Arc::clone(&context));
 
