@@ -483,6 +483,73 @@ interface ReviewDueNote {
 - 切换联网档位会清空既有的确认时间戳（切回「仅本地」后再切到联网需重新确认一次）；
 - 审计写在 `.knowledge/logs/ai-audit.jsonl`，仅记录行为元数据（时间 / 能力 / 是否外发 / 结果 / 耗时 / 备注）。
 
+## 23.1 Ask 引用式问答（V2.0 M1）
+
+| 命令 | 参数 | 返回 | 说明 |
+| --- | --- | --- | --- |
+| `ask_question` | `{ input: AskQuestionInput }` | `AskAnswer` | 对当前笔记 / 分类 / 标签 / 全库提问；只读，不写笔记 |
+| `ask_answer_note_preview` | `{ input: AskSaveInput }` | `AskNotePreview` | 预览答案笔记并重新核对来源；只读 |
+| `ask_answer_save` | `{ input: AskSaveInput }` | `AskSaveResult` | `confirm=true` 后创建普通 Markdown 笔记 |
+
+`AskQuestionInput`：
+`{ question, scope: 'note'|'category'|'tag'|'all', scopeId?: string|null, selection?: string|null,
+history?: { question, answer }[], confirmOutbound?: boolean }`。
+`note/category/tag` 必须带对应 `scopeId`；问题 1–2000 字符；AI 总开关关闭返回 `AI_DISABLED`。
+`selection` 最多 4000 字符；最近 6 轮 `history` 只用于理解指代，不能作为事实或引用来源。
+
+`AskAnswer`：
+`{ question, text, citations[], provider, tier: 'online'|'local'|'template', evidenceSufficient,
+evidenceNote, warnings[], channels[], retrievedCount, tookMs }`。
+每条 `AskCitation` 为
+`{ citationId, noteId, title, chunkIndex, heading, snippet, charStart, charEnd }`；
+区间是正文（不含 frontmatter）的 Unicode 码点下标，点击后由编辑器换算成 UTF-16 并选中原文块。
+
+- 当前笔记作用域先做本笔记内 FTS5，完全无命中时退回前若干正文块；
+  其余作用域用 FTS5 + 规则查询扩展（含中文双字词，最多 8 条）；
+- 生成档顺序：在线（已授权；开启逐次确认时必须 `confirmOutbound=true`）→ 本地 → 模板；
+- 模型正文只接受本次材料编号 `[n]` / `[Cn]`。出现越界 / 零号编号或没有任何引用时，
+  当前档输出整份丢弃并继续降级；模板输出始终带材料编号；
+- 没有材料时返回 `evidenceSufficient=false`、空引用和“证据不足”说明，不生成事实性结论；
+- 审计能力名为 `ask_answer`，只记录是否外发、结果、耗时与 provider / 错误码，不记录正文。
+
+`AskSaveInput` 为 `{ answer: AskAnswer, title?, categoryId?, confirm? }`。
+预览固定 `confirm=false`；保存必须 `confirm=true`，后端仍会重新执行预览校验。
+校验项包括：答案必须有证据与引用、正文确实使用这些引用、来源笔记仍存在且
+`charStart/charEnd` 对应的原文与 `snippet` 一致。来源被外部修改返回 `NOTE_CONFLICT`，
+要求重新提问。预览返回 `{ title, content, categoryId, sources, warnings }`；
+正文包含问题、实际生成档位、答案、`[[来源笔记]]` 与折叠的原文摘录，默认落 Inbox。
+
+## 23.2 Organize 建议队列（V2.0 P0）
+
+| 命令 | 参数 | 返回 | 说明 |
+| --- | --- | --- | --- |
+| `organize_generate` | `{ noteId, kindValue, confirmOutbound? }` | `AiSuggestion` | 生成一条待确认建议；不修改 Markdown |
+| `organize_suggestions` | `{ statusValue?, kindValue?, limit }` | `AiSuggestion[]` | 查询建议队列 |
+| `organize_accept` | `{ id }` | `AiSuggestion` | 接受建议；冲突时 `NOTE_CONFLICT` |
+| `organize_accept_many` | `{ ids }` | `OrganizeBatchReport` | 逐条接受并如实返回部分失败 |
+| `organize_reject` | `{ id }` | `AiSuggestion` | 拒绝 pending 建议；不改文件 |
+| `organize_undo` | `{ id }` | `AiSuggestion` | 按接受前原字节恢复 |
+| `organize_job_create` | `{ kindValue, noteIds, confirmOutbound? }` | `AiJob` | 创建持久化批任务 |
+| `organize_job_get/list` | `{ id }` / `{ limit }` | `AiJob` / `AiJob[]` | 查询任务 |
+| `organize_job_run` | `{ id }` | `AiJob` | 同步执行到完成或暂停 / 取消边界 |
+| `organize_job_pause/resume/cancel/retry` | `{ id }` | `AiJob` | 任务控制 |
+| `organize_recover` | — | `number` | 把遗留 running 任务改为 paused |
+
+`kindValue` 取 `summary` / `tags` / `relations` / `duplicate`。
+建议记录：
+`{ id, noteId, noteTitle, kind, status, model, promptVersion, evidence[],
+payload, sourceHash, createdAt, updatedAt, appliedAt, undoneAt, error, undoAvailable }`。
+
+- 生成 / 拒绝阶段只写 `ai_suggestions`；同一笔记同类只有一个 pending，旧项标 superseded；
+- 摘要与标签在模型可用时走在线 → 本地；输出必须是严格 JSON，失败回退规则建议；
+- 接受前重算完整文件 SHA-256，必须等于 `sourceHash`；
+- 接受成功后保存完整 `before_raw` 与接受后文件哈希 `applied_hash`；撤销前核对当前文件，
+  接受后又被编辑时返回 `NOTE_CONFLICT`；通过核对后写回 `before_raw` 并同步索引与派生数据；
+- `ai_jobs / ai_job_items` 状态和计数持久化；暂停/取消在工作项边界生效；
+- 工作区重开时 `running` 任务转 `paused`，`running` item 转 `pending`；
+- 进度事件 `ai://organize-progress`：
+  `{ jobId, status, total, completed, failed, currentNoteId }`，不含正文。
+
 ## 24. 研究助手（V1.2.1 阶段 D1 / AI_ARCHITECTURE_PLAN §9）
 
 五步固定流程，每步一个命令，便于界面逐步推进、显示进度、随时中止。
@@ -493,6 +560,12 @@ interface ReviewDueNote {
 | `research_start` | `{ input: ResearchRequest }` | `ResearchSession` | 立项：课题 → 3–5 个子问题 + 本地「已知基线」；课题过于宽泛返回 `INVALID_INPUT` 并要求补充范围 |
 | `research_get` | `{ sessionId }` | `ResearchSession` | 读取会话（刷新页面后恢复现场） |
 | `research_list` | `{ limit }` | `ResearchSessionSummary[]` | 最近的会话（新的在前） |
+| `research_update_plan` | `{ sessionId, edit }` | `ResearchSession` | 收集前编辑子问题 / 时间窗 / 语言 / 来源类型 |
+| `research_rerun` | `{ sessionId }` | `ResearchSession` | 同课题重跑，`rerunOf` 指向原会话 |
+| `research_resume` | `{ sessionId }` | `ResearchSession` | 中止后保留来源并回到 Planned |
+| `research_compare` | `{ previousId, currentId }` | `ResearchComparison` | 新增 / 消失来源与结论变化 |
+| `research_template_save` | `{ sessionId, name }` | `ResearchPlanTemplate` | 保存计划模板 |
+| `research_template_list` | — | `ResearchPlanTemplate[]` | 列出计划模板 |
 | `research_collect` | `{ sessionId, confirmed }` | `ResearchSession` | 收集材料：本地 FTS5 +（D3）外部检索；`confirmed` 表示本次联网已获用户确认 |
 | `research_verify` | `{ sessionId, confirmOutbound? }` | `ResearchSession` | 按子问题汇总，≥2 个独立来源才算交叉验证；冲突判定见 C5（模型档优先，回退规则档） |
 | `research_compose` | `{ sessionId, confirmOutbound? }` | `ResearchSession` | 渲染固定六段报告（顶部「资料截至 YYYY-MM-DD」）；`confirmOutbound` 见 C2 闸门 |
@@ -504,13 +577,24 @@ interface ReviewDueNote {
 - 步骤状态机：`planned → collected → verified → composed → proposed`；顺序不可跳过
   （例如未收集就验证返回 `INVALID_INPUT`），`aborted` 后不可再推进；
   `research_proposal` 允许在 `composed` / `proposed` 重复调用（同标题冲突可能后出现）；
+- `ResearchRequest` 另外接受 `language / sourceTypes / rerunOf / planTemplateId`；
+  `ResearchPlan` 保存语言、来源类型与编辑后的查询；
+- `ResearchPlanEdit`：`{ subQuestions?: string[], timeWindowDays?, language?, sourceTypes? }`；
+  只有 Planned 状态可编辑；
+- 计划模板存 `.knowledge/research-templates/<id>.json`；复用新课题时把模板原课题文本替换为新课题；
+- `research_rerun` 复用上次实际执行的子问题、时间窗、语言与来源类型，不会静默退回默认问题；
+- `research_resume` 保留中止前的来源；再次 collect 会跳过相同来源，从工作项边界继续；
+- `ResearchComparison`：
+  `{ previousSessionId, currentSessionId, topic, addedSources[], removedSources[], unchangedSources[],
+  changedClaims[], previousEvidenceSufficient, currentEvidenceSufficient }`；
 - 会话持久化在 `.knowledge/research/<sessionId>.json`；**不写入正文**以外的任何外部系统；
 - 报告结构（顺序固定）：① 结论先行（只放交叉验证过的）② 关键事实 ③ 争议与不确定性
   ④ 与本知识库的关系（`[[标题]]`）⑤ 待验证清单 ⑥ 参考来源；推测段由模板 Provider 生成，
   默认不写入笔记，需要时在写入确认里勾选；
 - **查询扩展（N9）**：`research_start` 生成的 `ResearchPlan.queries`（字符串数组，≤6 条）就是
-  `research_collect` 实际逐条检索用的一组查询——第一条永远是课题原文，其余来自规则扩展
+  `research_collect` 实际检索用的一组查询——第一条永远是课题原文，其余来自规则扩展
   （括号短语 / 连接词切分 / 拉丁词）。`ResearchPlan.queries` 为空（旧会话）时按课题原文单条检索；
+  外部检索按计划中的查询顺序执行最多 3 条并去重，子问题编辑会实际改变联网查询；
 - **证据充分性（N9）**：`research_compose` 在定稿前评估材料够不够，结果写在
   `ResearchReport.evidence`（`{ sufficient, score, coveredSubQuestions, totalSubQuestions,
   independentSources, usableSources, gaps[], verdict, recommendation }`）。
@@ -568,7 +652,24 @@ interface ReviewDueNote {
   **本机地址永不代理**；
 - 审计：每一步都写 `research_*` 记录（不含正文）；**默认口径下 `outbound` 恒为 `false`**。
 
-### 24.1 写入纪律（`research_write`）
+### 24.1 应用更新与诊断（Platform 2.0）
+
+| 命令 | 参数 | 返回 | 说明 |
+| --- | --- | --- | --- |
+| `app_update_check` | — | `AppUpdateInfo \| null` | 只检查，不下载 |
+| `app_update_install` | — | `AppUpdateInstallResult` | 重新检查后下载、校验签名并安装 |
+| `app_restart` | — | — | 安装完成后重启应用 |
+| `app_diagnostic_export` | `{ targetPath }` | `string` | 导出运行元数据 + `app.log` / `app.log.1` |
+
+- 更新公钥在发布构建中通过 `PKOS_UPDATER_PUBKEY` 注入；缺失时检查命令明确失败；
+- 更新入口默认 `https://github.com/ResonLee-Code/personalknowlge/releases/latest/download/latest.json`，
+  可用 `PKOS_UPDATER_ENDPOINT` 在构建时覆盖；
+- `download_and_install` 由 Tauri updater 校验 minisign 签名；失败不发生安装；
+- 下载 / 校验进度事件 `app://update-progress`：
+  `{ stage: 'downloading'|'verifying', downloaded, contentLength? }`；
+- 诊断导出不读取笔记正文；用户主动选择保存路径。
+
+### 24.2 写入纪律（`research_write`）
 
 #### 实现上限（代码里的硬上限，与 `ResearchBudget` 是「上限的上限」关系）
 

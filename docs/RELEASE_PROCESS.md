@@ -28,6 +28,23 @@ preflight（ubuntu-22.04）
 
 三个构建 job 互不阻塞（除 preflight 外无依赖），因此总时长约等于最慢平台。
 
+### 2.1 V2 发布签名门槛
+
+推送 `v2.*` 标签前必须在 GitHub Secrets 配置：
+
+| Secret | 用途 |
+| --- | --- |
+| `PKOS_UPDATER_PUBKEY` | updater 公钥，编译进应用用于 minisign 校验 |
+| `TAURI_SIGNING_PRIVATE_KEY` | updater 私钥，CI 为三平台 updater 产物签名 |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | updater 私钥密码（无密码时可为空） |
+| `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` / `APPLE_SIGNING_IDENTITY` | Developer ID 证书 |
+| `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` | macOS 公证 |
+| `WINDOWS_CERTIFICATE` / `WINDOWS_CERTIFICATE_PASSWORD` | Windows 代码签名 PFX（base64） |
+
+tag 发布 preflight 会拒绝缺失 updater / Apple / Windows 签名凭据的构建；
+手动运行 workflow 在没有凭据时可产出未签名演练包，但**不能当作 V2 发布物**。
+私钥只存 Secret，不能提交仓库；丢失 updater 私钥会导致旧客户端无法验证新版本。
+
 ## 3. 发版步骤
 
 ### 分支约定（2026-10-19 起）
@@ -107,9 +124,11 @@ curl --http1.1 -L --retry 3 -x http://127.0.0.1:8118 \
 
 | 平台 | 文件 | 备注 |
 | --- | --- | --- |
-| macOS（arm64） | `Personal Knowledge OS_X.Y.Z_aarch64.dmg` | **ad-hoc 签名**（无 Developer ID、无公证）：下载副本首次打开会提示「无法验证开发者」，到 系统设置 → 隐私与安全性 → **仍要打开** 放行一次。若看到的是「**已损坏**」，说明这一版没走 ad-hoc 签名——见 [BUILD_COMMANDS.md](./BUILD_COMMANDS.md) 的「为什么必须有 ad-hoc 签名」 |
-| Windows（x64） | `..._x64-setup.exe`（NSIS）、`..._x64-portable.zip` | 未签名，SmartScreen 需放行 |
-| Linux（x64） | `*.deb`、`*.rpm`、`*.AppImage` | 需 WebKitGTK 4.1；AppImage 需 `chmod +x` |
+| macOS（arm64） | `Personal Knowledge OS_X.Y.Z_aarch64.dmg` | V2 发布要求 Developer ID 签名 + 公证；本地无证书开发包才使用 ad-hoc |
+| macOS（arm64） | `*.app.tar.gz` + `*.sig` | Tauri updater 包与 minisign 签名 |
+| Windows（x64） | `..._x64-setup.exe`（NSIS）、`..._x64-portable.zip` | V2 发布要求代码签名；本轮真机验证前不得视为完成 |
+| Linux（x64） | `*.deb`、`*.rpm`、`*.AppImage`、`*.AppImage.tar.gz` + `*.sig` | 需 WebKitGTK 4.1；AppImage 需 `chmod +x`；应用内更新使用签名的 gzip 包 |
+| 全平台 updater | `latest.json` | 版本、notes、pub_date、三平台 URL + signature |
 
 每个平台各自的 `SHA256SUMS-<platform>.txt` 会一并附在 Release 上，另有汇总的
 `SHA256SUMS-all.txt`。验收清单见：
@@ -131,7 +150,7 @@ curl --http1.1 -L --retry 3 -x http://127.0.0.1:8118 \
    preflight 会拦截不一致的标签）；
 2. macOS 目前只构建 **arm64**（`macos-14`）。如需 Intel 包，在 `macos` job 上加矩阵
    （`macos-13`，若 GitHub 仍提供）即可，产物名会带架构后缀不会冲突；
-3. Windows / Linux 产物均未签名；需要签名时在各自 job 增加证书步骤；
+3. V2 tag 发布必须配置 updater / Apple / Windows 签名 secrets；缺少时 preflight 直接失败；
 4. 本机（macOS）仍可用 `./scripts/linux/build-linux.sh`、`scripts/windows/*`、
    `pnpm tauri build --bundles app dmg` 做单平台出包，用于快速验证；
 5. 工作流跑完前不要把标签当作「已发布」——`release` job 只在三个平台全部成功后创建 Release。

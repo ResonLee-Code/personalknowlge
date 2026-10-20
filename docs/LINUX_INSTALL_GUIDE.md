@@ -7,7 +7,7 @@ Debian 12+、Fedora 38+、Arch 等，需 WebKitGTK 4.1）。
 
 | 项目 | 现状 |
 | --- | --- |
-| 应用代码 | **V1.3.7**（与 macOS / Windows 同一份代码；数据库 schema 13） |
+| 应用代码 | V2.0 开发线（数据库 schema 15；发布版本号以构建产物为准） |
 | Linux 安装包 | ✅ **V1.3.7 已随 Release 发布**：`.deb` / `.rpm` / `.AppImage`（由 CI 的 ubuntu-22.04 job 产出；本机无法交叉编译 Linux） |
 | macOS 安装包 | ✅ V1.3.7 `.dmg`（ad-hoc 签名，首次打开需「仍要打开」放行一次） |
 | Windows 安装包 | ✅ V1.3.7（交叉编译、未签名，待真机验收） |

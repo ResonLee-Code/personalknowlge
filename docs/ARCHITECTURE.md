@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 表现层 | 界面与交互，不直接访问 SQLite 与文件系统 | `src/` |
 | 命令层 | Tauri 命令，参数校验与线程调度 | `src-tauri/src/commands/` |
-| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件、模板、图谱、剪藏、关系、历史；**AI 策略闸门 / 出站代理 / 只读工具 / 研究助手 / 决策引擎+缓存+Trace / 校准与探针 / 证据充分性与查询扩展 / 嵌入与向量索引 / 本地与在线模型**） | `src-tauri/src/application/` |
+| 应用层 | 编排业务流程（工作区、笔记、分类、标签、搜索、导入、导出、备份、双向链接、附件、模板、图谱、剪藏、关系、历史；**AI 策略闸门 / Ask 引用式问答 / 出站代理 / 只读工具 / 研究助手 / 决策引擎+缓存+Trace / 校准与探针 / 证据充分性与查询扩展 / 嵌入与向量索引 / 本地与在线模型**） | `src-tauri/src/application/` |
 | 领域层 | 数据结构与不变量，不依赖框架 | `src-tauri/src/domain/` |
 | 仓储层 | 隔离 SQL 细节（trait + SQLite 实现） | `src-tauri/src/repositories/` |
 | 基础设施层 | SQLite、Markdown 存储、FTS5、文件监听、备份、frontmatter、docx 生成 | `src-tauri/src/infrastructure/` |
@@ -23,7 +23,7 @@ commands/            ← 只做转发；阻塞任务交给 async_runtime::spawn_
 application/         ← NoteService / CategoryService / TagService / SearchService / BackupService /
                        LinkService / AttachmentService / TemplateService / GraphService / IndexService /
                        WorkspaceService / ClipService / RelationService / HistoryService / ImportService / ExportService
-  application/ai/    ← AiPolicyService（四道闸门 + 审计）/ AiTools（只读工具）/ ResearchService（五步调研）
+  application/ai/    ← AiPolicyService（四道闸门 + 审计）/ AskService（引用式问答）/ AiTools（只读工具）/ ResearchService（五步调研）
                        RuleDecisionProvider（规则档打分）/ OllamaModel（本地模型）/ source_grade /
                        web_search（联网检索）/ template_provider（无模型时的报告模板）
    ▼
@@ -135,6 +135,91 @@ research_write  → 用户确认后 note_create 或 note_save（追加留历史�
   provider 标识写进报告（`rule` / `system_one:<模型>` / `local.ollama:<模型>`）；
 - **独立性口径唯一**：`evidence::source_identity()`（本地笔记按 id、外部来源按域名）同时供
   「结论是否交叉验证」与「证据是否充分」使用，不允许两处各写一套。
+
+### 3.6 Ask 引用式问答（V2.0 M1）
+
+```text
+ask_question
+  → 校验 AI 总开关
+  → 最近问答仅作为指代上下文；本轮重新检索
+  → 作用域
+      当前笔记：先在本笔记内 FTS5 定位；无词面命中时退回前若干正文块
+      分类/标签/全库：自然语言规则扩展 → FTS5 多条查询 → 按 note/chunk 去重
+  → 命中所在 `note_chunks` 映射为完整段落区间
+  → 在线（已授权 + 必要时本次确认）→ 本地 → 模板
+  → 严格解析 [n] / [Cn]：未知编号或零引用 → 丢弃该档输出 / 降级
+  → AskAnswer { text, citations[], provider, tier, evidenceSufficient, warnings, channels }
+
+ask_answer_note_preview
+  → 重新核对每条 citation 的来源笔记与原文字符区间
+  → 生成标题 / 正文 / [[来源]] / 原文摘录（只读）
+
+ask_answer_save（confirm=true）
+  → 再次执行同一套校验（来源被改则 NOTE_CONFLICT）
+  → NoteService::create 写入普通 Markdown
+```
+
+问答为只读路径；保存是单独的显式命令，预览与确认缺一不可。
+引用点击沿用 `pendingHighlight` 与 UTF-16 换算。
+浏览器预览只实现模板档，并明确标注“不调用模型”。
+
+### 3.7 Organize 建议与任务（V2.0 P0）
+
+```text
+organize_generate
+  → AI 总开关
+  → 摘要 / 标签优先走模型网关（在线已授权 → 本地）；无效 JSON 回退规则
+  → 关联 / 重复使用可解释相似度（重复：标题 / 正文 / 可选向量三路投票）
+  → 写 ai_suggestions(pending)，Markdown 不变
+
+organize_accept
+  → 重新读取完整文件 SHA-256，与 source_hash 对比
+  → 摘要 / 标签 / 关系走既有 NoteService / TagService / RelationService
+  → 保存 before_raw 与 applied_at
+
+organize_undo
+  → 按 before_raw 原字节写回
+  → 同步元数据、标签、索引、链接与关系
+
+organize_job_*
+  → ai_jobs / ai_job_items 持久化
+  → 工作项边界暂停 / 取消 / 重试
+  → 工作区重开时 running → paused、running item → pending
+```
+
+### 3.8 Research 2.0（V2.0 P0）
+
+```text
+选中文字 / 命令面板 / Ask 答案
+  → UI seed → /research → research_start（同一后端流程）
+  → research_update_plan（Planned 才允许）
+      子问题 / 时间窗 / 语言 / 来源类型 → 重算 queries
+  → research_template_save / list（.knowledge/research-templates）
+  → collect → verify → compose
+  → research_rerun（rerunOf）
+  → research_compare（新增/消失来源、结论变化、证据充分性）
+
+aborted
+  → research_resume：保留来源，回到 Planned
+  → collect：跳过已完成来源，从缺口继续
+```
+
+### 3.9 Platform 更新与诊断（V2.0 P0）
+
+```text
+关于页
+  → app_update_check：只请求 latest.json，不下载
+  → 用户确认 → app_update_install
+      → Tauri updater 下载
+      → minisign 公钥校验
+      → 校验失败：不安装，当前版本继续运行
+      → 校验成功：安装
+  → app_restart
+
+app_diagnostic_export
+  → 运行元数据 + app.log / app.log.1
+  → 不读取笔记正文
+```
 
 ## 4. 可替换性设计
 

@@ -22,6 +22,21 @@
 | 看产物体积对照表（E3） | 当前平台 | `scripts/size-report.sh` | 控制台的 Markdown 表（`--json` 可机读） |
 | 三平台一次产出 + Release | CI | `git tag vX.Y.Z && git push origin main --tags` | GitHub Release + 三平台工件 + `SHA256SUMS-*` |
 
+## 0.1 签名 updater 产物（V2）
+
+普通本地构建不生成 updater 包。需要演练签名更新时：
+
+```bash
+export PKOS_UPDATER_PUBKEY='<publickey.pem 内容>'
+export TAURI_SIGNING_PRIVATE_KEY='<privatekey.pem 内容或路径>'
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD='<密码>'
+pnpm tauri build --config src-tauri/tauri.updater.conf.json --bundles app dmg
+```
+
+Windows 使用同一 updater config，并额外用证书 thumbprint 的 JSON merge 配置；
+Linux 使用 `--config src-tauri/tauri.updater.conf.json --bundles appimage`。
+CI 会生成 `latest.json`；本地只有 updater 产物与 `.sig`，不能直接替代 GitHub Release 清单。
+
 ## 1. 前提条件（一次性）
 
 ```bash

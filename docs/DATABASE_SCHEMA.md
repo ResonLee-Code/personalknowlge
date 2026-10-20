@@ -232,6 +232,76 @@ CREATE TABLE IF NOT EXISTS chunk_embeddings (
 
 用途：让检索多一路**向量召回**，与 BM25 用 RRF 融合。
 
+### ai_suggestions（迁移 014 / 015，Organize 建议队列 · V2.0 P0）
+
+```sql
+CREATE TABLE ai_suggestions (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    note_id TEXT NOT NULL,
+    kind TEXT NOT NULL,              -- summary / tags / relations / duplicate
+    status TEXT NOT NULL,            -- pending / accepted / rejected / superseded
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    before_raw TEXT,                 -- 接受前完整文件文本，用于字节级撤销
+    applied_hash TEXT,               -- 接受后完整文件 SHA-256（迁移 015）
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    applied_at TEXT,
+    undone_at TEXT,
+    error TEXT
+);
+```
+
+- `idx_ai_suggestions_pending_unique` 是部分唯一索引：同一笔记同一类只保留一条 `pending`；
+  新建议写入前先把旧 pending 标为 `superseded`；
+- 生成 / 拒绝只改这张表，**不碰 Markdown**；接受后才走笔记、标签、关系常规业务路径；
+- 接受前重新计算完整文件 SHA-256，与 `source_hash` 不一致返回 `NOTE_CONFLICT`；
+- 接受时把完整 `before_raw` 与接受后文件哈希 `applied_hash` 一起存档；撤销前先核对当前
+  文件哈希，接受后又被编辑时返回 `NOTE_CONFLICT`，不会覆盖新内容；
+- 通过冲突检查后按 `before_raw` 原字节写回，不重新序列化 frontmatter。
+
+### ai_jobs / ai_job_items（迁移 014，Organize 持久化任务 · V2.0 P0）
+
+```sql
+CREATE TABLE ai_jobs (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,            -- queued / running / paused / canceled / completed / failed
+    total INTEGER NOT NULL,
+    completed INTEGER NOT NULL,
+    failed INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT
+);
+
+CREATE TABLE ai_job_items (
+    job_id TEXT NOT NULL,
+    item_index INTEGER NOT NULL,
+    note_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL,
+    error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (job_id, item_index),
+    UNIQUE (job_id, note_id)
+);
+```
+
+- 每篇笔记是独立任务项；暂停 / 取消在工作项边界生效，已完成项不会重跑；
+- 打开工作区时，上次遗留的 `running` 任务改为 `paused`，运行中的 item 退回 `pending`，
+  用户可从整理页面继续；
+- 失败项可重试；任务本身保存总任务数、完成数和失败数，进程重启不丢；
+- 进度事件 `ai://organize-progress` 只含计数与当前笔记 id，不含正文。
+
 - **只存向量与指纹**，不存正文（正文仍以 Markdown 文件为准）；删掉这张表只是重算一遍；
 - 主键带 `model`：换嵌入模型要各存一份，**不同模型的向量不能混用**；
 - 检索是**本地暴力余弦**（不引入向量数据库依赖）；10 万条以内够用，超过要重新评估（已知边界）；
@@ -424,7 +494,9 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 `010_note_declared_parent`（父文档声明原文，用于重试解析层级）、
 `011_note_chunks`（N5 分块索引：标题路径 + 原文字符区间）、
 `012_decision_cache`（D2/N6 决策缓存：内容寻址的键 + 过期时间）、
-`013_chunk_embeddings`（D3/N7 向量索引：分块向量 + 内容指纹），`SCHEMA_VERSION = 13`。
+`013_chunk_embeddings`（D3/N7 向量索引：分块向量 + 内容指纹）、
+`014_ai_organize`（Organize 建议队列 + 持久化任务）、
+`015_organize_undo_hash`（撤销冲突保护），`SCHEMA_VERSION = 15`。
 
 ## 6. 数据恢复能力
 
