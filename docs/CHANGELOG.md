@@ -9,6 +9,31 @@
 
 ---
 
+## V1.3.7（2026-10-20）
+
+### 修复：手动关闭窗口弹出“意外退出”
+
+**症状**：打开应用后点红色关闭键，macOS 弹出 “Personal Knowledge OS” 意外退出。
+
+**证据**：`~/Library/Logs/DiagnosticReports/personal-knowledge-os-*.ips` 连续三份
+（21:29 / 21:30 / 21:31），异常为 `SIGABRT`；主线程栈顶是
+`-[NSView removeFromSuperview]` 抛 ObjC 异常后 rethrow。本机复现：启动 10 秒后点红键，
+生成第 4 份同样栈的 `.ips`（21:33:44）。
+
+**根因**：V1.3.6 为了“绿色按钮保持系统全屏箭头、点击只缩放”，用
+`object_setClass` 把主窗口换成了动态子类 `PKOSZoomWindow`。AppKit 在关闭窗口、
+拆除视图层级时对窗口类有假设，换类导致 `removeFromSuperview` 抛异常。
+
+**修复**：
+
+- **不再换窗口类**；改为用 `class_replaceMethod` 只替换 `NSWindow` 的
+  `toggleFullScreen:` 实现，窗口仍是最原始的 `NSWindow`；
+- 绿色按钮继续由系统绘制（`full screen button`，对角箭头），点击仍只调用 `zoom:`；
+- 回归验证：红键关闭、`⌘Q` 退出各跑一次，均**没有新增** `.ips`；绿色按钮仍为
+  `full screen button`，点击后 `AXFullScreen = false`。
+
+---
+
 ## V1.3.6（2026-10-20）
 
 ### 绿色按钮：保留系统全屏箭头外观，但只做缩放

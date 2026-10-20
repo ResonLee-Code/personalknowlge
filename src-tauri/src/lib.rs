@@ -168,7 +168,7 @@ fn configure_macos_window(app: &tauri::App) {
     use std::ffi::CStr;
     use std::sync::OnceLock;
 
-    use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, Sel};
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
     use objc2::{class, msg_send, sel};
     use tauri::Manager;
 
@@ -178,7 +178,6 @@ fn configure_macos_window(app: &tauri::App) {
     };
     match window.ns_window() {
         Ok(pointer) => {
-            /// 绿色按钮保持系统“全屏”外观（对角箭头），但执行系统“缩放”。
             extern "C-unwind" fn toggle_full_screen_as_zoom(
                 this: &mut AnyObject,
                 _cmd: Sel,
@@ -188,24 +187,27 @@ fn configure_macos_window(app: &tauri::App) {
                 let _: () = unsafe { msg_send![this, zoom: std::ptr::null_mut::<AnyObject>()] };
             }
 
-            static ZOOM_ONLY_WINDOW: OnceLock<&'static AnyClass> = OnceLock::new();
-            let zoom_class = ZOOM_ONLY_WINDOW.get_or_init(|| {
-                let name = CStr::from_bytes_with_nul(b"PKOSZoomWindow\0").expect("class name");
-                let mut builder = ClassBuilder::new(name, class!(NSWindow))
-                    .expect("创建 PKOSZoomWindow 失败（已存在？）");
+            // 不要用 object_setClass 换窗口类：实测会让 AppKit 在关闭窗口
+            // （-[NSView removeFromSuperview]）时抛 ObjC 异常并 SIGABRT。
+            // 改为只替换 NSWindow 的 toggleFullScreen: 实现，窗口类保持不变。
+            static ZOOM_REDIRECT: OnceLock<()> = OnceLock::new();
+            ZOOM_REDIRECT.get_or_init(|| {
                 unsafe {
-                    builder.add_method(
+                    let types = CStr::from_bytes_with_nul(b"v@:@\0").expect("method types");
+                    let imp: Imp = std::mem::transmute(
+                        toggle_full_screen_as_zoom
+                            as extern "C-unwind" fn(&mut AnyObject, Sel, *mut AnyObject),
+                    );
+                    objc2::ffi::class_replaceMethod(
+                        class!(NSWindow) as *const AnyClass as *mut AnyClass,
                         sel!(toggleFullScreen:),
-                        toggle_full_screen_as_zoom as extern "C-unwind" fn(_, _, _),
+                        imp,
+                        types.as_ptr(),
                     );
                 }
-                builder.register()
             });
 
-            // SAFETY: setup 在 macOS 主线程执行；子类只重写 toggleFullScreen:，
-            // 不新增实例变量，实例大小与 NSWindow 相同。
-            let ns_window = pointer as *mut AnyObject;
-            unsafe { AnyObject::set_class(&*ns_window, zoom_class) };
+            let _ = pointer;
             tracing::info!(
                 target: "app",
                 "macOS 绿色按钮保留系统全屏箭头外观，但 toggleFullScreen: 已重定向为 zoom:"

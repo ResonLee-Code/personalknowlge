@@ -34,27 +34,27 @@ scripts/size-report.sh --json   # 机器可读
 
 两者差 **8.6 倍**。所以任何"体积多少"的说法，不写清楚是哪个配置，等于没说。
 
-## 2. 本机当前产物（自动生成，2026-10-20，V1.3.6 出包演练）
+## 2. 本机当前产物（自动生成，2026-10-20，V1.3.7 出包演练）
 
 机器：**macOS 27.0.1 / arm64**。生成命令：`scripts/size-report.sh`。
 
 | 产物形态 | 平台 | 体积 | MiB | 路径（相对仓库根） |
 | --- | --- | ---: | ---: | --- |
 | 前端构建产物（未压缩） | 当前平台 | 7,024,266 B | 6.70 | `dist` |
-| release 可执行文件（strip + LTO） | macOS arm64 | **11,940,816 B** | 11.39 | `src-tauri/target/release/personal-knowledge-os` |
-| debug 可执行文件（未 strip） | macOS arm64 | 90,665,144 B | 86.47 | `src-tauri/target/debug/personal-knowledge-os` |
-| macOS 应用包（`.app`） | macOS arm64 | 12,030,902 B | 11.47 | `src-tauri/target/release/bundle/macos/Personal Knowledge OS.app` |
+| release 可执行文件（strip + LTO） | macOS arm64 | **11,940,832 B** | 11.39 | `src-tauri/target/release/personal-knowledge-os` |
+| debug 可执行文件（未 strip） | macOS arm64 | 90,661,976 B | 86.46 | `src-tauri/target/debug/personal-knowledge-os` |
+| macOS 应用包（`.app`） | macOS arm64 | 12,030,918 B | 11.47 | `src-tauri/target/release/bundle/macos/Personal Knowledge OS.app` |
 | macOS 磁盘镜像（`.dmg`，**旧版残留**） | macOS arm64 | 5,431,245 B | 5.18 | `src-tauri/target/release/bundle/dmg/Personal Knowledge OS_1.3.0_aarch64.dmg` |
 | macOS 签名（`.app` / `.dmg` 里的那份） | macOS arm64 | ad-hoc，`Identifier=com.personalknowledge.os` | — | `codesign --verify --deep --strict …` 通过；**不签就会在下载副本上报"已损坏"**，见 [BUILD_COMMANDS.md](./BUILD_COMMANDS.md) |
 | Windows 可执行文件（交叉编译） | Windows x64 | 8,495,616 B | 8.10 | `src-tauri/target/x86_64-pc-windows-gnu/release/personal-knowledge-os.exe` |
 | Windows 安装包（NSIS，V1.2.0 产物） | Windows x64 | 3,259,700 B | 3.11 | `dist-windows/Personal Knowledge OS_1.2.0_x64-setup.exe` |
 | Windows 便携版（zip，V1.2.0 产物） | Windows x64 | 3,973,990 B | 3.79 | `dist-windows/Personal Knowledge OS_1.2.0_x64-portable.zip` |
 
-`.app` 内的 `Info.plist` 显示 `CFBundleShortVersionString = 1.3.6`（与四处版本号一致，已核对）。
+`.app` 内的 `Info.plist` 显示 `CFBundleShortVersionString = 1.3.7`（与四处版本号一致，已核对）。
 
-`.app` 的构成（2026-10-20 带 ad-hoc 签名后的实测）：`MacOS/personal-knowledge-os` 11,871,536 B +
+`.app` 的构成（2026-10-20 带 ad-hoc 签名后的实测）：`MacOS/personal-knowledge-os` 11,871,552 B +
 `Resources/icon.icns` 155,840 B + `_CodeSignature/CodeResources` 2,440 B + `Info.plist` 1,086 B。
-注意：**包内那个二进制（11,871,536 B）与独立构建出来的（11,940,816 B）不是一个数**——
+注意：**包内那个二进制（11,871,552 B）与独立构建出来的（11,940,832 B）不是一个数**——
 打包时 tauri 会用 `codesign` 重新签一遍（带上 hardened runtime 标记），签名数据不同，别混着比。
 
 ### 2.1 已发布版本的 Release 资产（CI 实测，精确字节）
@@ -140,10 +140,12 @@ Linux 为 `ubuntu-22.04`（x64）。**不可与本机 arm64 构建的数字混�
 | **V1.3.4** | **11,940,720 B（11.39 MiB）** | 实测（2026-10-19，视觉对齐；字节数与 V1.3.3 相同） |
 | **V1.3.5** | **11,940,736 B（11.39 MiB）** | 实测（2026-10-19，删除自绘标题栏 + macOS 原生缩放；+16 B） |
 | **V1.3.6** | **11,940,816 B（11.39 MiB）** | 实测（2026-10-20，原生全屏箭头 + toggleFullScreen→zoom；+80 B） |
+| **V1.3.7** | **11,940,832 B（11.39 MiB）** | 实测（2026-10-20，关闭崩溃修复；+16 B） |
 
 差值：V1.2.0 → V1.2.1 **+2,054,848 B**；V1.2.1 → V1.3.0 **+728,032 B**；
 V1.3.0 → V1.3.1 **+1,370,496 B**；V1.3.1 → V1.3.2 **0 B**；V1.3.2 → V1.3.3 **+16 B**；
-V1.3.3 → V1.3.4 **0 B**；V1.3.4 → V1.3.5 **+16 B**；V1.3.5 → V1.3.6 **+80 B**。
+V1.3.3 → V1.3.4 **0 B**；V1.3.4 → V1.3.5 **+16 B**；V1.3.5 → V1.3.6 **+80 B**；
+V1.3.6 → V1.3.7 **+16 B**。
 
 **这些差值归因到功能时要小心**：仓库**没有任何 tag**，V1.2.0 / V1.2.1 的源码状态无法重建，
 上面的旧值只能引用当时的记录，**不能**现在重新量一遍。能确证的只有两件事：
@@ -170,8 +172,8 @@ macOS 侧同理留 `dist-macos/`，这样下一个版本能拿**同一台机器�
 
 | 层 | 体积 | 说明 |
 | --- | ---: | --- |
-| release 二进制 | 11,940,816 B | 后端 + 宿主窗口；**前端资源已内嵌** |
-| `.app` 包 | 12,030,902 B | = 包内二进制 11,871,536 B + `icon.icns` 155,840 B + `CodeResources` 2,440 B + `Info.plist` 1,086 B |
+| release 二进制 | 11,940,832 B | 后端 + 宿主窗口；**前端资源已内嵌** |
+| `.app` 包 | 12,030,918 B | = 包内二进制 11,871,552 B + `icon.icns` 155,840 B + `CodeResources` 2,440 B + `Info.plist` 1,086 B |
 | 前端 `dist`（未压缩源） | 7,024,266 B | 构建期输入；发布时被内嵌进二进制，**不是**额外增量 |
 | debug 二进制 | 90,658,408 B | 同码不同配置，见 §1 |
 

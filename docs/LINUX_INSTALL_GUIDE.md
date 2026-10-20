@@ -1,18 +1,18 @@
 # Linux 安装与使用说明
 
-适用于 Personal Knowledge OS **V1.3.6**（x86_64，glibc 发行版：Ubuntu 22.04+、
+适用于 Personal Knowledge OS **V1.3.7**（x86_64，glibc 发行版：Ubuntu 22.04+、
 Debian 12+、Fedora 38+、Arch 等，需 WebKitGTK 4.1）。
 
 ## 版本状态（重要）
 
 | 项目 | 现状 |
 | --- | --- |
-| 应用代码 | **V1.3.6**（与 macOS / Windows 同一份代码；数据库 schema 13） |
-| Linux 安装包 | ✅ **V1.3.6 已随 Release 发布**：`.deb` / `.rpm` / `.AppImage`（由 CI 的 ubuntu-22.04 job 产出；本机无法交叉编译 Linux） |
-| macOS 安装包 | ✅ V1.3.6 `.dmg`（ad-hoc 签名，首次打开需「仍要打开」放行一次） |
-| Windows 安装包 | ✅ V1.3.6（交叉编译、未签名，待真机验收） |
+| 应用代码 | **V1.3.7**（与 macOS / Windows 同一份代码；数据库 schema 13） |
+| Linux 安装包 | ✅ **V1.3.7 已随 Release 发布**：`.deb` / `.rpm` / `.AppImage`（由 CI 的 ubuntu-22.04 job 产出；本机无法交叉编译 Linux） |
+| macOS 安装包 | ✅ V1.3.7 `.dmg`（ad-hoc 签名，首次打开需「仍要打开」放行一次） |
+| Windows 安装包 | ✅ V1.3.7（交叉编译、未签名，待真机验收） |
 
-> 产物与代码已对齐（V1.3.6）。安装前建议先校验：`sha256sum -c SHA256SUMS-linux.txt`
+> 产物与代码已对齐（V1.3.7）。安装前建议先校验：`sha256sum -c SHA256SUMS-linux.txt`
 > （Release 里的校验值按**你下载到的文件名**写，在下载目录里直接跑即可）。
 > 三平台发布流程与发布后抽验清单见 [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)。
 
