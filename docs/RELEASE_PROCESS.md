@@ -85,6 +85,24 @@ python3 scripts/cross/verify-pe.py "<解包出来的>/Personal Knowledge OS.exe"
 > 注意：`x64-setup.exe` 是 NSIS 安装器，**外壳是 32 位 stub 属正常**，
 > 别拿 `verify-pe.py` 直接判它「不是 x64」。
 
+### 通过 MonoProxy 下载发布物（2026-10-20）
+
+本机代理 `127.0.0.1:8118` 是 **MonoProxyMac**；它的设置里没有暴露 HTTP/2 开关。
+下载 GitHub 大资产（尤其 85 MB 的 AppImage）时，HTTP/2 会偶发
+`PROTOCOL_ERROR` / 流未正常关闭。客户端侧固定 HTTP/1.1：
+
+```bash
+# 本仓库的 git（仓库本地配置，不改全局）
+git config http.version HTTP/1.1
+
+# curl 下载发布物（所有 GitHub 大文件都建议这样）
+curl --http1.1 -L --retry 3 -x http://127.0.0.1:8118 \
+  -o <asset> "https://github.com/.../releases/download/<tag>/<asset>"
+```
+
+这不会改变代理本身的协议能力；只是让 curl / git 不主动协商 HTTP/2。
+如果要在代理侧彻底关闭，需要 MonoProxy 提供对应选项或改它的配置——当前版本没有可用的用户开关。
+
 ## 4. 产物与校验
 
 | 平台 | 文件 | 备注 |
