@@ -50,7 +50,23 @@ v1.3.6 用 `object_setClass` 把主窗口换成动态子类 `PKOSZoomWindow`，�
 
 ## D. 发布后抽验
 
-（CI 完成后填写。）
+Release 已生成（10 个资产）。按用户路径抽验：
+
+| 项目 | 结果 | 证据 |
+| --- | --- | --- |
+| 校验文件行尾 | ✅ 全部 LF | 4 份 `SHA256SUMS-*.txt` 均无 `\r` |
+| macOS `.dmg` | ✅ 哈希一致、版本 `1.3.7`、`codesign` 有效 | 挂载后 `CFBundleShortVersionString = 1.3.7` |
+| **发布 dmg 的关闭回归** | ✅ **PASS** | 直接启动挂载的 Release `.app`，5 秒后点红键：无新增 `.ips` |
+| Windows 便携版 exe | ✅ PE32+ / x86-64 / GUI | `verify-pe.py` |
+| Windows `setup.exe` | ✅ NSIS 安装器 | PE32 i386 stub 属正常 |
+| Linux `.deb` | ✅ `Version: 1.3.7`、`Architecture: amd64` | control + payload |
+| Linux `.rpm` | ✅ 结构完整 | `bsdtar -tf` |
+| Linux `.AppImage` | ⚠️ 本轮未重新下载 | 85.7 MB；代理 HTTP/2 反复中断，下载到 23 MB 后停止。CI 资产存在且大小匹配 |
+| 汇总校验 | ⚠️ 已验 **5/6** | dmg/setup/zip/deb/rpm 全部 OK；AppImage 未完成下载 |
+
+> 如实记录：本轮没有把 AppImage 完整下载再校验。它与 v1.3.6 使用同一套 Linux 构建，
+> 且本次改动只在 macOS 的 `lib.rs`；对用户报的 macOS 关闭崩溃，决定性证据是
+> **Release dmg 直接启动后红键关闭 PASS**。
 
 ## E. 已知限制
 

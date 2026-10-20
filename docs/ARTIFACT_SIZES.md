@@ -112,6 +112,17 @@ Linux 为 `ubuntu-22.04`（x64）。**不可与本机 arm64 构建的数字混�
 | `Personal.Knowledge.OS-1.3.6-1.x86_64.rpm` | Linux x64 | 7,743,418 |
 | `Personal.Knowledge.OS_1.3.6_amd64.AppImage` | Linux x64 | 85,723,640 |
 
+**V1.3.7**（关闭崩溃修复；CI 资产）：
+
+| 资产 | 平台 | 字节 |
+| --- | --- | ---: |
+| `Personal.Knowledge.OS_1.3.7_aarch64.dmg` | macOS arm64 | 6,972,918 |
+| `Personal.Knowledge.OS_1.3.7_x64-setup.exe` | Windows x64（NSIS） | 5,822,330 |
+| `Personal.Knowledge.OS_1.3.7_x64-portable.zip` | Windows x64（便携） | 7,021,013 |
+| `Personal.Knowledge.OS_1.3.7_amd64.deb` | Linux x64 | 7,742,616 |
+| `Personal.Knowledge.OS-1.3.7-1.x86_64.rpm` | Linux x64 | 7,743,688 |
+| `Personal.Knowledge.OS_1.3.7_amd64.AppImage` | Linux x64 | 85,723,640 |
+
 ## 3. 每个形态"包含什么、能不能独立运行"
 
 | 形态 | 里面是什么 | 能独立运行吗 | 复现命令 |
