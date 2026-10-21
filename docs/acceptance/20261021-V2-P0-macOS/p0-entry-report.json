@@ -1,0 +1,147 @@
+{
+  "startedAt": "2026-10-21T16:17:47.856Z",
+  "mode": "real（真机执行）",
+  "appName": "Personal Knowledge OS",
+  "workspace": "/private/tmp/pkos-app-scale-smoke-65888",
+  "scene": {
+    "ok": true,
+    "steps": [
+      {
+        "op": "activate",
+        "status": "passed",
+        "detail": "已把应用切到前台",
+        "evidence": ""
+      },
+      {
+        "op": "cleanup",
+        "status": "passed",
+        "detail": "按 Esc 清掉可能残留的弹层",
+        "evidence": ""
+      },
+      {
+        "op": "scene",
+        "status": "passed",
+        "detail": "应用已在主界面：直接开始用例（若当前打开的不是目标工作区，文件断言会如实报错）",
+        "evidence": ""
+      }
+    ]
+  },
+  "summary": "0 条通过、0 条失败、1 条待人工（自动步骤 15 步通过 / 0 步失败）",
+  "autoSteps": {
+    "passed": 15,
+    "failed": 0
+  },
+  "cases": [
+    {
+      "id": 14,
+      "title": "V2 P0 原生入口：Ask / 整理建议 / 研究助手",
+      "expect": "原生应用可从顶栏进入 Ask、从侧栏进入整理建议与研究助手，页面内容真实渲染",
+      "steps": [
+        {
+          "op": "app",
+          "status": "passed",
+          "detail": "app=Personal Knowledge OS pid=80637",
+          "evidence": ""
+        },
+        {
+          "op": "keyCode",
+          "status": "passed",
+          "detail": "keyCode(53)",
+          "evidence": ""
+        },
+        {
+          "op": "click",
+          "status": "passed",
+          "detail": "click(1342,89) · AXPress",
+          "evidence": ""
+        },
+        {
+          "op": "pause",
+          "status": "passed",
+          "detail": "等待 900 ms（等界面自己完成）",
+          "evidence": ""
+        },
+        {
+          "op": "expectElement",
+          "status": "passed",
+          "detail": "界面上找到了：Ask 面板的提问范围",
+          "evidence": "✓ 界面存在「Ask 面板的提问范围」"
+        },
+        {
+          "op": "shot",
+          "status": "passed",
+          "detail": "截图已存档",
+          "evidence": "截图 `14-ask-panel.png`"
+        },
+        {
+          "op": "keyCode",
+          "status": "passed",
+          "detail": "keyCode(53)",
+          "evidence": ""
+        },
+        {
+          "op": "click",
+          "status": "passed",
+          "detail": "click(182,444) · AXPress",
+          "evidence": ""
+        },
+        {
+          "op": "pause",
+          "status": "passed",
+          "detail": "等待 900 ms（等界面自己完成）",
+          "evidence": ""
+        },
+        {
+          "op": "expectElement",
+          "status": "passed",
+          "detail": "界面上找到了：整理建议页面的只建议说明",
+          "evidence": "✓ 界面存在「整理建议页面的只建议说明」"
+        },
+        {
+          "op": "shot",
+          "status": "passed",
+          "detail": "截图已存档",
+          "evidence": "截图 `14-organize.png`"
+        },
+        {
+          "op": "click",
+          "status": "passed",
+          "detail": "click(182,410) · AXPress",
+          "evidence": ""
+        },
+        {
+          "op": "pause",
+          "status": "passed",
+          "detail": "等待 900 ms（等界面自己完成）",
+          "evidence": ""
+        },
+        {
+          "op": "expectElement",
+          "status": "passed",
+          "detail": "界面上找到了：研究助手五步流程说明",
+          "evidence": "✓ 界面存在「研究助手五步流程说明」"
+        },
+        {
+          "op": "shot",
+          "status": "passed",
+          "detail": "截图已存档",
+          "evidence": "截图 `14-research.png`"
+        },
+        {
+          "op": "manual",
+          "status": "manual",
+          "detail": "三个新增页面的信息层级、留白与长文案观感需人眼确认",
+          "evidence": ""
+        }
+      ],
+      "status": "manual"
+    }
+  ],
+  "manualOnly": [
+    {
+      "id": 10,
+      "title": "首次启动放行（Gatekeeper）",
+      "reason": "只对「从网络下载的包」有意义；本机构建无 quarantine，脚本无法覆盖"
+    }
+  ]
+}

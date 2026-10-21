@@ -728,6 +728,44 @@ const CASES = [
       },
     ],
   },
+  {
+    id: 14,
+    title: 'V2 P0 原生入口：Ask / 整理建议 / 研究助手',
+    expect: '原生应用可从顶栏进入 Ask、从侧栏进入整理建议与研究助手，页面内容真实渲染',
+    steps: [
+      { op: 'app' },
+      { op: 'keyCode', code: 53 },
+      { op: 'click', frame: { title: '问知识库' } },
+      { op: 'pause', ms: 900 },
+      {
+        op: 'expectElement',
+        query: { title: '提问范围' },
+        label: 'Ask 面板的提问范围',
+      },
+      { op: 'shot', name: '14-ask-panel.png' },
+      { op: 'keyCode', code: 53 },
+      { op: 'click', frame: { title: '整理建议' } },
+      { op: 'pause', ms: 900 },
+      {
+        op: 'expectElement',
+        query: { title: 'AI 只生成建议' },
+        label: '整理建议页面的只建议说明',
+      },
+      { op: 'shot', name: '14-organize.png' },
+      { op: 'click', frame: { title: '研究助手' } },
+      { op: 'pause', ms: 900 },
+      {
+        op: 'expectElement',
+        query: { title: '用五步把「一个课题」做成可复核的调研报告' },
+        label: '研究助手五步流程说明',
+      },
+      { op: 'shot', name: '14-research.png' },
+      {
+        op: 'manual',
+        note: '三个新增页面的信息层级、留白与长文案观感需人眼确认',
+      },
+    ],
+  },
 ];
 
 /** 第 10 条（首次启动放行）**只能**在干净机器上人工验，脚本明确不覆盖。 */
