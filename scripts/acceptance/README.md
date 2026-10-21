@@ -63,6 +63,15 @@ scripts/acceptance/run.sh --only 3,4    # 只跑第 3、4 条（调某一条时�
 - 报告：[`report.md`](../../docs/acceptance/20261021-V2-P0-macOS/report.md)；
   P0 原生入口：[`p0-entry-report.md`](../../docs/acceptance/20261021-V2-P0-macOS/p0-entry-report.md)。
 
+### 2026-10-22：用例 4 状态污染复测
+
+- 在真实 App、`/private/tmp/pkos-acceptance` 工作区重跑大纲栏位切换用例；
+- **39 个自动步骤通过 / 0 失败**，覆盖列表栏大纲 → 正文右侧 → 贴边悬停 → 钉住 →
+  返回列表栏 → 拖拽分栏；
+- 旧记录中的 37/39 属于验收现场状态 / 导航残留，不再是当前代码失败；
+- 仅保留拖拽跟手与悬停动效观感的人工判断；
+- 证据：[`report.md`](../../docs/acceptance/20261022-V2-case4/report.md)。
+
 ### 2026-10-19：非全屏窗口纵向布局（V1.3.2）
 
 - **为什么手工量**：正文可见高度取决于 WebView 的滚动视口，而 AX 树里 CodeMirror 的
