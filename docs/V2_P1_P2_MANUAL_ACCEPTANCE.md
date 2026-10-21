@@ -3,6 +3,8 @@
 > 自动门禁与当前状态见 [PLAN_V2_P1_P2_EXECUTION.md](./PLAN_V2_P1_P2_EXECUTION.md)。
 > 本清单只列确实需要真实模型、真实远端、真实平台或人工判断的项目。
 > 未执行的项目保持未勾选，不以自动化、mock 或本地桩替代。
+> 统一执行顺序、前置材料与证据目录见
+> [V2 统一人工真机验收执行包](./acceptance/V2_UNIFIED_MANUAL_PLAN.md)。
 
 ## 1. Graph 2.0
 

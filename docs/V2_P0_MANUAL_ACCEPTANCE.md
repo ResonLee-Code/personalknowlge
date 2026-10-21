@@ -3,6 +3,8 @@
 > 本清单只放自动化无法证明、需要真实设备 / 真实凭据 / 人工判断的事项。
 > 在代码 P0 收口后统一执行，不提前用 mock 或 CI 绿结果代替。
 > 每轮执行时从 [验收报告模板](./acceptance/V2_P0_REPORT_TEMPLATE.md) 复制一份并填写证据。
+> 统一执行顺序、前置材料与证据目录见
+> [V2 统一人工真机验收执行包](./acceptance/V2_UNIFIED_MANUAL_PLAN.md)。
 > 2026-10-21 macOS 已执行关键 UI 与 P0 原生入口自动步骤 126/126；完整记录见
 > [macOS P0 真机报告](./acceptance/20261021-V2-P0-macOS/report.md)。
 
