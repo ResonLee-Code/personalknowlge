@@ -44,8 +44,8 @@ test('Writing 逐段接受 → diff → 确认写入', async ({ page }) => {
 test('Graph 洞察展示可解释近邻与只读重复预览', async ({ page }) => {
   await createNote(page, '索引设计', '# 索引设计\n\n全文检索使用倒排索引和分块检索。');
   await page.getByRole('button', { name: '新建笔记' }).first().click();
-  await page.getByLabel('标题', { exact: true }).fill('检索优化');
-  await page.getByLabel('初始内容（可选）').fill('# 检索优化\n\n全文检索需要倒排索引和分块策略。');
+  await page.getByLabel('标题', { exact: true }).fill('索引设计旧版');
+  await page.getByLabel('初始内容（可选）').fill('# 索引设计\n\n全文检索使用倒排索引和分块检索。');
   await page.getByRole('button', { name: '创建笔记' }).click();
   await page.goto('/#/graph');
   await page.getByRole('button', { name: '洞察' }).click();
@@ -53,6 +53,12 @@ test('Graph 洞察展示可解释近邻与只读重复预览', async ({ page }) 
   await expect(page.getByText('本地词项 + 证据', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: '语义近邻' })).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '51-graph-insights.png') });
+  await page.getByRole('button', { name: /索引设计旧版.*2 篇/ }).click();
+  await expect(page.getByTestId('duplicate-preview')).toBeVisible();
+  await page.getByRole('button', { name: '生成引用摘要' }).click();
+  await expect(page.getByText('摘要预览（写入前可取消）')).toBeVisible();
+  await page.getByRole('button', { name: '确认新建摘要笔记' }).click();
+  await expect(page.locator('.cm-content')).toContainText('写作来源');
 });
 
 test('Sync 设置能保存非秘密配置且密码不回显', async ({ page }) => {

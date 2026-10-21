@@ -6,18 +6,26 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use personal_knowledge_os_lib::application::ai::policy::AiPolicyService;
+use personal_knowledge_os_lib::application::ai::writing::WritingService;
 use personal_knowledge_os_lib::application::attachment_service::{
     AttachmentService, SaveAttachmentInput,
 };
+use personal_knowledge_os_lib::application::graph_service::GraphService;
 use personal_knowledge_os_lib::application::note_service::NoteService;
+use personal_knowledge_os_lib::application::search_service::SearchService;
 use personal_knowledge_os_lib::application::sync::SyncService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::error::ErrorCode;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
+use personal_knowledge_os_lib::domain::ai::UpdateAiPolicyInput;
+use personal_knowledge_os_lib::domain::graph::GraphQuery;
 use personal_knowledge_os_lib::domain::note::{CreateNoteInput, NoteListQuery, SaveNoteInput};
+use personal_knowledge_os_lib::domain::search::SearchQuery;
 use personal_knowledge_os_lib::domain::sync::{
     ResolveSyncConflictInput, SyncRunInput, UpdateSyncSettingsInput,
 };
+use personal_knowledge_os_lib::domain::writing::{WritingMode, WritingRequest};
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -33,6 +41,7 @@ struct StoredObject {
 struct DavState {
     objects: HashMap<String, StoredObject>,
     sequence: u64,
+    include_etags: bool,
 }
 
 struct LocalDav {
@@ -44,10 +53,17 @@ struct LocalDav {
 
 impl LocalDav {
     fn start(auth: &str) -> Self {
+        Self::start_with_etags(auth, true)
+    }
+
+    fn start_with_etags(auth: &str, include_etags: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("启动本地同步服务");
         listener.set_nonblocking(true).expect("设置非阻塞 listener");
         let address = listener.local_addr().expect("本地地址");
-        let state = Arc::new(Mutex::new(DavState::default()));
+        let state = Arc::new(Mutex::new(DavState {
+            include_etags,
+            ..Default::default()
+        }));
         let stop = Arc::new(AtomicBool::new(false));
         let state_for_thread = Arc::clone(&state);
         let stop_for_thread = Arc::clone(&stop);
@@ -190,13 +206,20 @@ fn handle_connection(
     let mut guard = state.lock().expect("服务端状态");
     match method {
         "GET" | "HEAD" => match guard.objects.get(&path).cloned() {
-            Some(object) => respond(
-                &mut stream,
-                200,
-                &[("ETag", object.etag.as_str())],
-                if method == "HEAD" { b"" } else { &object.bytes },
-                None,
-            ),
+            Some(object) => {
+                let headers: Vec<(&str, &str)> = if guard.include_etags {
+                    vec![("ETag", object.etag.as_str())]
+                } else {
+                    Vec::new()
+                };
+                respond(
+                    &mut stream,
+                    200,
+                    &headers,
+                    if method == "HEAD" { b"" } else { &object.bytes },
+                    None,
+                )
+            }
             None => respond(&mut stream, 404, &[], b"", None),
         },
         "PUT" => {
@@ -214,7 +237,12 @@ fn handle_connection(
                     etag: etag.clone(),
                 },
             );
-            respond(&mut stream, 201, &[("ETag", etag.as_str())], b"", None)
+            let headers: Vec<(&str, &str)> = if guard.include_etags {
+                vec![("ETag", etag.as_str())]
+            } else {
+                Vec::new()
+            };
+            respond(&mut stream, 201, &headers, b"", None)
         }
         "DELETE" => {
             guard.objects.remove(&path);
@@ -374,6 +402,10 @@ impl Device {
 
     fn workspace_root(&self) -> &std::path::Path {
         self._workspace.path()
+    }
+
+    fn data_root(&self) -> &std::path::Path {
+        self._data.path()
     }
 
     fn run_sync(&self) -> personal_knowledge_os_lib::domain::sync::SyncRunReport {
@@ -556,6 +588,44 @@ fn webdav_two_device_add_modify_delete_conflict_and_merge() {
         .expect("关闭同步后仍可本地读取")
         .content
         .contains("第二行旧值"));
+
+    drop(remote);
+    let context = device_b.app.context().expect("关闭同步后的本地上下文");
+    let search = SearchService::new(Arc::clone(&context))
+        .search(SearchQuery {
+            keyword: "三方冲突".to_string(),
+            ..Default::default()
+        })
+        .expect("关闭同步后检索仍可用");
+    assert!(
+        search.hits.iter().any(|hit| hit.note.title == "三方冲突"),
+        "关闭同步并断开远端后，检索不应受影响"
+    );
+    let graph = GraphService::new(Arc::clone(&context))
+        .graph(GraphQuery::default())
+        .expect("关闭同步后图谱仍可用");
+    assert!(
+        graph.nodes.iter().any(|node| node.title == "三方冲突"),
+        "关闭同步后图谱应继续读取本地图"
+    );
+    AiPolicyService::new(Arc::clone(&context))
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            ..Default::default()
+        })
+        .expect("开启本地 AI 降级");
+    let writing = WritingService::new(Arc::clone(&context))
+        .draft(WritingRequest {
+            note_id: device_b.find_note("三方冲突"),
+            mode: Some(WritingMode::Shorten),
+            instruction: "保持本地可用".to_string(),
+            selection: Some("第二行旧值".to_string()),
+            selection_start: Some(0),
+            selection_end: Some(8),
+            confirm_outbound: false,
+        })
+        .expect("关闭同步后写作模板仍可用");
+    assert!(!writing.segments.is_empty());
 }
 
 #[test]
@@ -633,11 +703,61 @@ fn wrong_passphrase_and_tampered_ciphertext_are_rejected() {
 }
 
 #[test]
+fn missing_manifest_etag_refuses_to_overwrite_remote_state() {
+    let remote = LocalDav::start_with_etags("Basic dXNlcjpwYXNz", false);
+    let device = Device::new("ETag 缺失");
+    device.clear_initial_notes();
+    device.configure_webdav(&remote.endpoint);
+    let note = device.note("无 ETag", "# 无 ETag\n\n初始正文。");
+    device.run_sync();
+    device.save_note(&note, "# 无 ETag\n\n本地第二版。");
+
+    let error = device
+        .sync()
+        .run(SyncRunInput {
+            passphrase: PASSPHRASE.to_string(),
+            confirm: true,
+        })
+        .expect_err("已有 manifest 但服务端无 ETag 时必须拒绝覆盖");
+    assert_eq!(error.code, ErrorCode::SyncFailed);
+    assert!(
+        error.message.contains("ETag"),
+        "错误需要明确说明并发保护缺什么：{}",
+        error.message
+    );
+    assert!(device
+        .notes()
+        .get(&note)
+        .expect("本地版本")
+        .content
+        .contains("本地第二版"));
+}
+
+#[test]
 fn offline_changes_are_queued_and_local_editing_stays_available() {
     let remote = LocalDav::start("Basic dXNlcjpwYXNz");
     let device = Device::new("离线队列");
     device.clear_initial_notes();
     device.configure_webdav(&remote.endpoint);
+    let credential_file = std::fs::read_dir(device.data_root().join("sync"))
+        .expect("同步状态目录")
+        .flatten()
+        .map(|entry| entry.path().join("credentials.json"))
+        .find(|path| path.is_file())
+        .expect("应用数据目录应保存同步凭据");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&credential_file)
+                .expect("凭据文件元数据")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "同步凭据必须仅当前用户可读写"
+        );
+    }
     let note = device.note("离线编辑", "# 离线编辑\n\n初始正文。");
     device.run_sync();
 
@@ -654,6 +774,17 @@ fn offline_changes_are_queued_and_local_editing_stays_available() {
     assert!(
         device.sync().settings().pending_queue >= 1,
         "网络失败后本地修改必须进入持久重试队列"
+    );
+    let root = device.workspace_root().to_path_buf();
+    WorkspaceService::new(Arc::clone(&device.app))
+        .close()
+        .expect("关闭离线队列工作区");
+    WorkspaceService::new(Arc::clone(&device.app))
+        .open(&root.to_string_lossy())
+        .expect("重开离线队列工作区");
+    assert!(
+        device.sync().settings().pending_queue >= 1,
+        "离线队列必须跨应用重启保留"
     );
     assert!(device
         .notes()

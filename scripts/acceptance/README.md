@@ -72,6 +72,16 @@ scripts/acceptance/run.sh --only 3,4    # 只跑第 3、4 条（调某一条时�
 - 仅保留拖拽跟手与悬停动效观感的人工判断；
 - 证据：[`report.md`](../../docs/acceptance/20261022-V2-case4/report.md)。
 
+### 2026-10-22：脚手架误写与弱断言修复
+
+- 加进程级工作区核验：从 App 打开的 `database.sqlite` 反推实际 workspace；不匹配就在
+  任何 UI 写入前中止；
+- `check` 同时指定“最近生成”与正文 `grep` 时，两项必须命中同一个最新文件；
+- 文件断言与 workspace 解析共 **4 个 Node 测试通过**；
+- 真实 App 用错误 workspace 声明时已确认中止；正确 workspace 下用例 1 为
+  **10 个自动步骤通过 / 0 失败**，并明确输出“刚生成且正文匹配”；
+- 证据：[`report.md`](../../docs/acceptance/20261022-V2-harness/report.md)。
+
 ### 2026-10-19：非全屏窗口纵向布局（V1.3.2）
 
 - **为什么手工量**：正文可见高度取决于 WebView 的滚动视口，而 AX 树里 CodeMirror 的

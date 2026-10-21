@@ -23,6 +23,7 @@ const { spawn } = require('node:child_process');
 
 const mac = require('./lib/mac');
 const report = require('./lib/report');
+const { runCheck } = require('./lib/file-check');
 const { APP_NAME, CASES, MANUAL_ONLY } = require('./cases');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -110,74 +111,6 @@ function resolvePoint(appName, target) {
  * 为什么要递归（2026-10-18）：附件按 `attachments/YYYY-MM/` 分月存放，
  * 只读顶层目录会得到"没有匹配的 .png"——那是**断言写错了**，不是没落盘。
  */
-function findFilesRecursive(root, needle, depth = 3) {
-  const found = [];
-  const walk = (dir, prefix, level) => {
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        if (level < depth) walk(path.join(dir, entry.name), relative, level + 1);
-      } else if (entry.name.includes(needle)) {
-        found.push({ name: relative, absolute: path.join(dir, entry.name) });
-      }
-    }
-  };
-  walk(root, '', 0);
-  return found;
-}
-
-/** 文件断言：`{path, exists, containsFile, grep}`（相对于工作区）。 */
-function runCheck(workspace, step) {
-  const target = path.join(workspace, step.path);
-  if (step.exists) {
-    if (!fs.existsSync(target)) return { ok: false, error: `不存在：${step.path}` };
-    return { ok: true, evidence: `✓ ${step.path} 存在` };
-  }
-  if (step.notExists) {
-    if (fs.existsSync(target)) return { ok: false, error: `本不该存在，却在：${step.path}` };
-    return { ok: true, evidence: `✓ ${step.path} 不存在（符合预期）` };
-  }
-  if (step.containsFile) {
-    if (!fs.existsSync(target)) return { ok: false, error: `不存在：${step.path}` };
-    // 递归找（附件在 attachments/YYYY-MM/ 子目录里）
-    const entries = findFilesRecursive(target, step.containsFile).map((entry) => entry.name);
-    if (entries.length === 0) return { ok: false, error: `${step.path}（含子目录）下没有匹配「${step.containsFile}」的文件` };
-    // 「必须有**刚刚生成**的文件」：只检查"目录里有匹配文件"太弱——
-    // 上次验收留下的旧文件也能让断言通过，等于没验（备份那条就踩过）。
-    if (step.modifiedWithinMinutes) {
-      // 取**最新**的那个：目录里可能同时躺着上一轮几分钟内的产物，
-      // 随便挑一个会让证据指向旧文件（看起来"验了"，其实验的是别人）。
-      const newest = entries
-        .map((name) => ({ name, mtime: fs.statSync(path.join(target, name)).mtimeMs }))
-        .sort((left, right) => right.mtime - left.mtime)[0];
-      if (!newest || Date.now() - newest.mtime > step.modifiedWithinMinutes * 60_000) {
-        return {
-          ok: false,
-          error: `${step.path} 下的「${step.containsFile}」都不是最近 ${step.modifiedWithinMinutes} 分钟内生成的（可能是旧文件）`,
-        };
-      }
-      // 证据里报**这一轮刚生成的那个文件**，而不是目录里第一个匹配项
-      // （旧文件也能匹配子串，报旧文件等于让人以为验的是新的）
-      return { ok: true, evidence: `✓ ${step.path}/${newest.name}（刚生成）` };
-    }
-    if (step.grep) {
-      const hit = entries.some((name) => {
-        const body = fs.readFileSync(path.join(target, name), 'utf8');
-        return body.includes(step.grep);
-      });
-      if (!hit) return { ok: false, error: `匹配到的文件里没有「${step.grep}」` };
-    }
-    return { ok: true, evidence: `✓ ${step.path}/${entries[0]}` };
-  }
-  return { ok: false, error: '未知的断言类型' };
-}
-
 /** 睡一会儿（不 spin，也不起子进程）。 */
 function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -214,6 +147,21 @@ function ensureScene(appName, workspace) {
     if (detail) record('scene', ok ? 'passed' : 'failed', detail);
     return { ok, steps };
   };
+  const verifyWorkspace = () => {
+    const pid = mac.pidOf(appName);
+    if (!pid.ok) return { ok: false, error: pid.error };
+    const found = mac.workspaceRootOf(pid.pid);
+    if (!found.ok) return found;
+    const actual = fs.existsSync(found.root) ? fs.realpathSync(found.root) : path.resolve(found.root);
+    const expected = fs.existsSync(workspace) ? fs.realpathSync(workspace) : path.resolve(workspace);
+    if (actual !== expected) {
+      return {
+        ok: false,
+        error: `当前打开的是 ${actual}，不是验收目标 ${expected}；为避免写错库，已中止`,
+      };
+    }
+    return { ok: true, root: actual };
+  };
 
   const activated = mac.activate(appName);
   record(
@@ -233,7 +181,13 @@ function ensureScene(appName, workspace) {
 
   // 主界面 = 有「新建笔记」；欢迎页 = 有「创建知识库」
   if (waitForFrame(appName, { role: 'AXButton', title: '新建笔记' }, 5000).ok) {
-    return finish(true, '应用已在主界面：直接开始用例（若当前打开的不是目标工作区，文件断言会如实报错）');
+    const verified = verifyWorkspace();
+    return finish(
+      verified.ok,
+      verified.ok
+        ? `应用已在目标工作区：${verified.root}`
+        : `应用已在主界面，但工作区核验失败：${verified.error}`,
+    );
   }
   if (!waitForFrame(appName, { role: 'AXButton', title: '创建知识库' }, 5000).ok) {
     return finish(false, '界面既不是主界面（找不到「新建笔记」）也不是欢迎页（找不到「创建知识库」）');
@@ -250,7 +204,13 @@ function ensureScene(appName, workspace) {
   if (recent.ok) {
     mac.click(appName, centerOf(recent.frame), recentQuery);
     if (waitForFrame(appName, { role: 'AXButton', title: '新建笔记' }, 15000).ok) {
-      return finish(true, `已从「最近打开」按路径打开工作区：${workspace}`);
+      const verified = verifyWorkspace();
+      return finish(
+        verified.ok,
+        verified.ok
+          ? `已从「最近打开」按路径打开工作区：${verified.root}`
+          : `从最近打开进入后工作区不一致：${verified.error}`,
+      );
     }
     return finish(false, `点了「最近打开」里的 ${workspace}，但主界面没有出现`);
   }
@@ -274,7 +234,11 @@ function ensureScene(appName, workspace) {
   if (!create.ok) return finish(false, '找不到「创建知识库」按钮');
   mac.click(appName, centerOf(create.frame), createQuery);
   if (waitForFrame(appName, { role: 'AXButton', title: '新建笔记' }, 20000).ok) {
-    return finish(true, `已创建并打开工作区：${workspace}`);
+    const verified = verifyWorkspace();
+    return finish(
+      verified.ok,
+      verified.ok ? `已创建并打开工作区：${verified.root}` : `创建后工作区核验失败：${verified.error}`,
+    );
   }
   return finish(false, `创建 ${workspace} 之后主界面没有出现（可能路径已存在或创建失败）`);
 }

@@ -73,6 +73,39 @@ function pidOf(appName) {
   return agent({ op: 'pid', app: appName });
 }
 
+/** 从 `lsof -Fn` 输出里提取当前工作区根目录（数据库在 `<root>/.knowledge/database.sqlite`）。 */
+function parseWorkspaceRoots(output) {
+  const roots = new Set();
+  for (const line of String(output).split('\n')) {
+    if (!line.startsWith('n')) continue;
+    const file = line.slice(1);
+    const suffix = '/.knowledge/database.sqlite';
+    if (!file.endsWith(suffix)) continue;
+    roots.add(file.slice(0, -suffix.length));
+  }
+  return [...roots];
+}
+
+/** 通过进程打开的 SQLite 句柄确认当前活动工作区，避免把验收笔记写进另一个库。 */
+function workspaceRootOf(pid) {
+  try {
+    const output = execFileSync('lsof', ['-Fn', '-p', String(pid)], {
+      encoding: 'utf8',
+      timeout: 15_000,
+    });
+    const roots = parseWorkspaceRoots(output);
+    if (roots.length === 0) {
+      return { ok: false, error: `pid ${pid} 没有打开工作区数据库` };
+    }
+    if (roots.length > 1) {
+      return { ok: false, error: `pid ${pid} 同时打开了多个工作区数据库：${roots.join('、')}` };
+    }
+    return { ok: true, root: roots[0] };
+  } catch (error) {
+    return { ok: false, error: `读取进程工作区失败：${error.message}` };
+  }
+}
+
 /** 把应用切到前台（CGEvent 点击必须落在最前面的窗口上）。 */
 function activate(appName) {
   return agent({ op: 'activate', app: appName });
@@ -143,6 +176,8 @@ module.exports = {
   preflight,
   trusted,
   pidOf,
+  parseWorkspaceRoots,
+  workspaceRootOf,
   activate,
   frameOf,
   click,
