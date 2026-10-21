@@ -22,3 +22,13 @@ test('release write permission is scoped to the release job', () => {
     '只有 release job 应获得 contents: write',
   );
 });
+
+test('every external action is pinned to an immutable commit SHA', () => {
+  const actionRefs = Array.from(
+    workflow.matchAll(/^\s*(?:-\s*)?uses:\s*(\S+)/gm),
+    (match) => match[1],
+  );
+  assert.ok(actionRefs.length > 0, '工作流应包含 Action');
+  const mutable = actionRefs.filter((reference) => !/@[0-9a-f]{40}$/.test(reference));
+  assert.deepEqual(mutable, [], `Action 必须锁定完整 commit SHA：${mutable.join(', ')}`);
+});

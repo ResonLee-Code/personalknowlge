@@ -58,7 +58,8 @@ Rust 依赖审计未在本机执行：当前工具链没有安装 `cargo-audit`�
 - 备份安全：ZIP 条目先整体预检路径；含 `..` 穿越的归档校验为无效，解压在创建目标目录和
   写出任何文件前中止；正常备份创建、恢复及附件/历史/模板保留回归通过。
 - 发布安全：GitHub Actions 默认权限降为 `contents: read`，只有 Release job 获得
-  `contents: write`；新增 workflow 权限静态测试并接入 preflight。
+  `contents: write`；所有外部 Action 锁定完整 commit SHA；新增 workflow 权限与引用
+  静态测试并接入 preflight。
 
 真机验收脚手架另有 4 个 Node 测试通过：错误 workspace 在任何 UI 写入前中止；
 “最近生成 + 正文匹配”必须命中同一个最新文件。真实 App 复测用例 1 为 10/10、

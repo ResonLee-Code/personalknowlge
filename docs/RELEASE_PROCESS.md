@@ -47,7 +47,8 @@ tag 发布 preflight 会拒绝缺失 updater / Apple / Windows 签名凭据的�
 
 preflight 另运行 `pnpm test:release-manifest`、`pnpm test:release-workflow` 与
 `pnpm test:update-signature`。工作流权限测试要求 preflight / 三平台构建只有仓库只读权限，
-`contents: write` 仅授予最终创建 Release 的 job。
+`contents: write` 仅授予最终创建 Release 的 job；同一条测试还要求每个外部 Action
+锁定完整 commit SHA，不能使用可移动的 `@v4` / `@stable` 标签。
 后者用临时测试密钥走同一条 Tauri signer + minisign 路径，验证有效载荷通过、篡改载荷拒绝，
 并校验签名绑定 `version:2.0.0`。它不读取或替代正式发布私钥。
 

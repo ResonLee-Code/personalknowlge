@@ -29,7 +29,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 校验标签与 package.json 版本一致
         id: version
@@ -110,13 +110,13 @@ jobs:
           fi
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         # 不写 version：版本由 package.json 的 packageManager 决定。
         # 两处都写会直接失败（ERR_PNPM_BAD_PM_VERSION：Multiple versions of pnpm specified）——
         # 2026-10-14 第一次跑流水线就是这么挂的。
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # Node 版本：本机验证口径是 v22.16；pnpm 11 要求 **≥ v22.13**，
           # 之前写 20 会在 Setup Node 之后直接报「This version of pnpm requires at least Node.js v22.13」。
@@ -124,7 +124,7 @@ jobs:
           cache: pnpm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
       # Linux 上 tauri/wry 的链接需要这些系统开发包；preflight 里也要跑 cargo test，
       # 所以这里必须装（清单与 linux 打包 job 一致）——否则 cargo test 直接链接失败。
@@ -159,16 +159,16 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         # 不写 version：版本由 package.json 的 packageManager 决定。
         # 两处都写会直接失败（ERR_PNPM_BAD_PM_VERSION：Multiple versions of pnpm specified）——
         # 2026-10-14 第一次跑流水线就是这么挂的。
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # Node 版本：本机验证口径是 v22.16；pnpm 11 要求 **≥ v22.13**，
           # 之前写 20 会在 Setup Node 之后直接报「This version of pnpm requires at least Node.js v22.13」。
@@ -176,10 +176,10 @@ jobs:
           cache: pnpm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
       - name: Cache Rust build
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
 
@@ -224,7 +224,7 @@ jobs:
           cat "$GITHUB_WORKSPACE/SHA256SUMS-macos.txt"
 
       - name: 上传工件
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pkos-macos
           if-no-files-found: error
@@ -240,16 +240,16 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         # 不写 version：版本由 package.json 的 packageManager 决定。
         # 两处都写会直接失败（ERR_PNPM_BAD_PM_VERSION：Multiple versions of pnpm specified）——
         # 2026-10-14 第一次跑流水线就是这么挂的。
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # Node 版本：本机验证口径是 v22.16；pnpm 11 要求 **≥ v22.13**，
           # 之前写 20 会在 Setup Node 之后直接报「This version of pnpm requires at least Node.js v22.13」。
@@ -257,10 +257,10 @@ jobs:
           cache: pnpm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
       - name: Cache Rust build
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
 
@@ -337,7 +337,7 @@ jobs:
           Get-Content "$env:GITHUB_WORKSPACE/SHA256SUMS-windows.txt"
 
       - name: 上传工件
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pkos-windows
           if-no-files-found: error
@@ -353,7 +353,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 安装系统依赖
         run: |
@@ -370,13 +370,13 @@ jobs:
             libssl-dev
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         # 不写 version：版本由 package.json 的 packageManager 决定。
         # 两处都写会直接失败（ERR_PNPM_BAD_PM_VERSION：Multiple versions of pnpm specified）——
         # 2026-10-14 第一次跑流水线就是这么挂的。
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # Node 版本：本机验证口径是 v22.16；pnpm 11 要求 **≥ v22.13**，
           # 之前写 20 会在 Setup Node 之后直接报「This version of pnpm requires at least Node.js v22.13」。
@@ -384,10 +384,10 @@ jobs:
           cache: pnpm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
       - name: Cache Rust build
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
 
@@ -415,7 +415,7 @@ jobs:
           cat "$GITHUB_WORKSPACE/SHA256SUMS-linux.txt"
 
       - name: 上传工件
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pkos-linux
           if-no-files-found: error
@@ -437,7 +437,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: 下载全部工件
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
 
@@ -458,7 +458,7 @@ jobs:
         run: node scripts/release/update-manifest.mjs
 
       - name: 创建 Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: Personal Knowledge OS ${{ github.ref_name }}
           generate_release_notes: true
