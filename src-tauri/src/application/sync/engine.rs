@@ -454,7 +454,12 @@ impl SyncService {
                     salt: base64::encode(Uuid::new_v4().as_bytes()),
                 };
                 let bytes = serde_json::to_vec_pretty(&generated)?;
-                transport.put(&profile_key, &bytes, None)?;
+                match transport.put(&profile_key, &bytes, None, true) {
+                    Ok(_) => {}
+                    // 另一台设备先创建了 profile：随后读取它的 salt，双方会收敛到同一密钥。
+                    Err(error) if error.code == ErrorCode::SyncConflict => {}
+                    Err(error) => return Err(error),
+                }
                 // 首次两台设备同时创建时，以随后读到的 profile 为准。
                 let object = transport.get(&profile_key)?.ok_or_else(|| {
                     AppError::new(ErrorCode::SyncFailed, "远端同步 profile 创建后无法读取。")
@@ -599,9 +604,12 @@ impl SyncService {
                         object_aad(&prefix, &object_id).as_bytes(),
                         &bytes,
                     )?;
-                    session
-                        .transport
-                        .put(&format!("{prefix}/{object_id}"), &encrypted, None)?;
+                    session.transport.put(
+                        &format!("{prefix}/{object_id}"),
+                        &encrypted,
+                        None,
+                        false,
+                    )?;
                     entries.insert(
                         change.path.clone(),
                         RemoteEntry {
@@ -725,6 +733,7 @@ impl SyncService {
             &format!("{prefix}/manifest.enc"),
             &encrypted,
             session.manifest_etag.as_deref(),
+            !session.manifest_existed,
         )?;
 
         for (path, bytes) in downloaded_payloads {

@@ -82,6 +82,7 @@ import type {
   WritingDraft,
   WritingMode,
   WritingRequest,
+  WritingSummarySaveInput,
 } from '@/types';
 
 import packageJson from '../../package.json';
@@ -3122,6 +3123,29 @@ function mockWritingApplyConfirmed(input: WritingApplyInput): WritingApplyResult
   };
 }
 
+function mockWritingSummarySave(input: WritingSummarySaveInput): WritingApplyResult {
+  if (!input.confirm) fail('INVALID_INPUT', '新建摘要笔记前必须确认。');
+  if (!input.title.trim() || input.segments.length === 0) {
+    fail('INVALID_INPUT', '摘要标题或生成段落为空。');
+  }
+  const citations = input.segments.flatMap((segment) => segment.citations);
+  if (citations.length === 0) fail('INVALID_INPUT', '摘要没有可解析引用。');
+  const sources = [...new Map(citations.map((citation) => [citation.noteId, citation])).values()]
+    .map((citation) => `- [[${citation.title}]]`)
+    .join('\n');
+  return {
+    detail: createNote({
+      title: input.title.trim(),
+      initialContent: `${input.segments.map((segment) => segment.text).join('\n\n')}\n\n## 写作来源\n\n${sources}\n`,
+      categoryId: null,
+      tags: ['图谱摘要'],
+      parentId: null,
+    }),
+    acceptedSegments: input.segments.length,
+    sourceCount: citations.length,
+  };
+}
+
 function categoryTree(): CategoryNode[] {
   const build = (parentId: string | null, depth: number): CategoryNode[] =>
     state.categories
@@ -3306,6 +3330,9 @@ export async function handleMockInvoke(
     case 'writing_apply':
       requireWorkspace();
       return mockWritingApplyConfirmed((payload.input ?? {}) as WritingApplyInput);
+    case 'writing_summary_save':
+      requireWorkspace();
+      return mockWritingSummarySave((payload.input ?? {}) as WritingSummarySaveInput);
     case 'note_list': {
       requireWorkspace();
       return listNotes(payload.query as NoteListQuery);

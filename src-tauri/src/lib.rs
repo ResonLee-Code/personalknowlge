@@ -203,6 +203,7 @@ pub fn run() {
             commands::writing_commands::writing_draft,
             commands::writing_commands::writing_apply_preview,
             commands::writing_commands::writing_apply,
+            commands::writing_commands::writing_summary_save,
         ])
         .run(tauri::generate_context!())
         .expect("Personal Knowledge OS 启动失败");

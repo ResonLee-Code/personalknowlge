@@ -4,6 +4,7 @@ import type {
   WritingApplyResult,
   WritingDraft,
   WritingRequest,
+  WritingSummarySaveInput,
 } from '@/types';
 
 import { call } from './api';
@@ -13,4 +14,6 @@ export const writingService = {
   applyPreview: (input: WritingApplyInput) =>
     call<WritingApplyPreview>('writing_apply_preview', { input }),
   apply: (input: WritingApplyInput) => call<WritingApplyResult>('writing_apply', { input }),
+  saveSummary: (input: WritingSummarySaveInput) =>
+    call<WritingApplyResult>('writing_summary_save', { input }),
 };

@@ -22,7 +22,14 @@ pub struct RemoteObject {
 pub trait SyncTransport: Send + Sync {
     fn get(&self, key: &str) -> Result<Option<RemoteObject>>;
     /// `if_match` 非空时要求服务端进行乐观并发检查。
-    fn put(&self, key: &str, bytes: &[u8], if_match: Option<&str>) -> Result<Option<String>>;
+    /// `if_none_match=true` 时只在对象不存在时创建。
+    fn put(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        if_match: Option<&str>,
+        if_none_match: bool,
+    ) -> Result<Option<String>>;
     /// 保留物理删除能力；当前同步删除使用 manifest 墓碑，避免离线设备丢数据。
     #[allow(dead_code)]
     fn delete(&self, key: &str, if_match: Option<&str>) -> Result<bool>;
@@ -103,6 +110,7 @@ impl WebDavTransport {
         key: &str,
         body: Vec<u8>,
         if_match: Option<&str>,
+        if_none_match: bool,
     ) -> Result<ureq::http::Response<ureq::Body>> {
         let mut builder = ureq::http::Request::builder()
             .method(method)
@@ -111,6 +119,9 @@ impl WebDavTransport {
             .header("Accept", "application/octet-stream");
         if let Some(etag) = if_match {
             builder = builder.header("If-Match", etag);
+        }
+        if if_none_match {
+            builder = builder.header("If-None-Match", "*");
         }
         let request = builder
             .body(body)
@@ -123,7 +134,7 @@ impl WebDavTransport {
 
 impl SyncTransport for WebDavTransport {
     fn get(&self, key: &str) -> Result<Option<RemoteObject>> {
-        let response = self.request("GET", key, Vec::new(), None)?;
+        let response = self.request("GET", key, Vec::new(), None, false)?;
         let status = response.status().as_u16();
         if status == 404 {
             return Ok(None);
@@ -145,9 +156,15 @@ impl SyncTransport for WebDavTransport {
         Ok(Some(RemoteObject { bytes, etag }))
     }
 
-    fn put(&self, key: &str, bytes: &[u8], if_match: Option<&str>) -> Result<Option<String>> {
+    fn put(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        if_match: Option<&str>,
+        if_none_match: bool,
+    ) -> Result<Option<String>> {
         self.ensure_parents(key)?;
-        let response = self.request("PUT", key, bytes.to_vec(), if_match)?;
+        let response = self.request("PUT", key, bytes.to_vec(), if_match, if_none_match)?;
         let status = response.status().as_u16();
         if status == 412 {
             return Err(AppError::new(
@@ -168,7 +185,7 @@ impl SyncTransport for WebDavTransport {
     }
 
     fn delete(&self, key: &str, if_match: Option<&str>) -> Result<bool> {
-        let response = self.request("DELETE", key, Vec::new(), if_match)?;
+        let response = self.request("DELETE", key, Vec::new(), if_match, false)?;
         let status = response.status().as_u16();
         if status == 404 {
             return Ok(false);
@@ -259,6 +276,7 @@ impl S3Transport {
         key: &str,
         body: Vec<u8>,
         if_match: Option<&str>,
+        if_none_match: bool,
     ) -> Result<ureq::http::Response<ureq::Body>> {
         let (url, path) = self.url_and_path(key);
         let host = self.host()?;
@@ -274,6 +292,7 @@ impl S3Transport {
             &date,
             &payload_hash,
             if_match,
+            if_none_match,
         );
         let mut builder = ureq::http::Request::builder()
             .method(method)
@@ -284,6 +303,9 @@ impl S3Transport {
             .header("Authorization", authorization);
         if let Some(etag) = if_match {
             builder = builder.header("If-Match", etag);
+        }
+        if if_none_match {
+            builder = builder.header("If-None-Match", "*");
         }
         let request = builder
             .body(body)
@@ -303,19 +325,29 @@ impl S3Transport {
         date: &str,
         payload_hash: &str,
         if_match: Option<&str>,
+        if_none_match: bool,
     ) -> String {
-        let mut signed_headers = vec!["host", "x-amz-content-sha256", "x-amz-date"];
-        let mut canonical_headers =
-            format!("host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n");
+        let mut headers: Vec<(&str, String)> = vec![
+            ("host", host.to_string()),
+            ("x-amz-content-sha256", payload_hash.to_string()),
+            ("x-amz-date", amz_date.to_string()),
+        ];
         if let Some(etag) = if_match {
-            signed_headers.push("if-match");
-            signed_headers.sort_unstable();
-            // 头顺序必须与 SignedHeaders 完全一致。
-            canonical_headers = format!(
-                "host:{host}\nif-match:{etag}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
-            );
+            headers.push(("if-match", etag.to_string()));
         }
-        let signed_headers = signed_headers.join(";");
+        if if_none_match {
+            headers.push(("if-none-match", "*".to_string()));
+        }
+        headers.sort_by(|left, right| left.0.cmp(right.0));
+        let signed_headers = headers
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(";");
+        let canonical_headers = headers
+            .iter()
+            .map(|(name, value)| format!("{name}:{value}\n"))
+            .collect::<String>();
         let canonical_request =
             format!("{method}\n{path}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}");
         let scope = format!("{date}/{}/s3/aws4_request", self.region);
@@ -340,7 +372,7 @@ impl S3Transport {
 
 impl SyncTransport for S3Transport {
     fn get(&self, key: &str) -> Result<Option<RemoteObject>> {
-        let response = self.request("GET", key, Vec::new(), None)?;
+        let response = self.request("GET", key, Vec::new(), None, false)?;
         let status = response.status().as_u16();
         if status == 404 {
             return Ok(None);
@@ -362,8 +394,14 @@ impl SyncTransport for S3Transport {
         Ok(Some(RemoteObject { bytes, etag }))
     }
 
-    fn put(&self, key: &str, bytes: &[u8], if_match: Option<&str>) -> Result<Option<String>> {
-        let response = self.request("PUT", key, bytes.to_vec(), if_match)?;
+    fn put(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        if_match: Option<&str>,
+        if_none_match: bool,
+    ) -> Result<Option<String>> {
+        let response = self.request("PUT", key, bytes.to_vec(), if_match, if_none_match)?;
         let status = response.status().as_u16();
         if status == 412 {
             return Err(AppError::new(
@@ -382,7 +420,7 @@ impl SyncTransport for S3Transport {
     }
 
     fn delete(&self, key: &str, if_match: Option<&str>) -> Result<bool> {
-        let response = self.request("DELETE", key, Vec::new(), if_match)?;
+        let response = self.request("DELETE", key, Vec::new(), if_match, false)?;
         let status = response.status().as_u16();
         if status == 404 {
             return Ok(false);
@@ -482,6 +520,7 @@ mod tests {
             "20261022",
             &sha256_hex(b"{}"),
             None,
+            false,
         );
         let second = transport.authorization(
             "PUT",
@@ -491,9 +530,23 @@ mod tests {
             "20261022",
             &sha256_hex(b"{}"),
             Some("\"etag\""),
+            false,
         );
         assert_ne!(first, second);
         assert!(first.contains("SignedHeaders=host;x-amz-content-sha256;x-amz-date"));
         assert!(!first.contains("SECRET"));
+
+        let create_only = transport.authorization(
+            "PUT",
+            "/bucket/pkos/manifest.enc",
+            "s3.example.test",
+            "20261022T010203Z",
+            "20261022",
+            &sha256_hex(b"{}"),
+            None,
+            true,
+        );
+        assert!(create_only
+            .contains("SignedHeaders=host;if-none-match;x-amz-content-sha256;x-amz-date"));
     }
 }

@@ -1848,6 +1848,12 @@ export interface WritingApplyResult {
   sourceCount: number;
 }
 
+export interface WritingSummarySaveInput {
+  title: string;
+  segments: WritingSegment[];
+  confirm: boolean;
+}
+
 export interface ResolveSyncConflictInput {
   conflictId: string;
   resolution: 'local' | 'remote' | 'merged';

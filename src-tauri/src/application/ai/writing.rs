@@ -13,7 +13,7 @@ use crate::domain::note::SaveNoteInput;
 use crate::domain::research::SourceLevel;
 use crate::domain::writing::{
     WritingApplyInput, WritingApplyPreview, WritingApplyResult, WritingDraft, WritingMode,
-    WritingRequest, WritingSegment,
+    WritingRequest, WritingSegment, WritingSummarySaveInput,
 };
 
 use super::ask::{
@@ -234,52 +234,13 @@ impl WritingService {
         let chars: Vec<char> = detail.content.chars().collect();
         let start = input.target_start.clamp(0, chars.len() as i64) as usize;
         let end = input.target_end.clamp(start as i64, chars.len() as i64) as usize;
-        let mut citations = Vec::new();
-        let mut insertion_parts = Vec::new();
-        for (index, segment) in input.accepted_segments.iter().enumerate() {
-            let text = segment.text.trim();
-            if text.is_empty() || text.chars().count() > 8_000 {
-                return Err(AppError::invalid_input(format!(
-                    "第 {} 个生成段落为空或过长。",
-                    index + 1
-                )));
-            }
-            if segment.citations.is_empty() {
-                return Err(AppError::invalid_input(format!(
-                    "第 {} 个生成段落没有引用，不能写入。",
-                    index + 1
-                )));
-            }
-            for citation in &segment.citations {
-                let numeric = citation
-                    .citation_id
-                    .strip_prefix('C')
-                    .filter(|value| value.chars().all(|ch| ch.is_ascii_digit()))
-                    .ok_or_else(|| AppError::invalid_input("写作引用编号格式无效。"))?;
-                if !text.contains(&format!("[{}]", citation.citation_id))
-                    && !text.contains(&format!("[{numeric}]"))
-                {
-                    return Err(AppError::invalid_input(format!(
-                        "第 {} 个段落没有使用引用 {}。",
-                        index + 1,
-                        citation.citation_id
-                    )));
-                }
-                validate_citation(&notes, citation)?;
-            }
-            insertion_parts.push(text.to_string());
-            citations.extend(segment.citations.clone());
-        }
-        let insertion = insertion_parts.join("\n\n");
-        if insertion.chars().count() > MAX_GENERATED_CHARS {
-            return Err(AppError::invalid_input("接受段落的正文总量超过写入上限。"));
-        }
+        let (insertion, citations) =
+            validate_and_join_segments(&notes, &input.accepted_segments, MAX_GENERATED_CHARS)?;
         let mut content: String = chars[..start]
             .iter()
             .chain(insertion.chars().collect::<Vec<_>>().iter())
             .chain(chars[end..].iter())
             .collect();
-        let citations = dedupe_citations(citations);
         append_source_section(&mut content, &citations);
         let added_chars = insertion.chars().count();
         let removed_chars = end.saturating_sub(start);
@@ -329,6 +290,46 @@ impl WritingService {
             detail: saved,
             accepted_segments: preview.accepted_segments,
             source_count: preview.citations.len(),
+        })
+    }
+
+    pub fn save_summary(&self, input: WritingSummarySaveInput) -> Result<WritingApplyResult> {
+        if !input.confirm {
+            return Err(AppError::invalid_input(
+                "新建摘要笔记前必须确认预览；本次没有写入。",
+            ));
+        }
+        let title = input.title.trim();
+        if title.is_empty() || title.chars().count() > 120 {
+            return Err(AppError::invalid_input("摘要笔记标题为空或过长。"));
+        }
+        let notes = NoteService::new(Arc::clone(&self.ctx));
+        let (insertion, citations) =
+            validate_and_join_segments(&notes, &input.segments, MAX_GENERATED_CHARS)?;
+        let mut content = insertion;
+        append_source_section(&mut content, &citations);
+        let detail = notes.create(crate::domain::note::CreateNoteInput {
+            title: title.to_string(),
+            category_id: None,
+            initial_content: Some(content),
+            tags: Some(vec!["图谱摘要".to_string()]),
+            parent_id: None,
+        })?;
+        AiPolicyService::new(Arc::clone(&self.ctx)).audit(
+            "writing_cluster_summary",
+            false,
+            "ok",
+            input.segments.len() as u64,
+            Some(&format!(
+                "segments={} sources={}",
+                input.segments.len(),
+                citations.len()
+            )),
+        );
+        Ok(WritingApplyResult {
+            accepted_segments: input.segments.len(),
+            source_count: citations.len(),
+            detail,
         })
     }
 }
@@ -483,6 +484,57 @@ fn template_draft(mode: WritingMode, evidence: &[Evidence]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn validate_and_join_segments(
+    notes: &NoteService,
+    segments: &[WritingSegment],
+    max_chars: usize,
+) -> Result<(String, Vec<AskCitation>)> {
+    if segments.is_empty() {
+        return Err(AppError::invalid_input("没有可写入的生成段落。"));
+    }
+    let mut citations = Vec::new();
+    let mut insertion_parts = Vec::new();
+    for (index, segment) in segments.iter().enumerate() {
+        let text = segment.text.trim();
+        if text.is_empty() || text.chars().count() > 8_000 {
+            return Err(AppError::invalid_input(format!(
+                "第 {} 个生成段落为空或过长。",
+                index + 1
+            )));
+        }
+        if segment.citations.is_empty() {
+            return Err(AppError::invalid_input(format!(
+                "第 {} 个生成段落没有引用，不能写入。",
+                index + 1
+            )));
+        }
+        for citation in &segment.citations {
+            let numeric = citation
+                .citation_id
+                .strip_prefix('C')
+                .filter(|value| value.chars().all(|ch| ch.is_ascii_digit()))
+                .ok_or_else(|| AppError::invalid_input("写作引用编号格式无效。"))?;
+            if !text.contains(&format!("[{}]", citation.citation_id))
+                && !text.contains(&format!("[{numeric}]"))
+            {
+                return Err(AppError::invalid_input(format!(
+                    "第 {} 个段落没有使用引用 {}。",
+                    index + 1,
+                    citation.citation_id
+                )));
+            }
+            validate_citation(notes, citation)?;
+        }
+        insertion_parts.push(text.to_string());
+        citations.extend(segment.citations.clone());
+    }
+    let insertion = insertion_parts.join("\n\n");
+    if insertion.chars().count() > max_chars {
+        return Err(AppError::invalid_input("接受段落的正文总量超过写入上限。"));
+    }
+    Ok((insertion, dedupe_citations(citations)))
 }
 
 fn validate_citation(notes: &NoteService, citation: &AskCitation) -> Result<()> {

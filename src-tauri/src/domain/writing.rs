@@ -98,3 +98,11 @@ pub struct WritingApplyResult {
     pub accepted_segments: usize,
     pub source_count: usize,
 }
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WritingSummarySaveInput {
+    pub title: String,
+    pub segments: Vec<WritingSegment>,
+    pub confirm: bool,
+}

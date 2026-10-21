@@ -9,7 +9,7 @@ use personal_knowledge_os_lib::core::events::NoopEventSink;
 use personal_knowledge_os_lib::domain::ai::UpdateAiPolicyInput;
 use personal_knowledge_os_lib::domain::note::{CreateNoteInput, SaveNoteInput};
 use personal_knowledge_os_lib::domain::writing::{
-    WritingApplyInput, WritingMode, WritingRequest, WritingSegment,
+    WritingApplyInput, WritingMode, WritingRequest, WritingSegment, WritingSummarySaveInput,
 };
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
@@ -226,10 +226,24 @@ fn source_changed_after_generation_blocks_apply() {
             accepted_segments: vec![WritingSegment {
                 id: "W1".to_string(),
                 text: format!("扩写内容 [{}]", source_citation.citation_id),
-                citations: vec![source_citation],
+                citations: vec![source_citation.clone()],
             }],
             confirm: true,
         })
         .expect_err("来源漂移必须阻止写入");
     assert_eq!(error.code, ErrorCode::NoteConflict);
+
+    let summary_error = fixture
+        .writing()
+        .save_summary(WritingSummarySaveInput {
+            title: "聚类摘要".to_string(),
+            segments: vec![WritingSegment {
+                id: "W1".to_string(),
+                text: format!("摘要内容 [{}]", source_citation.citation_id),
+                citations: vec![source_citation],
+            }],
+            confirm: true,
+        })
+        .expect_err("聚类摘要也必须复核来源");
+    assert_eq!(summary_error.code, ErrorCode::NoteConflict);
 }

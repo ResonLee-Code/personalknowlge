@@ -14,7 +14,6 @@ import {
 import type { DuplicateCluster, GraphInsights } from '@/types';
 import { reportFailure } from '@/lib/actionFeedback';
 import { errorMessage } from '@/lib/format';
-import { noteService } from '@/services/noteService';
 import { writingService } from '@/services/writingService';
 
 interface GraphInsightsPanelProps {
@@ -94,22 +93,15 @@ export function GraphInsightsPanel({
     if (!summaryDraft) return;
     setSummaryBusy(true);
     try {
-      const sources = [
-        ...new Map(summaryDraft.citations.map((citation) => [citation.noteId, citation])).values(),
-      ]
-        .map((citation) => `- [[${citation.title}]]`)
-        .join('\n');
-      const created = await noteService.create({
+      const saved = await writingService.saveSummary({
         title: `聚类摘要：${cluster.members[0]?.title ?? '近重复笔记'}`,
-        initialContent: `${summaryDraft.text}\n\n## 写作来源\n\n${sources}\n`,
-        categoryId: null,
-        tags: ['图谱摘要'],
-        parentId: null,
+        segments: summaryDraft.segments,
+        confirm: true,
       });
       toast.success('聚类摘要已确认并写入知识库');
       setDuplicatePreview(null);
       setSummaryDraft(null);
-      onOpen(created.note.id);
+      onOpen(saved.detail.note.id);
     } catch (cause) {
       reportFailure('写入聚类摘要失败', errorMessage(cause));
     } finally {

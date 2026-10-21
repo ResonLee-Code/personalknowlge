@@ -14,7 +14,7 @@ use personal_knowledge_os_lib::application::attachment_service::{
 use personal_knowledge_os_lib::application::graph_service::GraphService;
 use personal_knowledge_os_lib::application::note_service::NoteService;
 use personal_knowledge_os_lib::application::search_service::SearchService;
-use personal_knowledge_os_lib::application::sync::SyncService;
+use personal_knowledge_os_lib::application::sync::{SyncService, SyncTransport, WebDavTransport};
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::error::ErrorCode;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
@@ -223,6 +223,13 @@ fn handle_connection(
             None => respond(&mut stream, 404, &[], b"", None),
         },
         "PUT" => {
+            if headers
+                .get("if-none-match")
+                .is_some_and(|value| value == "*")
+                && guard.objects.contains_key(&path)
+            {
+                return respond(&mut stream, 412, &[], b"", None);
+            }
             if let Some(required) = headers.get("if-match") {
                 if guard.objects.get(&path).map(|item| item.etag.as_str()) != Some(required) {
                     return respond(&mut stream, 412, &[], b"", None);
@@ -731,6 +738,22 @@ fn missing_manifest_etag_refuses_to_overwrite_remote_state() {
         .expect("本地版本")
         .content
         .contains("本地第二版"));
+}
+
+#[test]
+fn conditional_create_prevents_two_first_syncs_from_overwriting_manifest() {
+    let remote = LocalDav::start("Basic dXNlcjpwYXNz");
+    let transport = WebDavTransport::new(&remote.endpoint, "user", "pass");
+    let key = "pkos-sync/v2/library/test-create.json";
+    transport
+        .put(key, b"first", None, true)
+        .expect("首次条件创建");
+    let conflict = transport
+        .put(key, b"second", None, true)
+        .expect_err("对象已存在时 If-None-Match 必须失败");
+    assert_eq!(conflict.code, ErrorCode::SyncConflict);
+    let object = transport.get(key).expect("读取远端").expect("对象存在");
+    assert_eq!(object.bytes, b"first", "第二个创建者不能覆盖第一个");
 }
 
 #[test]

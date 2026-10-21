@@ -585,6 +585,7 @@ payload, sourceHash, createdAt, updatedAt, appliedAt, undoneAt, error, undoAvail
 | `writing_draft` | 生成只读草稿；支持 `outline / continue / rewrite / shorten / expand` |
 | `writing_apply_preview` | 校验目标哈希、逐段引用和来源区间，返回完整写入预览 |
 | `writing_apply` | `confirm=true` 后写入；走现有 `NoteService.save`、历史留档与索引更新 |
+| `writing_summary_save` | Graph 聚类摘要专用；新建笔记前重新校验每段引用与来源区间 |
 
 `WritingDraft.segments[]` 每项都带 `citations: AskCitation[]`；任一段没有可解析引用，
 或模型使用未知编号，整份草稿作废。`acceptedSegments` 由用户逐段选择；未先调用
