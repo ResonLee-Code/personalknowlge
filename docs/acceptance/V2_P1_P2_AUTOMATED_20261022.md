@@ -18,6 +18,7 @@
 | TypeScript / Vite production build | 通过 |
 | Playwright E2E | **5/5 通过**（含 Graph 洞察、Writing diff、Sync 设置） |
 | updater 正负验签 | 有效载荷通过、篡改拒绝、版本绑定 `2.0.0` |
+| 前端生产依赖审计 | `pnpm audit --prod --audit-level high`：**No known vulnerabilities** |
 | Graph 10 万首屏 | **2866.6 ms**（< 3 s） |
 | 检索 1 万 | p95 **18.09 ms**、recall@5 **100%** |
 | 检索 10 万（4 分片） | p95 **190.69 ms**、recall@5 **100%**、重开 **1246.09 ms**、RSS **344.64 MB** |
@@ -30,6 +31,8 @@
 等旧文件）；本轮新增文件与改动点已按 Clippy 反馈清零，未把全仓历史债混入本功能提交。
 `pnpm format:check` 也仍被 83 个既有前端文件拦住；本轮新增 / 接触文件已通过 Prettier，
 没有把全仓机械格式化混入功能提交。
+Rust 依赖审计未在本机执行：当前工具链没有安装 `cargo-audit`。发布机或 CI 应补跑
+`cargo audit`，不能把“未安装工具”记成通过。
 
 ## P1 / P2 专项
 
