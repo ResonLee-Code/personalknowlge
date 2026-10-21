@@ -20,6 +20,15 @@ export async function logAppFailure(
 ): Promise<void> {
   const message = errorMessage(error);
   if (!message.trim()) return;
+  await logAppMessage(scope, message, level);
+}
+
+/** 写入受控的元数据日志；调用方不得传入笔记正文、Key 或完整提示词。 */
+export async function logAppMessage(
+  scope: string,
+  message: string,
+  level: 'error' | 'warn' | 'info' = 'info',
+): Promise<void> {
   try {
     await call('app_log', { level, scope, message });
   } catch {

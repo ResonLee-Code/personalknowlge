@@ -55,6 +55,7 @@ function parseArgs(argv) {
     workspace: process.env.PKOS_ACCEPTANCE_WORKSPACE || '/private/tmp/pkos-acceptance',
     out: null,
     only: null,
+    sceneOnly: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -64,6 +65,7 @@ function parseArgs(argv) {
     else if (arg === '--app') options.app = argv[++index];
     else if (arg === '--workspace') options.workspace = argv[++index];
     else if (arg === '--out') options.out = argv[++index];
+    else if (arg === '--scene-only') options.sceneOnly = true;
     // 只跑某几条用例（迭代某一条时不用把 9 条全跑一遍）：`--only 3,4`
     else if (arg === '--only') {
       options.only = String(argv[++index] || '')
@@ -723,6 +725,32 @@ function main() {
     ? path.resolve(options.out)
     : path.join(repoRoot, 'docs', 'acceptance', timestamp());
   const mode = options.dryRun ? 'dry-run（未执行）' : 'real（真机执行）';
+
+  if (options.sceneOnly) {
+    if (!mac.isMac) {
+      console.error('--scene-only 只支持 macOS');
+      return 1;
+    }
+    const blocking = mac.preflight(options.app).filter((check) => !check.ok);
+    if (blocking.length > 0) {
+      for (const check of blocking) console.error(`✗ ${check.name}：${check.detail}`);
+      return 1;
+    }
+    keepAlive = spawn(process.execPath, [path.join(__dirname, 'lib', 'ax-keepalive.js'), options.app], {
+      stdio: 'ignore',
+      detached: false,
+    });
+    const started = Date.now();
+    const scene = ensureScene(options.app, options.workspace);
+    for (const step of scene.steps) {
+      console.log(`${step.status === 'passed' ? '✓' : '✗'} 现场准备 · ${step.op}：${step.detail}`);
+    }
+    console.log(
+      `PKOS_SCENE ${scene.ok ? 'ready' : 'failed'} app=${options.app} ` +
+        `workspace=${options.workspace} scene_ms=${Date.now() - started}`,
+    );
+    return scene.ok ? 0 : 1;
+  }
 
   if (!options.dryRun && !mac.isMac) {
     console.error('真跑只支持 macOS；想要结论表骨架请用 --dry-run');

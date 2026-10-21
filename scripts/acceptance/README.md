@@ -17,6 +17,8 @@ scripts/acceptance/run.sh               # 真跑，产出截图 + 结论表
 ```bash
 scripts/acceptance/run.sh --list        # 列出 E 节 1–9 的用例
 scripts/acceptance/run.sh --dry-run     # 只出结论表骨架（不碰界面，可在任何时候跑）
+scripts/acceptance/run.js --scene-only --app "Personal Knowledge OS" --workspace /path
+                                        # 只准备并验证当前工作区现场
 scripts/acceptance/run.sh --out /tmp/pkos-accept-1   # 指定输出目录
 scripts/acceptance/run.sh --only 3,4    # 只跑第 3、4 条（调某一条时用；结论表里也只列这几条）
 ```

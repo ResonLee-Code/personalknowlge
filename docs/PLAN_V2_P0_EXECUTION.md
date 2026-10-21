@@ -20,8 +20,10 @@
 | `pnpm tauri build --debug --no-bundle` | 桌面二进制构建通过 |
 | `pnpm test:ask-eval` | 50 正样本、20 负样本全部过门禁 |
 | `pnpm test:release-manifest` | 三平台映射、Linux `AppImage.tar.gz`、GitHub 资产名归一化与缺签名拒绝测试通过 |
+| `runtime_contract` / release App 实启 | updater 配置可反序列化；窗口位置恢复权限完整；macOS release 包真实打开 10 万篇工作区 |
 | `pnpm bench` | 1 万检索 p95 8.06ms；3 万图谱 821.5ms |
 | 10 万扩展门禁 | 检索 p95 77.76ms、recall@5 100%、后端重开 1140.77ms、RSS 350.84MB |
+| macOS 完整 App 10 万篇 | release/ad-hoc：稳定首帧 1001ms、RSS 224.23MB；重建后首次 2947ms 已单独记录；截图为 100001 篇就绪界面 |
 | updater manifest 脚本 / release.yml | 合成夹具通过；YAML 解析通过 |
 
 人工执行时从
@@ -157,5 +159,5 @@ M0-A 契约与持久化
 6. Windows / Linux / macOS 真机清单统一执行并留存报告。
 7. 发布前执行完整测试、E2E、性能基准和发布物抽验。
 
-> 10 万篇后端指标已过线；完整桌面 App 的 WebView 首屏与整机内存仍需做真机抽样，
-> 不能用后端重开时间替代整机启动证据。
+> 10 万篇后端指标和当前 macOS 完整 App 已过线；Developer ID/公证后的干净机器冷启动、
+> Windows/Linux 真机仍需统一人工验收。

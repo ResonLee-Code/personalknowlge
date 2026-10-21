@@ -1,6 +1,6 @@
 # V2.0.x P0 人工验收报告模板
 
-> 复制本文件为 `docs/acceptance/YYYYMMDD-V2-P0/report.md` 后填写。
+> 在 `docs/acceptance/` 下按日期新建目录，将本文件复制为该目录内的 `report.md` 后填写。
 > 只记录实际执行结果；未执行写“未执行”，失败必须附复现步骤、日志或截图。
 
 ## 1. 基本信息
@@ -119,6 +119,8 @@
 10 万篇整机记录：首屏 `____ ms`（≤2000）· 峰值内存 `____ MB`（≤1536）
 · 检索 p95 `____ ms`（≤200）· recall@5 `____%`。
 验收库由 `scripts/bench/prepare-scale-fixture.sh` 生成，记录其绝对路径与 SHA-256 清单摘要。
+macOS 可使用 `scripts/bench/measure-macos-app.sh` 生成首帧日志、RSS 与截图；
+当前 ad-hoc 记录见 [V2_P0_SCALE_MACOS_20261021.md](./V2_P0_SCALE_MACOS_20261021.md)。
 
 结论：**未执行 / 通过 / 不通过**
 

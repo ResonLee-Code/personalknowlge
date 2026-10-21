@@ -273,6 +273,9 @@ dist-windows/                           # Windows 安装包与便携版（NSIS �
 pnpm bench                                     # 发布规格：1 万篇检索 + 3 万篇图谱
 pnpm bench --only search --search-notes 100000 # 10 万篇扩展门禁
 scripts/bench/prepare-scale-fixture.sh /private/tmp/pkos-100k # 持久化真机验收库
+scripts/bench/measure-macos-app.sh \
+  --workspace /private/tmp/pkos-100k --data-dir /private/tmp/pkos-100k-data \
+  --binary "$PWD/src-tauri/target/release/bundle/macos/Personal Knowledge OS.app/Contents/MacOS/personal-knowledge-os"
 pnpm bench -- --search-notes 2000 --graph-notes 3000   # 冒烟（约 10 s）
 pnpm bench -- --only search                    # 只跑检索（或 --only graph）
 ```
@@ -312,6 +315,17 @@ pnpm bench -- --only search                    # 只跑检索（或 --only graph
 
 `prepare-scale-fixture.sh` 会拒绝覆盖非空目录，生成一个可长期复用的 10 万篇工作区；
 启动应用并手动打开该路径后，可记录完整窗口首屏与整机峰值 RSS。
+
+`measure-macos-app.sh` 通过隔离数据目录和测试环境变量自动打开工作区，以
+`workspace-first-paint` 日志为界计算首帧，并输出 RSS 与截图。2026-10-21 release/ad-hoc
+实测：重建后首次启动 2947 ms，再次启动 1001 ms，RSS 224.23 MB；见
+[完整记录](./acceptance/V2_P0_SCALE_MACOS_20261021.md)。
+
+测试专用环境变量：
+
+- `PKOS_DATA_DIR`：隔离应用数据目录，不读写默认用户数据；
+- `PKOS_AUTO_OPEN_WORKSPACE`：启动时自动打开指定工作区，供首屏测量使用；
+- 仅记录启动时间、RSS 标记与工作区路径元数据，不记录笔记正文。
 
 ## 8. 相关文档
 

@@ -1,7 +1,7 @@
 import { toast } from 'sonner';
 import { create } from 'zustand';
 
-import { logAppFailure } from '@/lib/appLog';
+import { logAppFailure, logAppMessage } from '@/lib/appLog';
 import { errorMessage } from '@/lib/format';
 import { formatWarningsToast } from '@/lib/warnings';
 import { workspaceService } from '@/services/workspaceService';
@@ -54,6 +54,29 @@ const emptyStats: WorkspaceStats = {
   activity: [],
 };
 
+const appBootStartedAt = performance.now();
+const nextFrame = (callback: FrameRequestCallback) => {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(callback);
+  } else {
+    setTimeout(() => callback(performance.now()), 0);
+  }
+};
+
+function reportWorkspaceFirstPaint() {
+  const afterPaint = () => {
+    nextFrame(() => {
+      const elapsed = Math.round(performance.now() - appBootStartedAt);
+      void logAppMessage(
+        'startup',
+        `workspace-first-paint elapsed_frontend_ms=${elapsed}`,
+        'info',
+      );
+    });
+  };
+  nextFrame(afterPaint);
+}
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspace: null,
   stats: emptyStats,
@@ -75,6 +98,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           settings: current.settings,
           indexStatus: current.indexStatus,
         });
+        reportWorkspaceFirstPaint();
         useUiStore.getState().applyPreferences(current.settings);
       }
       await get().refreshList();
@@ -131,6 +155,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         indexStatus: result.indexStatus,
         initializedWarnings: result.warnings,
       });
+      reportWorkspaceFirstPaint();
       // 打开 / 新建 / 切换工作区时后端会带回提醒（例如「跳过无法读取的文件 xx.md」）：
       // 以前只是存进 state，界面上从来不显示——用户放进来的文件被跳过却毫无提示。
       const notice = formatWarningsToast(result.warnings);
@@ -157,6 +182,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         indexStatus: result.indexStatus,
         initializedWarnings: result.warnings,
       });
+      reportWorkspaceFirstPaint();
       // 打开 / 新建 / 切换工作区时后端会带回提醒（例如「跳过无法读取的文件 xx.md」）：
       // 以前只是存进 state，界面上从来不显示——用户放进来的文件被跳过却毫无提示。
       const notice = formatWarningsToast(result.warnings);

@@ -95,5 +95,6 @@
 - [ ] 更新源指向正确稳定通道，不使用本地测试地址。
 - [ ] `latest.json` 三个平台 URL 都指向 GitHub 实际资产名，均可下载；不得残留 `%20` 空格名。
 - [ ] 真实旧版升级到候选版本后，收藏 / 标签 / 版本历史 / 附件 / 回收站均保持。
-- [ ] 用 `scripts/bench/prepare-scale-fixture.sh` 准备 10 万篇真实工作区，记录完整 App
-  首次进入首屏时间与峰值内存；门槛分别为 < 2 s、< 1.5 GB。
+- [ ] 在 Developer ID/公证后的干净 macOS 真机复测 10 万篇完整 App 冷启动；当前
+  ad-hoc release 稳定口径已记录为 1001 ms / 224.23 MB，见
+  [macOS 记录](./acceptance/V2_P0_SCALE_MACOS_20261021.md)。

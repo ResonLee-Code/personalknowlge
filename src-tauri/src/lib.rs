@@ -13,6 +13,7 @@ pub mod state;
 
 use crate::core::events::TauriEventSink;
 use crate::core::logging;
+use crate::application::workspace_service::WorkspaceService;
 use crate::state::{AppInner, AppState};
 
 pub fn run() {
@@ -28,6 +29,13 @@ pub fn run() {
             use tauri::Manager;
             let events = TauriEventSink::new(app.handle().clone());
             let inner = AppInner::new(data_dir.clone(), events)?;
+            if let Some(root) = std::env::var_os("PKOS_AUTO_OPEN_WORKSPACE")
+                .map(std::path::PathBuf::from)
+                .filter(|path| !path.as_os_str().is_empty())
+            {
+                WorkspaceService::new(std::sync::Arc::clone(&inner))
+                    .open(&root.to_string_lossy())?;
+            }
             app.manage(AppState::new(inner));
             tracing::info!(target: "app", "数据目录：{}", data_dir.display());
             #[cfg(target_os = "macos")]

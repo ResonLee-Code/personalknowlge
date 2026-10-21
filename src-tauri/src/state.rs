@@ -70,6 +70,12 @@ impl AppInner {
 
     /// 应用数据目录（跨平台）。
     pub fn default_data_dir() -> PathBuf {
+        if let Some(path) = std::env::var_os("PKOS_DATA_DIR")
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+        {
+            return path;
+        }
         dirs::data_dir()
             .map(|dir| dir.join("PersonalKnowledgeOS"))
             .unwrap_or_else(|| PathBuf::from(".").join(".personal-knowledge-os"))
