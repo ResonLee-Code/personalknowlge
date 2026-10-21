@@ -145,6 +145,11 @@ jobs:
       - name: 前端与 Rust 测试
         run: |
           pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm test:acceptance
+          pnpm build
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:e2e
           pnpm test:release-manifest
           pnpm test:release-workflow
           pnpm test:update-signature

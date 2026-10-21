@@ -45,3 +45,26 @@ test('updater signature verification can bootstrap on a fresh runner', () => {
   );
   assert.match(script, /cargo test --locked/, '签名验签脚本必须使用锁文件，同时允许首次下载依赖');
 });
+
+test('preflight enforces the same build, lint, acceptance, and E2E gates as local release checks', () => {
+  const preflight = workflow.split(/\n  macos:\s*\n/, 2)[0];
+  const required = [
+    'pnpm lint',
+    'pnpm build',
+    'pnpm test:acceptance',
+    'pnpm exec playwright install --with-deps chromium',
+    'pnpm test:e2e',
+  ];
+  for (const command of required) {
+    assert.ok(preflight.includes(command), `preflight 缺少发布门禁：${command}`);
+  }
+  assert.ok(
+    preflight.indexOf('pnpm build') < preflight.indexOf('pnpm test:e2e'),
+    'E2E 必须使用 production build 产物',
+  );
+  assert.ok(
+    preflight.indexOf('pnpm exec playwright install --with-deps chromium') <
+      preflight.indexOf('pnpm test:e2e'),
+    '必须先安装 Playwright Chromium',
+  );
+});

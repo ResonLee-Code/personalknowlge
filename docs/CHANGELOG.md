@@ -42,6 +42,8 @@
   静默换入未经审查的代码；版本 tag 仅保留为可读注释；
 - updater 签名回归改用 `cargo test --locked`，修复全新 CI runner 因尚未建立 Rust
   依赖缓存而在 `--offline` 下提前失败的问题，同时继续锁定依赖版本；
+- CI preflight 补齐与本地发布口径一致的 ESLint、production build、验收器自测和
+  Playwright E2E 门禁，并静态测试防止后续遗漏；
 - AI / 同步凭据改为同目录原子私有写入，Unix 创建时即 `0600`，替换时不跟随预置符号链接；
 - 修正本机地址判定：只接受解析后的真实回环 IP 与精确 `localhost`；
   `127.evil.com` 一类公网主机不能再绕过同步 HTTPS 要求；
