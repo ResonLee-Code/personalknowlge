@@ -45,7 +45,9 @@ tag 发布 preflight 会拒绝缺失 updater / Apple / Windows 签名凭据的�
 手动运行 workflow 在没有凭据时可产出未签名演练包，但**不能当作 V2 发布物**。
 私钥只存 Secret，不能提交仓库；丢失 updater 私钥会导致旧客户端无法验证新版本。
 
-preflight 另运行 `pnpm test:release-manifest` 与 `pnpm test:update-signature`：
+preflight 另运行 `pnpm test:release-manifest`、`pnpm test:release-workflow` 与
+`pnpm test:update-signature`。工作流权限测试要求 preflight / 三平台构建只有仓库只读权限，
+`contents: write` 仅授予最终创建 Release 的 job。
 后者用临时测试密钥走同一条 Tauri signer + minisign 路径，验证有效载荷通过、篡改载荷拒绝，
 并校验签名绑定 `version:2.0.0`。它不读取或替代正式发布私钥。
 
