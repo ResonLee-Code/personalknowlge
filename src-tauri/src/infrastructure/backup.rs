@@ -263,7 +263,7 @@ pub fn entry_names(archive: &Path) -> Result<Vec<String>> {
     for index in 0..zip.len() {
         let entry = zip.by_index(index).map_err(zip_error)?;
         if !entry.is_dir() {
-            names.push(entry.name().to_string());
+            names.push(entry.name().map_err(zip_error)?.to_string());
         }
     }
     Ok(names)
@@ -441,7 +441,7 @@ pub fn extract_archive(archive: &Path, target: &Path) -> Result<usize> {
         if entry.is_dir() {
             continue;
         }
-        let name = normalize_entry_name(entry.name());
+        let name = normalize_entry_name(entry.name().map_err(zip_error)?.as_ref());
         if name.is_empty() || name == MANIFEST_NAME {
             continue;
         }
@@ -478,7 +478,7 @@ fn entry_names_from<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<Vec<Strin
     for index in 0..zip.len() {
         let entry = zip.by_index(index).map_err(zip_error)?;
         if !entry.is_dir() {
-            names.push(entry.name().to_string());
+            names.push(entry.name().map_err(zip_error)?.to_string());
         }
     }
     Ok(names)
@@ -502,8 +502,12 @@ fn normalize_entry_name(name: &str) -> String {
 fn ensure_safe_entry_names<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<()> {
     for index in 0..zip.len() {
         let entry = zip.by_index(index).map_err(zip_error)?;
-        let name = entry.name();
-        if !entry.is_dir() && !name.is_empty() && name != MANIFEST_NAME && is_unsafe_entry_name(name) {
+        let name = entry.name().map_err(zip_error)?;
+        if !entry.is_dir()
+            && !name.is_empty()
+            && name != MANIFEST_NAME
+            && is_unsafe_entry_name(name.as_ref())
+        {
             return Err(AppError::new(
                 ErrorCode::PathInvalid,
                 format!("备份中包含非法路径：{name}"),

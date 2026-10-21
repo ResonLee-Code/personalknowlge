@@ -19,11 +19,12 @@
 | Playwright E2E | **6/6 通过**（含 Ask 保存、Graph 洞察、Writing diff、Sync 设置） |
 | updater 正负验签 | 有效载荷通过、篡改拒绝、版本绑定 `2.0.0` |
 | 前端生产依赖审计 | `pnpm audit --prod --audit-level high`：**No known vulnerabilities** |
+| Rust 依赖审计 | `cargo-audit 0.22.2`：**0 vulnerabilities**；6 个上游 unmaintained/unsound warnings |
 | Graph 10 万首屏 | **2866.6 ms**（< 3 s） |
 | 检索 1 万 | p95 **18.09 ms**、recall@5 **100%** |
 | 检索 10 万（4 分片） | p95 **190.69 ms**、recall@5 **100%**、重开 **1246.09 ms**、RSS **344.64 MB** |
-| release 二进制 | **13,520,944 B**；SHA-256 `87db69a38ae3e4771e3c200d7ca1703c0d473594d66e2081c31c8e87a65e6e1f` |
-| `.app` 包内二进制 / 包文件合计 | **13,520,944 B / 13,680,310 B**；包内二进制 SHA-256 `605ddbff7fd198007df9422b8f888c9b10c39dac85b8c914a6352cf168b0d731` |
+| release 二进制 | **13,553,840 B**；SHA-256 `0b47752d3897970da3d792e7a2b7fed4cb6e760f59645bcc31f52e8569f69361` |
+| `.app` 包内二进制 / 包文件合计 | **13,553,840 B / 13,713,206 B**；包内二进制 SHA-256 `9b878b2d8bd59c20bc59220b91735c3fec7f98bc33eadf21e8535d0da84767bd` |
 | macOS `.app` 构建 | ad-hoc 签名成功；公证因无凭据跳过 |
 | macOS `.app` 后端启动冒烟 | 进程存活，迁移 1–16 全部完成，文件监听启动，主窗口存在 |
 
@@ -31,8 +32,9 @@
 等旧文件）；本轮新增文件与改动点已按 Clippy 反馈清零，未把全仓历史债混入本功能提交。
 `pnpm format:check` 也仍被 83 个既有前端文件拦住；本轮新增 / 接触文件已通过 Prettier，
 没有把全仓机械格式化混入功能提交。
-Rust 依赖审计未在本机执行：当前工具链没有安装 `cargo-audit`。发布机或 CI 应补跑
-`cargo audit`，不能把“未安装工具”记成通过。
+`cargo-audit` 使用官方 v0.22.2 macOS arm64 二进制，经 GitHub 资产 SHA-256 校验后执行。
+CI preflight 固定安装 `cargo-audit 0.22.2` 并以 `cargo audit --no-yanked` 阻断已知漏洞。
+剩余 warning 来自上游未维护/unsound 标记；已如实保留，不能视为完全无警告。
 
 ## P1 / P2 专项
 
@@ -62,6 +64,9 @@ Rust 依赖审计未在本机执行：当前工具链没有安装 `cargo-audit`�
   静态测试并接入 preflight。
 - updater 签名脚本使用 `cargo test --locked`，可在干净 runner 首次下载依赖并保持
   `Cargo.lock` 不变；有效载荷与篡改拒绝路径继续通过。
+- Rust 依赖安全：`zip` 升至 9.0.5；updater 通过固定上游 commit 使用 `zip 9`；
+  `rustls 0.23.46`、`rustls-webpki 0.103.16`、`webpki-roots 1.0.10` 消除审计发现的
+  9 个漏洞。
 - CI preflight 强制执行 ESLint、production build、验收器自测和 Playwright E2E，
   并由 workflow 静态测试固定顺序（build / Chromium 安装先于 E2E）。
 - 发布 workflow 通过 `actionlint 1.7.12` 语义检查；Release job 直接依赖 `preflight`，

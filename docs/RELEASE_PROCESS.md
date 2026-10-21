@@ -54,6 +54,8 @@ preflight 强制运行 ESLint、production build、验收器自测、Playwright 
 并校验签名绑定 `version:2.0.0`。它不读取或替代正式发布私钥。签名回归使用
 `cargo test --locked`，允许全新 runner 首次拉取依赖，同时拒绝锁文件漂移。
 workflow 静态测试同时要求这些本地发布门禁不能从 CI preflight 中遗漏。
+preflight 固定安装 `cargo-audit 0.22.2` 并运行
+`cargo audit --file src-tauri/Cargo.lock --no-yanked`，已知漏洞会使发布停止。
 `release` job 在读取 `needs.preflight.outputs.version` 时，必须把 `preflight` 也列入
 直接的 `needs`；GitHub Actions 不提供非直接依赖的 outputs。
 

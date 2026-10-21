@@ -126,6 +126,12 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
+      - name: 安装固定版本 cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+
+      - name: 审计 Rust 依赖漏洞
+        run: cargo audit --file src-tauri/Cargo.lock --no-yanked
+
       # Linux 上 tauri/wry 的链接需要这些系统开发包；preflight 里也要跑 cargo test，
       # 所以这里必须装（清单与 linux 打包 job 一致）——否则 cargo test 直接链接失败。
       - name: 安装 Linux 系统依赖（跑 cargo test 用）

@@ -44,6 +44,8 @@
   依赖缓存而在 `--offline` 下提前失败的问题，同时继续锁定依赖版本；
 - CI preflight 补齐与本地发布口径一致的 ESLint、production build、验收器自测和
   Playwright E2E 门禁，并静态测试防止后续遗漏；
+- Rust 依赖审计清除 9 个已知漏洞：`zip` 升至 9.0.5，updater 固定到上游修复 commit，
+  并升级 `rustls`、`rustls-webpki` 与 `webpki-roots`；CI 固定运行 `cargo-audit 0.22.2`；
 - 修复 Release job 读取非直接依赖 `preflight` outputs 的表达式错误；`latest.json`
   现在能直接取得构建版本，并通过 `actionlint 1.7.12` 语义检查；
 - AI / 同步凭据改为同目录原子私有写入，Unix 创建时即 `0600`，替换时不跟随预置符号链接；

@@ -447,7 +447,7 @@ fn imports_docx_paragraphs_headings_and_lists() {
     let docx_path = fixture.source.join("技术方案.docx");
     let file = std::fs::File::create(&docx_path).expect("创建 docx");
     let mut zip = zip::ZipWriter::new(file);
-    let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+    let options: zip::write::FileOptions<'_, '_, ()> = zip::write::FileOptions::default();
     zip.start_file("word/document.xml", options).expect("写入 document.xml");
     let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>

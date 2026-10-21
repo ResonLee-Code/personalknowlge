@@ -79,3 +79,15 @@ test('release job directly needs preflight when consuming its version output', (
   );
   assert.match(releaseJob, /needs\.preflight\.outputs\.version/);
 });
+
+test('preflight blocks Rust dependency vulnerabilities with a pinned cargo-audit', () => {
+  const preflight = workflow.split(/\n  macos:\s*\n/, 2)[0];
+  assert.ok(
+    preflight.includes('cargo install cargo-audit --locked --version 0.22.2'),
+    'cargo-audit 必须固定版本安装',
+  );
+  assert.ok(
+    preflight.includes('cargo audit --file src-tauri/Cargo.lock'),
+    'preflight 必须审计 Rust 依赖漏洞',
+  );
+});
