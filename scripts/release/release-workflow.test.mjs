@@ -68,3 +68,14 @@ test('preflight enforces the same build, lint, acceptance, and E2E gates as loca
     '必须先安装 Playwright Chromium',
   );
 });
+
+test('release job directly needs preflight when consuming its version output', () => {
+  const releaseJob = workflow.split(/\n  release:\s*\n/, 2)[1];
+  assert.ok(releaseJob, '必须存在 release job');
+  assert.match(
+    releaseJob,
+    /needs:\s*\[preflight, macos, windows, linux\]/,
+    '读取 needs.preflight.outputs 时 preflight 必须是 release 的直接依赖',
+  );
+  assert.match(releaseJob, /needs\.preflight\.outputs\.version/);
+});

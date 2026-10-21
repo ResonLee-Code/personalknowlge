@@ -44,6 +44,8 @@
   依赖缓存而在 `--offline` 下提前失败的问题，同时继续锁定依赖版本；
 - CI preflight 补齐与本地发布口径一致的 ESLint、production build、验收器自测和
   Playwright E2E 门禁，并静态测试防止后续遗漏；
+- 修复 Release job 读取非直接依赖 `preflight` outputs 的表达式错误；`latest.json`
+  现在能直接取得构建版本，并通过 `actionlint 1.7.12` 语义检查；
 - AI / 同步凭据改为同目录原子私有写入，Unix 创建时即 `0600`，替换时不跟随预置符号链接；
 - 修正本机地址判定：只接受解析后的真实回环 IP 与精确 `localhost`；
   `127.evil.com` 一类公网主机不能再绕过同步 HTTPS 要求；
