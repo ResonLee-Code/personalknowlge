@@ -22,6 +22,7 @@
 | 前端生产依赖审计 | `pnpm audit --prod --audit-level high`：**No known vulnerabilities** |
 | Rust 依赖审计 | `cargo-audit 0.22.2`：**0 vulnerabilities**；6 个上游 unmaintained/unsound warnings |
 | Graph 10 万首屏 | **2866.6 ms**（< 3 s） |
+| macOS 10 万完整 App 首屏 | 首次签名后 **2411 ms**；稳定 **989 ms**、RSS **223.03 MB** |
 | 检索 1 万 | p95 **18.09 ms**、recall@5 **100%** |
 | 检索 10 万（4 分片） | p95 **190.69 ms**、recall@5 **100%**、重开 **1246.09 ms**、RSS **344.64 MB** |
 | release 二进制 | **13,553,840 B**；SHA-256 `99fa5b26763b845f2fcae285abe1f72a92e3be7efddd620fd31bf4f47b6c71f6` |
