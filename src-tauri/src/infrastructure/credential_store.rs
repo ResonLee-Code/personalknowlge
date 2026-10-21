@@ -6,6 +6,8 @@
 //!   Key 本身不会出现在 IPC 响应、日志或审计里；
 //! - 文件权限在 Unix 上收紧到 `0600`。
 
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -91,14 +93,53 @@ fn persist(data_dir: &Path, credentials: &Credentials) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let text = serde_json::to_string_pretty(&credentials)?;
-    std::fs::write(&path, text)?;
+    write_private_atomic(&path, text.as_bytes())?;
+    Ok(())
+}
 
+/// 同目录写入后原子替换，避免跟随预置符号链接，也避免读取到半写文件。
+fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let temp = path.with_extension(format!("tmp-{}", crate::core::ids::ulid()));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut file = options.open(&temp)?;
+        file.write_all(bytes)?;
+        file.flush()?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = std::fs::remove_file(&temp);
+        return Err(error.into());
+    }
+
+    if let Err(error) = std::fs::rename(&temp, path) {
+        // Windows 的 rename 不覆盖已有文件；先移除旧文件再重试。
+        if path.exists() {
+            if let Err(remove_error) = std::fs::remove_file(path) {
+                let _ = std::fs::remove_file(&temp);
+                return Err(remove_error.into());
+            }
+            std::fs::rename(&temp, path).inspect_err(|_| {
+                let _ = std::fs::remove_file(&temp);
+            })?;
+        } else {
+            let _ = std::fs::remove_file(&temp);
+            return Err(error.into());
+        }
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        // 只有本用户可读写（凭据不该被同机其它账号读到）
         let permissions = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(&path, permissions)?;
+        std::fs::set_permissions(path, permissions)?;
     }
     Ok(())
 }
@@ -147,5 +188,32 @@ mod tests {
         // 两个都清掉 → 文件也不留
         set_remote_model_key(dir.path(), None).expect("清在线模型 Key");
         assert!(!dir.path().join(CREDENTIAL_FILE).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacing_credentials_does_not_follow_an_existing_symlink() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let dir = tempfile::tempdir().expect("临时目录");
+        let victim = dir.path().join("victim.txt");
+        std::fs::write(&victim, "keep me").expect("写保护目标");
+        symlink(&victim, dir.path().join(CREDENTIAL_FILE)).expect("创建凭据符号链接");
+
+        set_remote_model_key(dir.path(), Some("sk-safe")).expect("替换凭据");
+
+        assert_eq!(
+            std::fs::read_to_string(&victim).expect("读取保护目标"),
+            "keep me"
+        );
+        assert_eq!(
+            remote_model_key(dir.path()).as_deref(),
+            Some("sk-safe"),
+            "符号链接应被私有凭据文件替换"
+        );
+        let metadata =
+            std::fs::symlink_metadata(dir.path().join(CREDENTIAL_FILE)).expect("凭据元数据");
+        assert!(!metadata.file_type().is_symlink(), "凭据文件本身不能再是符号链接");
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
     }
 }

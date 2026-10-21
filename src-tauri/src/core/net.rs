@@ -19,11 +19,11 @@ pub fn is_loopback_target(target: &str) -> bool {
     let Some(host) = host_of_url(target) else {
         return true; // 解析不出来的（相对路径等）一律当本机处理：宁可不用代理
     };
-    let lowered = host.to_ascii_lowercase();
+    let lowered = host.trim_end_matches('.').to_ascii_lowercase();
     lowered == "localhost"
-        || lowered == "::1"
-        || lowered == "[::1]"
-        || lowered.starts_with("127.")
+        || lowered
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
 }
 
 /// 从 URL 里取主机名（小写、无端口、无 userinfo）。解析不出来返回 `None`。
@@ -167,6 +167,8 @@ mod tests {
             );
         }
         assert!(is_loopback_target("http://127.0.0.1:1234/v1"));
+        assert!(!is_loopback_target("http://127.evil.com:1234/v1"));
+        assert!(!is_loopback_target("http://127.0.0.1.evil.com:1234/v1"));
         assert!(!is_loopback_target("https://api.perplexity.ai/v1/decisions"));
     }
 

@@ -64,6 +64,8 @@ P0 的状态与人工项仍以 [V2_P0_MANUAL_ACCEPTANCE.md](./V2_P0_MANUAL_ACCEP
 
 - [x] 本地 WebDAV 桩覆盖实际使用的 GET/PUT/MKCOL、认证、ETag 与 manifest 并发保护。
 - [x] 首次 profile / manifest 使用条件创建；两个并发初始化者只有一个能成功，另一个重新读取。
+- [x] 凭据原子私有写入，Unix 创建即 `0600`，替换时不跟随预置符号链接；明文 HTTP 的本机
+  判定只接受解析后的真实回环地址，`127.evil.com` 一类公网主机不能绕过 HTTPS 要求。
 - [x] S3 兼容适配器用本地 HTTP 桩跑通 GET/PUT、条件 manifest 与 SigV4 请求生成。
 - [x] 密文验收：远端字节不包含正文、标题、附件内容等已知明文标记。
 - [x] 两台逻辑设备共享本地远端桩，逐步跑完新增 / 修改 / 删除 / 冲突 / 合并。

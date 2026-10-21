@@ -462,9 +462,13 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let temp = path.with_extension(format!("tmp-{}", Uuid::new_v4()));
+    let (temp, mut file) = create_private_temp(path).map_err(|error| {
+        AppError::new(
+            ErrorCode::SyncFailed,
+            format!("创建同步本地状态临时文件失败：{error}"),
+        )
+    })?;
     let result = (|| -> std::io::Result<()> {
-        let mut file = fs::File::create(&temp)?;
         file.write_all(bytes)?;
         file.flush()?;
         file.sync_all()?;
@@ -510,9 +514,45 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn create_private_temp(path: &Path) -> std::io::Result<(PathBuf, fs::File)> {
+    let temp = path.with_extension(format!("tmp-{}", Uuid::new_v4()));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(&temp)?;
+    Ok((temp, file))
+}
+
 fn safe_join(root: &Path, relative: &str) -> Result<PathBuf> {
     if relative.contains("..") || relative.starts_with('/') || relative.contains('\\') {
         return Err(AppError::invalid_input("同步历史路径无效。"));
     }
     Ok(root.join(relative))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn private_state_temp_files_are_owner_only_before_writing() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("临时目录");
+        let (temp, file) =
+            create_private_temp(&dir.path().join("state.json")).expect("创建私有临时文件");
+
+        assert_eq!(
+            file.metadata().expect("临时文件元数据").permissions().mode() & 0o777,
+            0o600
+        );
+
+        drop(file);
+        std::fs::remove_file(temp).expect("清理临时文件");
+    }
 }

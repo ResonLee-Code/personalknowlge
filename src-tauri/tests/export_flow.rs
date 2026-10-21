@@ -118,6 +118,38 @@ fn exports_self_contained_html() {
 }
 
 #[test]
+fn exported_html_does_not_execute_raw_html_from_a_note() {
+    let fixture = Fixture::new();
+    NoteService::new(fixture.context())
+        .save(SaveNoteInput {
+            id: fixture.note_id.clone(),
+            content: "正文\n\n<script>alert('pkos')</script>\n\n<img src=x onerror=alert(1)>\n\n\
+                      [危险链接](javascript:alert(1))\n\n[官网](https://example.com/docs)"
+                .to_string(),
+            base_content_hash: None,
+            title: None,
+            category_id: None,
+            tags: None,
+        })
+        .expect("写入含原始 HTML 的正文");
+
+    let target = fixture.output.join("unsafe.html");
+    fixture.export(ExportFormat::Html, Some(target.clone()));
+    let html = std::fs::read_to_string(&target).expect("读取 HTML");
+
+    assert!(!html.contains("<script>alert('pkos')</script>"));
+    assert!(!html.contains("<img src=x onerror=alert(1)>"));
+    assert!(html.contains("&lt;script&gt;"));
+    assert!(html.contains("&lt;/script&gt;"));
+    assert!(html.contains("&lt;img src=x onerror=alert(1)&gt;"));
+    assert!(!html.contains("href=\"javascript:"));
+    assert!(html.contains("href=\"#\""));
+    assert!(html.contains("href=\"https://example.com/docs\""));
+    assert!(html.contains("default-src 'none'"));
+    assert!(html.contains("script-src 'none'"));
+}
+
+#[test]
 fn exports_word_document_with_chinese_content() {
     let fixture = Fixture::new();
     let target = fixture.output.join("note.docx");

@@ -297,10 +297,7 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 fn decode_chunked(mut bytes: &[u8]) -> Vec<u8> {
     let mut output = Vec::new();
-    loop {
-        let Some(line_end) = find_bytes(bytes, b"\r\n") else {
-            break;
-        };
+    while let Some(line_end) = find_bytes(bytes, b"\r\n") {
         let size_text = String::from_utf8_lossy(&bytes[..line_end]);
         let size = usize::from_str_radix(size_text.split(';').next().unwrap_or("0").trim(), 16)
             .unwrap_or(0);
@@ -761,6 +758,8 @@ fn non_loopback_http_endpoint_is_rejected_before_credentials_cross_the_network()
     let device = Device::new("明文 endpoint");
     for (endpoint, expected) in [
         ("http://dav.example.test/pkos", "HTTPS"),
+        ("http://127.evil.com/pkos", "HTTPS"),
+        ("http://127.0.0.1.evil.com/pkos", "HTTPS"),
         ("https://user:secret@dav.example.test/pkos", "userinfo"),
         ("https://dav.example.test/pkos?token=secret", "查询串"),
         ("https:///missing-host", "主机名"),

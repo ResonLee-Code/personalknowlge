@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use regex::Regex;
 
-use pulldown_cmark::{html, Options, Parser};
+use pulldown_cmark::{html, Event, Options, Parser, Tag};
 use serde::{Deserialize, Serialize};
 
 use crate::core::error::{AppError, ErrorCode, Result};
@@ -270,7 +270,33 @@ pub fn markdown_to_html(markdown: &str) -> String {
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
     options.insert(Options::ENABLE_FOOTNOTES);
-    let parser = Parser::new_ext(markdown, options);
+    let parser = Parser::new_ext(markdown, options).map(|event| match event {
+        // 与预览口径一致：笔记里的原始 HTML 只作为文字展示，不进入可执行 DOM。
+        Event::Html(value) | Event::InlineHtml(value) => Event::Text(value),
+        Event::Start(Tag::Link {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) => Event::Start(Tag::Link {
+            link_type,
+            dest_url: safe_url_or_anchor(dest_url, false),
+            title,
+            id,
+        }),
+        Event::Start(Tag::Image {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) => Event::Start(Tag::Image {
+            link_type,
+            dest_url: safe_url_or_anchor(dest_url, true),
+            title,
+            id,
+        }),
+        other => other,
+    });
     let mut output = String::new();
     html::push_html(&mut output, parser);
     output
@@ -290,6 +316,7 @@ pub fn render_html(title: &str, markdown: &str, category_path: &str) -> String {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'" />
 <title>{title}</title>
 <style>
 :root {{ color-scheme: light; }}
@@ -335,4 +362,37 @@ fn escape_html(value: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+/// 导出文件与浏览器预览保持相同的 URL 白名单；不允许脚本协议进入生成的 HTML。
+fn safe_url_or_anchor(
+    value: pulldown_cmark::CowStr<'_>,
+    allow_data_image: bool,
+) -> pulldown_cmark::CowStr<'_> {
+    if is_safe_url(&value, allow_data_image) {
+        return value;
+    }
+    "#".into()
+}
+
+fn is_safe_url(value: &str, allow_data_image: bool) -> bool {
+    let trimmed =
+        value.trim_start_matches(|ch: char| ch.is_ascii_control() || ch.is_ascii_whitespace());
+    let Some(colon) = trimmed.find(':') else {
+        return true;
+    };
+    if trimmed[..colon].contains(['/', '?', '#']) {
+        return true;
+    }
+    let scheme = trimmed[..colon]
+        .chars()
+        .filter(|ch| !ch.is_ascii_control() && !ch.is_ascii_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if allow_data_image && scheme == "data" {
+        return trimmed
+            .get(colon + 1..)
+            .is_some_and(|rest| rest.to_ascii_lowercase().starts_with("image/"));
+    }
+    matches!(scheme.as_str(), "http" | "https" | "mailto")
 }
