@@ -213,6 +213,12 @@ impl SyncStore {
                     "同步 endpoint 必须以 http:// 或 https:// 开头。",
                 ));
             }
+            if trimmed.starts_with("http://") && !crate::core::net::is_loopback_target(&trimmed) {
+                return Err(AppError::invalid_input(
+                    "远程同步必须使用 HTTPS；明文 HTTP 只允许 localhost / 127.0.0.1 / ::1，\
+                     避免 WebDAV 密码或 S3 Access Key 在网络中裸传。",
+                ));
+            }
             config.endpoint = (!trimmed.is_empty()).then_some(trimmed);
         }
         if let Some(bucket) = input.bucket {

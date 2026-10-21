@@ -609,6 +609,8 @@ payload, sourceHash, createdAt, updatedAt, appliedAt, undoneAt, error, undoAvail
 远端对象名为路径哈希 + 内容哈希；manifest、正文、附件和可选索引缓存均用
 AES-256-GCM 加密，密钥由 Argon2id 从用户口令派生。口令不落盘；WebDAV/S3 凭据只存在
 应用数据目录。删除使用 manifest 墓碑，离线或认证失败时本地变更进入持久重试队列。
+非回环 endpoint 必须使用 HTTPS；明文 HTTP 只允许 localhost / 127.0.0.1 / ::1，
+避免认证头与 Access Key 在公网裸传。
 
 ## 24. 研究助手（V1.2.1 阶段 D1 / AI_ARCHITECTURE_PLAN §9）
 

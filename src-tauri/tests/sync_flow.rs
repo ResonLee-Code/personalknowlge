@@ -757,6 +757,28 @@ fn conditional_create_prevents_two_first_syncs_from_overwriting_manifest() {
 }
 
 #[test]
+fn non_loopback_http_endpoint_is_rejected_before_credentials_cross_the_network() {
+    let device = Device::new("明文 endpoint");
+    let error = device
+        .sync()
+        .update_settings(UpdateSyncSettingsInput {
+            enabled: Some(true),
+            provider: Some("webdav".to_string()),
+            endpoint: Some("http://dav.example.test/pkos".to_string()),
+            username: Some("user".to_string()),
+            password: Some("secret".to_string()),
+            ..Default::default()
+        })
+        .expect_err("公网明文 HTTP 必须拒绝");
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    assert!(error.message.contains("HTTPS"));
+    assert!(
+        !device.data_root().join("sync").exists(),
+        "被拒绝的配置不应落盘"
+    );
+}
+
+#[test]
 fn offline_changes_are_queued_and_local_editing_stays_available() {
     let remote = LocalDav::start("Basic dXNlcjpwYXNz");
     let device = Device::new("离线队列");
