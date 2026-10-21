@@ -16,7 +16,7 @@
 | 前端 Vitest | **81 文件 / 412 用例通过** |
 | ESLint | 通过 |
 | TypeScript / Vite production build | 通过 |
-| Playwright E2E | **6/6 通过**（含 Ask 保存、Graph 洞察、Writing diff、Sync 设置） |
+| Playwright E2E | **7/7 通过**（含 Ask 保存、Research 计划/模板/重跑、Graph 洞察、Writing diff、Sync 设置） |
 | updater 正负验签 | 有效载荷通过、篡改拒绝、版本绑定 `2.0.0` |
 | 前端生产依赖审计 | `pnpm audit --prod --audit-level high`：**No known vulnerabilities** |
 | Rust 依赖审计 | `cargo-audit 0.22.2`：**0 vulnerabilities**；6 个上游 unmaintained/unsound warnings |
@@ -52,6 +52,8 @@ CI preflight 固定安装 `cargo-audit 0.22.2` 并以 `cargo audit --no-yanked` 
 - App 外壳：新增 React 错误边界；生产包发生未捕获渲染错误时显示可恢复界面并写入
   `render` 日志，不再只剩空白窗口（自动测试 1/1）。
 - Ask：浏览器 E2E 已走通“提问 → 引用材料 → 存为笔记预览 → 确认写入 → 新笔记成为当前页”。
+- Research：浏览器 E2E 已走通“编辑子问题/时间窗/语言/来源类型 → 保存模板 →
+  本地收集 → 同课题重跑 → 查看新增/消失来源与结论变化”。
 - Organize：后台任务 UI 覆盖运行中暂停、暂停后继续、失败后重试、运行中取消；
   Rust 集成测试补齐失败任务在阻塞解除后的重试完成。
 - 安全边界：AI / 同步凭据改为同目录原子私有写入，Unix 创建即 `0600`，不跟随预置

@@ -126,9 +126,9 @@ M0-A 契约与持久化
 | 选中文字入口 | ✅ 已实现 | 编辑器右键菜单 / 格式条 → Research seed |
 | 命令面板入口 | ✅ 已实现 | 命令面板动作 + 组件测试 |
 | Ask 对话“深入调研”入口 | ✅ 已实现 | Ask 答案操作 → Research seed |
-| 研究计划可编辑（子问题 / 时间窗 / 来源类型 / 语言） | ✅ 已实现 | DTO + UI + 查询重算测试 |
-| 计划保存为模板、可复用 | ✅ 已实现 | `.knowledge/research-templates` + 新课题替换原课题 |
-| 同一课题重跑并对比来源 / 结论变化 | ✅ 已实现 | `research_rerun / research_compare` + 集成测试 |
+| 研究计划可编辑（子问题 / 时间窗 / 来源类型 / 语言） | ✅ 已实现 | DTO + Playwright 用户路径 + 查询重算测试 |
+| 计划保存为模板、可复用 | ✅ 已实现 | Playwright 保存/可选 + `.knowledge/research-templates` 复用测试 |
+| 同一课题重跑并对比来源 / 结论变化 | ✅ 已实现 | `research_rerun / research_compare` + Playwright 差异视图 |
 | 来源 freshness：fetched/published/applicable_version | ✅ 已实现 | 本地笔记从 frontmatter 读取适用版本；发布时间参与 stale 判定；报告与来源 UI 展示 |
 | 采集中断后按已完成来源继续 | ✅ 已实现 | `research_resume` 保留来源并去重续跑 |
 | 三入口走同一流程 | ✅ 已实现 | 统一 `/research` seed + 后端同一 start 流程 |

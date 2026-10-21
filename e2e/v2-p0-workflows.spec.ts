@@ -16,14 +16,17 @@ async function createNote(page: Page, title: string, body: string) {
   await expect(page.locator('.cm-content')).toBeVisible();
 }
 
-test('Ask 提问、展示可引用材料并经预览确认存为普通笔记', async ({ page }) => {
-  await createWorkspace(page);
-
+async function enableAi(page: Page) {
   await page.goto('/#/settings');
   const nav = page.getByRole('navigation', { name: '设置导航' });
   await nav.getByTestId('settings-nav-ai').click();
   await page.getByTestId('ai-enabled').click();
   await expect(page.getByTestId('ai-enabled')).toBeChecked();
+}
+
+test('Ask 提问、展示可引用材料并经预览确认存为普通笔记', async ({ page }) => {
+  await createWorkspace(page);
+  await enableAi(page);
 
   await page.goto('/#/notes');
   await createNote(
@@ -48,4 +51,45 @@ test('Ask 提问、展示可引用材料并经预览确认存为普通笔记', a
   await expect(saveDialog).not.toBeVisible();
   await expect(page.locator('.cm-content')).toContainText('证据整理（浏览器预览模板）');
   await expect(page.getByRole('heading', { name: '问知识库' })).not.toBeVisible();
+});
+
+test('Research 编辑计划、保存模板、重跑并展示差异', async ({ page }) => {
+  await createWorkspace(page);
+  await enableAi(page);
+
+  await page.goto('/#/notes');
+  await createNote(
+    page,
+    'SQLite 全文检索索引',
+    '# 索引\n\nSQLite FTS5 使用倒排索引，双字短语提升中文召回。',
+  );
+  await createNote(page, 'SQLite 查询性能', '# 性能\n\nFTS5 查询性能取决于索引分片与分页策略。');
+
+  await page.goto('/#/research');
+  await page.getByTestId('research-topic').fill('SQLite 全文检索性能');
+  await page.getByTestId('research-start').click();
+
+  await page.getByRole('button', { name: '编辑计划' }).click();
+  await page.getByLabel('子问题（一行一个）').fill('索引结构如何影响召回？\n查询性能如何测量？');
+  await page.getByLabel('时间窗（天）').fill('365');
+  await page.getByLabel('语言').fill('zh-CN');
+  await page.getByLabel('来源类型').fill('local');
+  await page.getByRole('button', { name: '保存计划' }).click();
+  await expect(page.getByTestId('research-plan')).toContainText('索引结构如何影响召回？');
+  await expect(page.getByTestId('research-plan')).toContainText('时间窗 365 天');
+
+  await page.getByLabel('保存为计划模板').fill('全文检索模板');
+  await page.getByRole('button', { name: '保存模板' }).click();
+  await expect(page.getByText('研究计划已保存为模板')).toBeVisible();
+  await expect(page.getByLabel('计划模板（可选）')).toContainText('全文检索模板');
+
+  await page.getByTestId('research-collect').click();
+  await expect(page.getByTestId('research-sources')).toBeVisible();
+
+  await page.getByRole('button', { name: '同课题重跑' }).click();
+  await page.getByRole('button', { name: '与上次对比' }).click();
+  await expect(page.getByRole('heading', { name: '与上次调研的差异' })).toBeVisible();
+  await expect(page.getByText(/新增来源 \d+/)).toBeVisible();
+  await expect(page.getByText(/消失来源 \d+/)).toBeVisible();
+  await expect(page.getByText(/结论变化 \d+/)).toBeVisible();
 });
