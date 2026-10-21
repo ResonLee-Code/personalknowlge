@@ -30,6 +30,8 @@
 - 4 分片后的 10 万检索复测：平均 **102.44 ms**、p95 **190.69 ms**（< 200 ms）、
   recall@5 **100%**、重开 **1246.09 ms**、RSS **344.64 MB**；1 万发布规格 p95 为 **18.09 ms**；
 - FTS5 改为 4 个按 `note_id` 稳定哈希路由的分片；迁移 016 重建映射表、跨分片检索保持原有分页和时间排序。
+- 搜索词中的连字符、点号、加号等作为分隔符处理，避免 `shard-updated-token` 一类查询被 FTS5
+  误当成列限定语法并返回数据库错误。
 
 自动门禁与人工项见 [PLAN_V2_P1_P2_EXECUTION.md](./PLAN_V2_P1_P2_EXECUTION.md) 和
 [V2_P1_P2_MANUAL_ACCEPTANCE.md](./V2_P1_P2_MANUAL_ACCEPTANCE.md)。

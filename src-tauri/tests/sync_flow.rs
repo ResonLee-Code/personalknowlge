@@ -891,3 +891,68 @@ fn downloaded_overwrite_is_archived_and_can_be_restored_after_confirmation() {
         "还原前也要先保存当前版本"
     );
 }
+
+#[test]
+fn propagated_delete_is_archived_and_can_be_restored_into_the_note_index() {
+    let remote = LocalDav::start("Basic dXNlcjpwYXNz");
+    let device_a = Device::new("删除历史 A");
+    let device_b = Device::new("删除历史 B");
+    device_b.clear_initial_notes();
+    device_a.configure_webdav(&remote.endpoint);
+    device_b.configure_webdav(&remote.endpoint);
+    device_a.note(
+        "删除后可恢复",
+        "# 删除后可恢复\n\n这版必须能从同步历史找回。",
+    );
+    device_a.run_sync();
+    device_b.run_sync();
+    let b_note = device_b.find_note("删除后可恢复");
+
+    device_a
+        .notes()
+        .delete(&device_a.find_note("删除后可恢复"))
+        .expect("设备 A 删除");
+    device_a.run_sync();
+    device_b.run_sync();
+    assert!(device_b
+        .notes()
+        .list(NoteListQuery {
+            page_size: Some(100),
+            ..Default::default()
+        })
+        .expect("删除后的笔记列表")
+        .items
+        .iter()
+        .all(|item| item.id != b_note));
+
+    let archived = device_b
+        .sync()
+        .history()
+        .expect("删除历史")
+        .into_iter()
+        .find(|entry| entry.category == "before-delete" && entry.original_path.ends_with(".md"))
+        .expect("删除前必须留档");
+    device_b
+        .sync()
+        .restore_history(RestoreSyncHistoryInput {
+            relative_path: archived.relative_path,
+            confirm: true,
+        })
+        .expect("从同步历史恢复删除文件");
+
+    let restored = device_b
+        .notes()
+        .get(&b_note)
+        .expect("恢复文件后原笔记记录也必须恢复");
+    assert!(restored.content.contains("同步历史找回"));
+    let searched = SearchService::new(device_b.app.context().expect("恢复后的上下文"))
+        .search(SearchQuery {
+            keyword: "同步历史找回".to_string(),
+            ..Default::default()
+        })
+        .expect("恢复后的检索");
+    assert!(
+        searched.hits.iter().any(|hit| hit.note.id == b_note),
+        "恢复文件后必须重新进入搜索索引"
+    );
+}

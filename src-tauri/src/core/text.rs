@@ -29,7 +29,10 @@ pub fn is_cjk(ch: char) -> bool {
 pub fn sanitize_file_name(input: &str) -> String {
     let mut cleaned = String::with_capacity(input.len());
     for ch in input.chars() {
-        let illegal = matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | '\0');
+        let illegal = matches!(
+            ch,
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | '\0'
+        );
         if illegal || ch.is_control() {
             cleaned.push('-');
         } else {
@@ -55,7 +58,9 @@ pub fn sanitize_file_name(input: &str) -> String {
 
     let trimmed = collapsed.trim_matches(|c: char| c == '-' || c == '.' || c.is_whitespace());
     let mut result: String = trimmed.chars().take(MAX_FILE_STEM_CHARS).collect();
-    result = result.trim_matches(|c: char| c == '-' || c == '.').to_string();
+    result = result
+        .trim_matches(|c: char| c == '-' || c == '.')
+        .to_string();
 
     if result.is_empty() {
         result.push_str("note");
@@ -66,7 +71,10 @@ pub fn sanitize_file_name(input: &str) -> String {
         "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
         "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
-    if RESERVED.iter().any(|name| result.eq_ignore_ascii_case(name)) {
+    if RESERVED
+        .iter()
+        .any(|name| result.eq_ignore_ascii_case(name))
+    {
         result = format!("note-{result}");
     }
 
@@ -109,7 +117,11 @@ pub fn markdown_to_plain_text(markdown: &str) -> String {
     text = link.replace_all(&text, "$1").into_owned();
     text = wikilink
         .replace_all(&text, |caps: &regex::Captures<'_>| {
-            caps.get(2).or_else(|| caps.get(1)).map(|m| m.as_str()).unwrap_or("").to_string()
+            caps.get(2)
+                .or_else(|| caps.get(1))
+                .map(|m| m.as_str())
+                .unwrap_or("")
+                .to_string()
         })
         .into_owned();
     text = heading.replace_all(&text, "").into_owned();
@@ -319,19 +331,18 @@ pub fn build_fts_match(keyword: &str) -> Option<String> {
     for segment in segments {
         match segment {
             QuerySegment::Ascii(word) => {
-                let cleaned: String = word
-                    .chars()
-                    .filter(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '+'))
-                    .collect();
-                if cleaned.is_empty() {
-                    continue;
-                }
-                // 去掉 FTS5 语法字符后再加前缀匹配，避免用户输入被当成语法
-                let escaped = cleaned.replace('"', "");
-                if escaped.chars().count() >= 2 {
-                    clauses.push(format!("{escaped}*"));
-                } else {
-                    clauses.push(escaped);
+                // FTS5 的 `-` / `.` 会成为列限定或语法的一部分；用户搜索文件名、URL 片段时
+                // 不能让整次查询报 "no such column"。保留字母、数字、下划线为 token，
+                // 其它标点作为分隔符；各 token 用 AND 组合。
+                for token in word
+                    .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+                    .filter(|token| !token.is_empty())
+                {
+                    if token.chars().count() >= 2 {
+                        clauses.push(format!("{token}*"));
+                    } else {
+                        clauses.push(token.to_string());
+                    }
                 }
             }
             QuerySegment::Cjk(run) => {
@@ -463,7 +474,10 @@ pub fn build_snippet(text: &str, keyword: &str, max_chars: usize) -> Vec<TextSeg
         if to > from {
             let value: String = chars[from..to].iter().collect();
             if !value.is_empty() {
-                segments.push(TextSegment { text: value, matched: false });
+                segments.push(TextSegment {
+                    text: value,
+                    matched: false,
+                });
             }
         }
     };
@@ -478,7 +492,10 @@ pub fn build_snippet(text: &str, keyword: &str, max_chars: usize) -> Vec<TextSeg
             push_plain(&mut segments, cursor, start);
         }
         let value: String = chars[start..end].iter().collect();
-        segments.push(TextSegment { text: value, matched: true });
+        segments.push(TextSegment {
+            text: value,
+            matched: true,
+        });
         cursor = end;
     }
     if cursor < window_end {
@@ -496,7 +513,10 @@ pub fn build_snippet(text: &str, keyword: &str, max_chars: usize) -> Vec<TextSeg
         }
     }
     if segments.is_empty() {
-        segments.push(TextSegment { text: String::new(), matched: false });
+        segments.push(TextSegment {
+            text: String::new(),
+            matched: false,
+        });
     }
     segments
 }
@@ -738,7 +758,10 @@ fn split_unescaped(value: &str, separator: char) -> (String, Option<String>) {
 }
 
 fn unescape_link_text(value: &str) -> String {
-    value.replace("\\|", "|").replace("\\#", "#").replace("\\]", "]")
+    value
+        .replace("\\|", "|")
+        .replace("\\#", "#")
+        .replace("\\]", "]")
 }
 
 /// 取某一字符位置所在行的上下文摘要。
@@ -796,10 +819,18 @@ fn mask_code_regions(chars: &[char]) -> Vec<bool> {
         if at_end || chars[index] == '\n' {
             let line: String = chars[line_start..index].iter().collect();
             let trimmed = line.trim();
-            let fence_run = trimmed.chars().take_while(|ch| *ch == '`' || *ch == '~').count();
+            let fence_run = trimmed
+                .chars()
+                .take_while(|ch| *ch == '`' || *ch == '~')
+                .count();
             let is_fence = fence_run >= 3
-                && trimmed.chars().all(|ch| ch == '`' || ch == '~' || ch.is_whitespace() || !ch.is_alphanumeric() == false)
-                && trimmed.chars().next().is_some_and(|ch| ch == '`' || ch == '~');
+                && trimmed.chars().all(|ch| {
+                    ch == '`' || ch == '~' || ch.is_whitespace() || !ch.is_alphanumeric() == false
+                })
+                && trimmed
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch == '`' || ch == '~');
             let marker = trimmed.chars().next().unwrap_or('`');
 
             if is_fence {
@@ -831,7 +862,8 @@ fn mask_code_regions(chars: &[char]) -> Vec<bool> {
     while cursor < chars.len() {
         if chars[cursor] == '`' && parsable[cursor] {
             let mut run = 1usize;
-            while cursor + run < chars.len() && chars[cursor + run] == '`' && parsable[cursor + run] {
+            while cursor + run < chars.len() && chars[cursor + run] == '`' && parsable[cursor + run]
+            {
                 run += 1;
             }
             let mut probe = cursor + run;
@@ -950,7 +982,8 @@ mod wikilink_tests {
 
     #[test]
     fn rewrites_wikilink_targets_keeping_alias_and_anchor() {
-        let body = "见 [[旧标题]]、[[旧标题|别名]]、[[旧标题#小节]]，以及 [[别的笔记]] 与 `[[旧标题]]`。";
+        let body =
+            "见 [[旧标题]]、[[旧标题|别名]]、[[旧标题#小节]]，以及 [[别的笔记]] 与 `[[旧标题]]`。";
         let (updated, count) = rewrite_wikilink_target(body, "旧标题", "新标题");
         assert_eq!(count, 3, "{updated}");
         assert!(updated.contains("[[新标题]]"));
@@ -1000,7 +1033,10 @@ mod tests {
     fn markdown_plain_text_strips_syntax_and_frontmatter() {
         let markdown = "---\nid: note_1\ntitle: 标题\n---\n\n# 大标题\n\n正文 **加粗** 与 `代码`。\n\n- 列表项\n\n> 引用\n\n![图](a.png)\n\n[链接](https://example.com)\n\n```rust\nlet a = 1;\n```\n";
         let plain = markdown_to_plain_text(markdown);
-        assert!(!plain.contains("id: note_1"), "frontmatter 应被去掉：{plain}");
+        assert!(
+            !plain.contains("id: note_1"),
+            "frontmatter 应被去掉：{plain}"
+        );
         assert!(!plain.contains('#'), "标题标记应被去掉：{plain}");
         assert!(plain.contains("大标题"));
         assert!(plain.contains("正文 加粗 与 代码。"));
@@ -1031,7 +1067,10 @@ mod tests {
             Some("\"sqlite索引\"*")
         );
         // 纯中文仍是双字短语，纯英文仍是前缀
-        assert_eq!(build_fts_match("查询优化").as_deref(), Some("\"查询 询优 优化\""));
+        assert_eq!(
+            build_fts_match("查询优化").as_deref(),
+            Some("\"查询 询优 优化\"")
+        );
         assert_eq!(build_fts_match("sqlite").as_deref(), Some("sqlite*"));
         // 带空格的混合查询：两段分别处理（拉丁前缀 + 中文双字）
         assert_eq!(
@@ -1044,7 +1083,10 @@ mod tests {
     fn cjk_tokens_include_unigrams_and_bigrams() {
         let tokens = cjk_search_tokens("全文搜索");
         for expected in ["全", "文", "搜", "索", "全文", "文搜", "搜索"] {
-            assert!(tokens.split(' ').any(|token| token == expected), "缺少 {expected}：{tokens}");
+            assert!(
+                tokens.split(' ').any(|token| token == expected),
+                "缺少 {expected}：{tokens}"
+            );
         }
         assert!(!tokens.contains("全文搜"), "不应生成三字词");
     }
@@ -1062,6 +1104,16 @@ mod tests {
         assert!(!dangerous.contains('('), "{dangerous}");
 
         assert!(build_fts_match("   ").is_none());
+
+        // URL / 文件名 / 版本片段里的连字符、点号不能变成 FTS5 语法。
+        assert_eq!(
+            build_fts_match("shard-updated-token").as_deref(),
+            Some("shard* AND updated* AND token*")
+        );
+        assert_eq!(
+            build_fts_match("v2.0.x-file").as_deref(),
+            Some("v2* AND 0 AND x AND file*")
+        );
     }
 
     #[test]
@@ -1080,14 +1132,20 @@ mod tests {
             .map(|segment| segment.text.clone())
             .collect();
         assert_eq!(matched, "全文搜索");
-        let joined: String = segments.iter().map(|segment| segment.text.clone()).collect();
+        let joined: String = segments
+            .iter()
+            .map(|segment| segment.text.clone())
+            .collect();
         assert!(joined.contains("SQLite"));
     }
 
     #[test]
     fn snippet_without_match_returns_prefix() {
         let segments = build_snippet("只有一段普通文本", "不存在", 6);
-        let joined: String = segments.iter().map(|segment| segment.text.clone()).collect();
+        let joined: String = segments
+            .iter()
+            .map(|segment| segment.text.clone())
+            .collect();
         assert!(joined.contains("只有一段普通"));
         assert!(segments.iter().all(|segment| !segment.matched));
     }
@@ -1098,6 +1156,12 @@ mod tests {
         // 按字符数倒序排列，较长的 ASCII 词排在前面
         assert_eq!(terms[0], "search");
         assert!(terms.contains(&"全文搜索".to_string()));
-        assert_eq!(terms.iter().filter(|term| term.as_str() == "search").count(), 1);
+        assert_eq!(
+            terms
+                .iter()
+                .filter(|term| term.as_str() == "search")
+                .count(),
+            1
+        );
     }
 }

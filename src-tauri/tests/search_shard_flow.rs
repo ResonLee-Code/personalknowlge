@@ -5,7 +5,7 @@ use personal_knowledge_os_lib::application::note_service::NoteService;
 use personal_knowledge_os_lib::application::search_service::SearchService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
-use personal_knowledge_os_lib::domain::note::CreateNoteInput;
+use personal_knowledge_os_lib::domain::note::{CreateNoteInput, SaveNoteInput};
 use personal_knowledge_os_lib::domain::search::SearchQuery;
 use personal_knowledge_os_lib::infrastructure::fts::SEARCH_SHARDS;
 use personal_knowledge_os_lib::state::AppInner;
@@ -21,8 +21,9 @@ fn rebuild_routes_documents_across_all_stable_shards_and_search_stays_complete()
         .expect("创建工作区");
     let context = app.context().expect("上下文");
     let notes = NoteService::new(Arc::clone(&context));
+    let mut changed_note = None;
     for index in 0..80 {
-        notes
+        let created = notes
             .create(CreateNoteInput {
                 title: format!("分片笔记 {index}"),
                 category_id: None,
@@ -33,6 +34,9 @@ fn rebuild_routes_documents_across_all_stable_shards_and_search_stays_complete()
                 parent_id: None,
             })
             .expect("创建笔记");
+        if index == 42 {
+            changed_note = Some(created.note.id);
+        }
     }
     let status = IndexService::new(Arc::clone(&context))
         .rebuild()
@@ -77,4 +81,43 @@ fn rebuild_routes_documents_across_all_stable_shards_and_search_stays_complete()
             .any(|hit| hit.note.title == "分片笔记 42"),
         "跨分片 UNION 检索必须找回目标笔记"
     );
+
+    let changed_note = changed_note.expect("应记录第 42 篇");
+    notes
+        .save(SaveNoteInput {
+            id: changed_note.clone(),
+            content: "# 分片笔记 42\n\n增量更新内容 shard-updated-token。".to_string(),
+            base_content_hash: None,
+            title: None,
+            category_id: None,
+            tags: None,
+        })
+        .expect("增量更新分片笔记");
+    let updated = SearchService::new(Arc::clone(&context))
+        .search(SearchQuery {
+            keyword: "shard-updated-token".to_string(),
+            ..Default::default()
+        })
+        .expect("增量更新后可检索");
+    assert!(updated.hits.iter().any(|hit| hit.note.id == changed_note));
+
+    notes.delete(&changed_note).expect("删除分片笔记");
+    let removed = SearchService::new(Arc::clone(&context))
+        .search(SearchQuery {
+            keyword: "shard-updated-token".to_string(),
+            ..Default::default()
+        })
+        .expect("删除后检索");
+    assert!(removed.hits.iter().all(|hit| hit.note.id != changed_note));
+    let map_rows: i64 = context
+        .db
+        .with_conn(|conn| {
+            Ok(
+                conn.query_row("SELECT COUNT(*) FROM search_documents_map", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .expect("删除后的映射");
+    assert_eq!(map_rows, 80, "删除分片笔记后映射应同步减少");
 }
