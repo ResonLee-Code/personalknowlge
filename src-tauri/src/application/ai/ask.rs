@@ -53,17 +53,17 @@ const QUESTION_STOP_BIGRAMS: &[&str] = &[
     "细节", "告诉",
 ];
 
-struct Evidence {
-    chunk: RetrievedChunk,
-    title: String,
-    level: SourceLevel,
-    stale: bool,
+pub(crate) struct Evidence {
+    pub(crate) chunk: RetrievedChunk,
+    pub(crate) title: String,
+    pub(crate) level: SourceLevel,
+    pub(crate) stale: bool,
 }
 
-struct Retrieval {
-    evidence: Vec<Evidence>,
-    channels: Vec<RetrievalChannelStatus>,
-    warnings: Vec<String>,
+pub(crate) struct Retrieval {
+    pub(crate) evidence: Vec<Evidence>,
+    pub(crate) channels: Vec<RetrievalChannelStatus>,
+    pub(crate) warnings: Vec<String>,
 }
 
 /// Ask 业务服务。构造时不联网；只有 `answer` 在策略允许时才会构造在线模型。
@@ -406,7 +406,7 @@ impl AskService {
         })
     }
 
-    fn retrieve(&self, input: &AskQuestionInput) -> Result<Retrieval> {
+    pub(crate) fn retrieve(&self, input: &AskQuestionInput) -> Result<Retrieval> {
         match input.scope {
             AskScope::Note => {
                 let searched = self.retrieve_search(input)?;
@@ -771,7 +771,7 @@ fn estimate_text_tokens(text: &str) -> usize {
     cjk + other.div_ceil(4)
 }
 
-fn estimate_request_tokens(request: &GenerationRequest) -> usize {
+pub(crate) fn estimate_request_tokens(request: &GenerationRequest) -> usize {
     let evidence = request
         .evidence
         .iter()
@@ -850,7 +850,7 @@ fn template_answer(evidence: &[Evidence], question: &str) -> String {
 ///
 /// 返回按首次出现顺序去重的 1-based 编号。没有引用或出现未知编号都返回错误——
 /// 上层据此丢弃整份模型回答并降级，避免把编造来源混入界面。
-fn citation_numbers(text: &str, evidence_count: usize) -> Result<Vec<usize>> {
+pub(crate) fn citation_numbers(text: &str, evidence_count: usize) -> Result<Vec<usize>> {
     let pattern = Regex::new(r"\[(?:[Cc])?(\d{1,3})\]")
         .map_err(|error| AppError::internal(format!("引用解析规则初始化失败：{error}")))?;
     let mut seen = HashSet::new();
@@ -884,7 +884,7 @@ fn citation_numbers(text: &str, evidence_count: usize) -> Result<Vec<usize>> {
     Ok(numbers)
 }
 
-fn build_citations(numbers: Vec<usize>, evidence: &[Evidence]) -> Vec<AskCitation> {
+pub(crate) fn build_citations(numbers: Vec<usize>, evidence: &[Evidence]) -> Vec<AskCitation> {
     numbers
         .into_iter()
         .filter_map(|number| {

@@ -25,6 +25,8 @@ import type {
   ClippedPage,
   CreateNoteInput,
   GraphData,
+  GraphInsights,
+  GraphInsightsQuery,
   GraphNode,
   GraphQuery,
   IndexStatus,
@@ -69,14 +71,23 @@ import type {
   TextSegment,
   UnresolvedLink,
   UpdateAiPolicyInput,
+  SyncConflictSummary,
+  SyncSettings,
+  UpdateSyncSettingsInput,
   Workspace,
   WorkspaceOpenResult,
+  WritingApplyInput,
+  WritingApplyPreview,
+  WritingApplyResult,
+  WritingDraft,
+  WritingMode,
+  WritingRequest,
 } from '@/types';
 
 import packageJson from '../../package.json';
 
 /** 与后端 `SCHEMA_VERSION` 对齐的迁移版本（预览端不跑迁移，只用于如实展示）。 */
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 /** 仓库当前版本（来自 package.json，避免预览端硬编码版本号）。 */
 const packageVersion = packageJson.version;
@@ -103,6 +114,8 @@ interface MockState {
   organizeSuggestions: OrganizeSuggestion[];
   organizeJobs: OrganizeJob[];
   researchTemplates: ResearchPlanTemplate[];
+  syncSettings: SyncSettings;
+  syncConflicts: SyncConflictSummary[];
 }
 
 interface MockHistoryEntry {
@@ -150,6 +163,21 @@ const emptySettings: AppSettings = {
   listSort: 'updatedDesc',
   lastOpenedNoteId: null,
   lastCategoryId: null,
+};
+
+const defaultSyncSettings: SyncSettings = {
+  enabled: false,
+  provider: 'webdav',
+  endpoint: null,
+  bucket: null,
+  region: 'us-east-1',
+  usernameSet: false,
+  accessKeySet: false,
+  syncNotes: true,
+  syncAttachments: true,
+  syncIndex: false,
+  deviceId: 'browser-preview-device',
+  pendingQueue: 0,
 };
 
 /**
@@ -247,6 +275,8 @@ function load(): MockState {
         organizeSuggestions: parsed.organizeSuggestions ?? [],
         organizeJobs: parsed.organizeJobs ?? [],
         researchTemplates: parsed.researchTemplates ?? [],
+        syncSettings: parsed.syncSettings ?? defaultSyncSettings,
+        syncConflicts: parsed.syncConflicts ?? [],
       };
     }
   } catch {
@@ -268,6 +298,8 @@ function load(): MockState {
     organizeSuggestions: [],
     organizeJobs: [],
     researchTemplates: [],
+    syncSettings: { ...defaultSyncSettings },
+    syncConflicts: [],
   };
 }
 
@@ -2759,6 +2791,337 @@ function mockGraph(query: GraphQuery): GraphData {
   };
 }
 
+function mockTermSet(text: string): Set<string> {
+  const plain = text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*_`[\]()|-]/g, ' ')
+    .toLowerCase();
+  const chars = Array.from(plain);
+  const terms = new Set<string>();
+  let current = '';
+  for (const char of chars) {
+    if (/[\p{L}\p{N}]/u.test(char)) {
+      current += char;
+    } else {
+      if (current.length >= 3) terms.add(current);
+      current = '';
+    }
+  }
+  if (current.length >= 3) terms.add(current);
+  const cjkRuns = plain.match(/[\u3400-\u9fff]+/g) ?? [];
+  cjkRuns.forEach((run) => {
+    const values = Array.from(run);
+    for (let index = 0; index + 1 < values.length; index += 1) {
+      terms.add(`${values[index]}${values[index + 1]}`);
+    }
+  });
+  return terms;
+}
+
+function mockTermSimilarity(left: Set<string>, right: Set<string>): number {
+  if (left.size === 0 || right.size === 0) return 0;
+  const [small, large] = left.size <= right.size ? [left, right] : [right, left];
+  let intersection = 0;
+  small.forEach((term) => {
+    if (large.has(term)) intersection += 1;
+  });
+  return intersection / Math.sqrt(left.size * right.size);
+}
+
+/** Graph 2.0 预览端：规则与 Rust 的核心约束一致，便于离线检查交互。 */
+function mockGraphInsights(query: GraphInsightsQuery): GraphInsights {
+  const startedAt = Date.now();
+  const graph = mockGraph({
+    categoryId: query.categoryId,
+    tagId: query.tagId,
+    keyword: query.keyword,
+    updatedAfter: query.updatedAfter,
+    maxNodes: Math.min(5000, query.maxNodes ?? 2000),
+    maxEdges: Math.min(40_000, Math.max(1, query.maxNodes ?? 2000) * 8),
+    includeOrphans: true,
+  });
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const terms = new Map(
+    graph.nodes.map((node) => [
+      node.id,
+      mockTermSet(`${node.title}\n${state.contents[node.id] ?? ''}`),
+    ]),
+  );
+  const neighbours = new Map<string, Set<string>>();
+  graph.edges.forEach((edge) => {
+    if (!neighbours.has(edge.source)) neighbours.set(edge.source, new Set());
+    if (!neighbours.has(edge.target)) neighbours.set(edge.target, new Set());
+    neighbours.get(edge.source)!.add(edge.target);
+    neighbours.get(edge.target)!.add(edge.source);
+  });
+
+  const focusId = query.focusNoteId ?? null;
+  const focus = focusId ? nodeById.get(focusId) : undefined;
+  const neighbors = focus
+    ? graph.nodes
+        .filter((node) => node.id !== focus.id)
+        .map((node) => {
+          const score = mockTermSimilarity(terms.get(focus.id)!, terms.get(node.id)!);
+          const direct = neighbours.get(focus.id)?.has(node.id) ?? false;
+          const sharedTags = node.tags.filter((tag) => focus.tags.includes(tag));
+          const evidence: GraphInsights['neighbors'][number]['evidence'] = [];
+          if (direct) {
+            evidence.push({
+              kind: 'reference',
+              label: '两篇笔记之间存在双向链接',
+              noteIds: [node.id],
+            });
+          }
+          if (sharedTags.length > 0) {
+            evidence.push({
+              kind: 'sharedTag',
+              label: `共同标签：${sharedTags.join('、')}`,
+              noteIds: [node.id],
+            });
+          }
+          const sharedTerms = [...(terms.get(focus.id) ?? [])].filter((term) =>
+            terms.get(node.id)?.has(term),
+          );
+          if (sharedTerms.length > 0) {
+            evidence.push({
+              kind: 'sharedTopic',
+              label: `共同主题：${sharedTerms.slice(0, 4).join('、')}`,
+              noteIds: [node.id],
+            });
+            evidence.push({
+              kind: 'similarContent',
+              label: `正文词项相似度 ${Math.round(score * 100)}%`,
+              noteIds: [node.id],
+            });
+          }
+          return {
+            noteId: node.id,
+            title: node.title,
+            categoryId: node.categoryId,
+            score: Math.min(1, score + (direct ? 0.22 : 0)),
+            evidence,
+          };
+        })
+        .filter((item) => item.evidence.length > 0 && item.score >= 0.08)
+        .sort((left, right) => right.score - left.score)
+        .slice(0, Math.min(20, query.neighborLimit ?? 10))
+    : [];
+
+  const threshold = Math.min(0.99, Math.max(0.6, query.duplicateThreshold ?? 0.82));
+  const duplicatePairs: Array<[GraphNode, GraphNode, number]> = [];
+  graph.nodes.forEach((left, leftIndex) => {
+    graph.nodes.slice(leftIndex + 1).forEach((right) => {
+      const similarity = mockTermSimilarity(terms.get(left.id)!, terms.get(right.id)!);
+      if (similarity >= threshold) duplicatePairs.push([left, right, similarity]);
+    });
+  });
+  const seenDuplicates = new Set<string>();
+  const duplicateClusters: GraphInsights['duplicateClusters'] = [];
+  for (const [left, right, similarity] of duplicatePairs) {
+    if (seenDuplicates.has(left.id) || seenDuplicates.has(right.id)) continue;
+    seenDuplicates.add(left.id);
+    seenDuplicates.add(right.id);
+    duplicateClusters.push({
+      id: `duplicate-${left.id}`,
+      similarity,
+      reason: `正文词项相似度至少 ${Math.round(similarity * 100)}%，合并前请核对差异。`,
+      members: [left, right].map((node) => ({
+        noteId: node.id,
+        title: node.title,
+        excerpt: Array.from((state.contents[node.id] ?? '').replace(/[#>*_`[\]()|-]/g, ' ').trim())
+          .slice(0, 180)
+          .join(''),
+        updatedAt: node.updatedAt,
+      })),
+      requiresConfirmation: true,
+    });
+  }
+
+  const categoryByNote = new Map(graph.nodes.map((node) => [node.id, node.categoryId ?? null]));
+  const bridges = graph.nodes
+    .map((node) => {
+      const connected = neighbours.get(node.id) ?? new Set<string>();
+      const categories = new Set(
+        [...connected]
+          .map((id) => categoryByNote.get(id) ?? null)
+          .filter((category) => category !== (node.categoryId ?? null)),
+      );
+      const cross = [...connected].filter(
+        (id) => (categoryByNote.get(id) ?? null) !== (node.categoryId ?? null),
+      ).length;
+      const ratio = connected.size === 0 ? 0 : cross / connected.size;
+      return {
+        noteId: node.id,
+        title: node.title,
+        categoryId: node.categoryId,
+        connectedCategories: categories.size,
+        bridgeScore: Math.min(1, ratio * Math.log2(2 + categories.size)),
+        explanation: `连接 ${categories.size} 个其它分类，跨分类邻居占 ${Math.round(ratio * 100)}%。`,
+      };
+    })
+    .filter((item) => item.connectedCategories > 0 && item.bridgeScore >= 0.25)
+    .sort((left, right) => right.bridgeScore - left.bridgeScore)
+    .slice(0, 50);
+
+  const categoryCounts = new Map<string, number>();
+  const categoryInternal = new Map<string, number>();
+  const categoryExternal = new Map<string, number>();
+  graph.nodes.forEach((node) => {
+    if (node.categoryId) {
+      categoryCounts.set(node.categoryId, (categoryCounts.get(node.categoryId) ?? 0) + 1);
+    }
+  });
+  graph.edges.forEach((edge) => {
+    const left = categoryByNote.get(edge.source);
+    const right = categoryByNote.get(edge.target);
+    if (left === right && left) {
+      categoryInternal.set(left, (categoryInternal.get(left) ?? 0) + 1);
+    } else {
+      if (left) categoryExternal.set(left, (categoryExternal.get(left) ?? 0) + 1);
+      if (right) categoryExternal.set(right, (categoryExternal.get(right) ?? 0) + 1);
+    }
+  });
+  const islandCategories: GraphInsights['islandCategories'] = [...categoryCounts.entries()]
+    .filter(
+      ([id, count]) =>
+        count >= 2 && (categoryExternal.get(id) ?? 0) === 0 && (categoryInternal.get(id) ?? 0) > 0,
+    )
+    .map(([id, count]) => {
+      const path =
+        state.categories
+          .filter((category) => category.id === id)
+          .map((category) => category.name)
+          .join('') || '未命名分类';
+      const internalEdges = categoryInternal.get(id) ?? 0;
+      return {
+        categoryId: id,
+        categoryPath: path,
+        noteCount: count,
+        internalEdges,
+        externalEdges: 0,
+        explanation: `${count} 篇笔记在分类内形成 ${internalEdges} 条连接，但未连接到其它分类。`,
+      };
+    });
+
+  return {
+    mode: 'local',
+    neighbors,
+    duplicateClusters,
+    orphanNotes: graph.nodes.filter((node) => node.orphan).slice(0, 50),
+    bridgeNotes: bridges,
+    islandCategories,
+    sampledNodes: graph.nodes.length,
+    totalNodes: graph.totalNodes,
+    truncated: graph.truncated,
+    warnings: ['浏览器预览使用本地词项降级通道；向量质量需在桌面端已建索引后验证。'],
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+function mockWritingDraft(input: WritingRequest): WritingDraft {
+  const note = state.notes.find((item) => item.id === input.noteId && item.status === 'active');
+  if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
+  const content = state.contents[note.id] ?? '';
+  const plain = content
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*_`[\]()|-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!plain) fail('INVALID_INPUT', '当前笔记没有可用于引用的正文。');
+  const mode = (input.mode ?? 'outline') as WritingMode;
+  const chars = Array.from(content);
+  const defaultEnd = mode === 'outline' || mode === 'continue' ? chars.length : chars.length;
+  const targetStart = Math.min(
+    chars.length,
+    Math.max(
+      0,
+      input.selectionStart ?? (mode === 'outline' || mode === 'continue' ? chars.length : 0),
+    ),
+  );
+  const targetEnd = Math.min(chars.length, Math.max(targetStart, input.selectionEnd ?? defaultEnd));
+  const snippet = Array.from(plain).slice(0, 260).join('');
+  const citation = {
+    citationId: 'C1',
+    noteId: note.id,
+    title: note.title,
+    chunkIndex: 0,
+    heading: '',
+    snippet: Array.from(plain).slice(0, 180).join(''),
+    charStart: 0,
+    charEnd: Array.from(content).length,
+  };
+  const text = mode === 'outline' ? `- ${note.title} · ${snippet} [1]` : `${snippet} [1]`;
+  return {
+    noteId: note.id,
+    mode,
+    text,
+    segments: [{ id: 'W1', text, citations: [citation] }],
+    citations: [citation],
+    provider: 'template.writing',
+    tier: 'template',
+    evidenceSufficient: true,
+    warnings: ['浏览器预览只做本地模板整理，不调用真实模型。'],
+    baseContentHash: note.contentHash ?? note.updatedAt,
+    targetStart,
+    targetEnd,
+    inputTokens: 0,
+    tookMs: 0,
+  };
+}
+
+function mockWritingApply(input: WritingApplyInput): WritingApplyPreview {
+  const note = state.notes.find((item) => item.id === input.noteId && item.status === 'active');
+  if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
+  if ((note.contentHash ?? note.updatedAt) !== input.baseContentHash) {
+    fail('NOTE_CONFLICT', '目标笔记在草稿生成后已被修改，请重新生成。');
+  }
+  if (input.acceptedSegments.length === 0) {
+    fail('INVALID_INPUT', '没有接受任何生成段落。');
+  }
+  const chars = Array.from(state.contents[note.id] ?? '');
+  const start = Math.min(chars.length, Math.max(0, input.targetStart));
+  const end = Math.min(chars.length, Math.max(start, input.targetEnd));
+  const insertion = input.acceptedSegments
+    .map((segment) => segment.text.trim())
+    .filter(Boolean)
+    .join('\n\n');
+  if (!insertion) fail('INVALID_INPUT', '接受段落为空。');
+  const citations = input.acceptedSegments.flatMap((segment) => segment.citations);
+  if (citations.length === 0) fail('INVALID_INPUT', '生成段落没有引用，不能写入。');
+  const sources = `\n\n## 写作来源\n\n${[
+    ...new Map(citations.map((item) => [item.noteId, item])).values(),
+  ]
+    .map((item) => `- [[${item.title}]]`)
+    .join('\n')}\n`;
+  return {
+    noteId: note.id,
+    content: `${chars.slice(0, start).join('')}${insertion}${chars.slice(end).join('')}${sources}`,
+    addedChars: Array.from(insertion).length,
+    removedChars: end - start,
+    acceptedSegments: input.acceptedSegments.length,
+    citations,
+    warnings: [],
+  };
+}
+
+function mockWritingApplyConfirmed(input: WritingApplyInput): WritingApplyResult {
+  if (!input.confirm) fail('INVALID_INPUT', '写入前必须确认 diff。');
+  const preview = mockWritingApply(input);
+  const note = state.notes.find((item) => item.id === input.noteId);
+  if (!note) fail('NOTE_NOT_FOUND', '笔记不存在。');
+  note.contentHash = `mock-${Date.now()}`;
+  note.updatedAt = new Date().toISOString();
+  note.wordCount = Array.from(preview.content).length;
+  state.contents[note.id] = preview.content;
+  persist();
+  emit('notes://changed', { kind: 'updated', id: note.id });
+  return {
+    detail: toDetail(note),
+    acceptedSegments: preview.acceptedSegments,
+    sourceCount: preview.citations.length,
+  };
+}
+
 function categoryTree(): CategoryNode[] {
   const build = (parentId: string | null, depth: number): CategoryNode[] =>
     state.categories
@@ -2868,6 +3231,8 @@ export async function handleMockInvoke(
         organizeSuggestions: [],
         organizeJobs: [],
         researchTemplates: [],
+        syncSettings: { ...defaultSyncSettings },
+        syncConflicts: [],
       };
       persist();
       return null;
@@ -2888,6 +3253,59 @@ export async function handleMockInvoke(
       persist();
       return state.settings;
     }
+    case 'sync_settings_get':
+      return state.syncSettings;
+    case 'sync_settings_update': {
+      const input = (payload.input ?? {}) as UpdateSyncSettingsInput;
+      state.syncSettings = {
+        ...state.syncSettings,
+        ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+        ...(input.provider ? { provider: input.provider } : {}),
+        ...(input.endpoint !== undefined ? { endpoint: input.endpoint.trim() || null } : {}),
+        ...(input.bucket !== undefined ? { bucket: input.bucket.trim() || null } : {}),
+        ...(input.region ? { region: input.region.trim() || 'us-east-1' } : {}),
+        ...(input.syncNotes !== undefined ? { syncNotes: input.syncNotes } : {}),
+        ...(input.syncAttachments !== undefined ? { syncAttachments: input.syncAttachments } : {}),
+        ...(input.syncIndex !== undefined ? { syncIndex: input.syncIndex } : {}),
+        ...(input.username ? { usernameSet: Boolean(input.username.trim()) } : {}),
+        ...(input.accessKey ? { accessKeySet: Boolean(input.accessKey.trim()) } : {}),
+        ...(input.clearCredentials ? { usernameSet: false, accessKeySet: false } : {}),
+      };
+      persist();
+      return state.syncSettings;
+    }
+    case 'sync_preview':
+    case 'sync_run':
+      fail(
+        'SYNC_FAILED',
+        '浏览器预览没有网络传输与端到端加密密钥；请在桌面应用中使用 WebDAV / S3 同步。',
+      );
+      break;
+    case 'sync_conflicts':
+      return state.syncConflicts;
+    case 'sync_conflict_detail':
+      fail('INVALID_INPUT', '浏览器预览没有本地同步冲突历史。');
+      break;
+    case 'sync_conflict_merge_preview':
+      fail('INVALID_INPUT', '浏览器预览没有本地同步冲突历史。');
+      break;
+    case 'sync_conflict_resolve':
+      fail('INVALID_INPUT', '浏览器预览没有本地同步冲突历史。');
+      break;
+    case 'sync_history':
+      return [];
+    case 'sync_history_restore':
+      fail('INVALID_INPUT', '浏览器预览没有本地同步历史。');
+      break;
+    case 'writing_draft':
+      requireWorkspace();
+      return mockWritingDraft((payload.input ?? {}) as WritingRequest);
+    case 'writing_apply_preview':
+      requireWorkspace();
+      return mockWritingApply((payload.input ?? {}) as WritingApplyInput);
+    case 'writing_apply':
+      requireWorkspace();
+      return mockWritingApplyConfirmed((payload.input ?? {}) as WritingApplyInput);
     case 'note_list': {
       requireWorkspace();
       return listNotes(payload.query as NoteListQuery);
@@ -3253,6 +3671,9 @@ export async function handleMockInvoke(
     case 'graph_get':
       requireWorkspace();
       return mockGraph((payload.query ?? {}) as GraphQuery);
+    case 'graph_insights':
+      requireWorkspace();
+      return mockGraphInsights((payload.query ?? {}) as GraphInsightsQuery);
     case 'note_export':
       fail('INVALID_INPUT', '浏览器预览模式不支持导出到本地文件，请在桌面应用中使用「导出」。');
       break;

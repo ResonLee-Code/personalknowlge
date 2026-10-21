@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
 use crate::application::ai::embeddings::{EmbeddingProvider, MAX_INPUT_CHARS};
 use crate::application::ai::policy::AiPolicyService;
@@ -24,7 +24,7 @@ use crate::core::hash::sha256_hex_str;
 use crate::core::time::now_iso;
 use crate::domain::ai::{VectorIndexPreview, VectorIndexReport, VectorIndexStatus};
 use crate::domain::note::NoteStatus;
-use crate::repositories::settings_repository::{SqliteSettingsRepository, SettingsRepository};
+use crate::repositories::settings_repository::{SettingsRepository, SqliteSettingsRepository};
 use crate::repositories::{NoteRepository, SqliteNoteRepository};
 
 /// 上次构建时间 / 构建用的模型（放设置表，随工作区走）。
@@ -44,7 +44,11 @@ pub struct VectorStore;
 
 impl VectorStore {
     pub fn count(conn: &Connection) -> Result<i64> {
-        Ok(conn.query_row("SELECT COUNT(*) FROM chunk_embeddings", [], |row| row.get(0))?)
+        Ok(
+            conn.query_row("SELECT COUNT(*) FROM chunk_embeddings", [], |row| {
+                row.get(0)
+            })?,
+        )
     }
 
     pub fn count_for_model(conn: &Connection, model: &str) -> Result<i64> {
@@ -129,6 +133,52 @@ impl VectorStore {
                 continue;
             }
             let vector: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|slice| f32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
+                .collect();
+            out.push((note_id, chunk_index, vector));
+        }
+        Ok(out)
+    }
+
+    /// 只读取指定笔记的向量。Graph 洞察必须在抽样子图上工作，不能为了 2000 个节点
+    /// 把 10 万库的全部向量拉进内存。
+    pub fn load_for_notes(
+        conn: &Connection,
+        model: &str,
+        note_ids: &[String],
+    ) -> Result<Vec<(String, i64, Vec<f32>)>> {
+        if note_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", note_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT note_id, chunk_index, dim, vector FROM chunk_embeddings
+             WHERE model = ?1 AND note_id IN ({placeholders})"
+        );
+        let mut statement = conn.prepare(&sql)?;
+        let mut values: Vec<&dyn rusqlite::ToSql> = vec![&model];
+        for id in note_ids {
+            values.push(id);
+        }
+        let rows = statement.query_map(params_from_iter(values), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (note_id, chunk_index, dim, bytes) = row?;
+            let expected = (dim.max(0) as usize) * 4;
+            if bytes.len() != expected || expected == 0 {
+                continue;
+            }
+            let vector = bytes
                 .chunks_exact(4)
                 .map(|slice| f32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
                 .collect();
@@ -258,7 +308,9 @@ impl VectorIndexService {
         };
         let model = model.to_string();
         if policy.vector_authorized_at.is_none() {
-            return Ok(blocked("向量检索尚未授权：查询词会发给嵌入端点，需要在「设置 → AI」里确认一次。"));
+            return Ok(blocked(
+                "向量检索尚未授权：查询词会发给嵌入端点，需要在「设置 → AI」里确认一次。",
+            ));
         }
 
         let pending = self.pending_chunks()?;
@@ -269,7 +321,8 @@ impl VectorIndexService {
         let to_embed = pending
             .iter()
             .filter(|chunk| {
-                existing.get(&(chunk.note_id.clone(), chunk.chunk_index)) != Some(&chunk.content_hash)
+                existing.get(&(chunk.note_id.clone(), chunk.chunk_index))
+                    != Some(&chunk.content_hash)
             })
             .count() as i64;
         let notes = pending
@@ -296,7 +349,11 @@ impl VectorIndexService {
     }
 
     /// 构建（增量）。**必须显式确认**——这是把整库内容发出去的一次性动作。
-    pub fn build(&self, provider: &dyn EmbeddingProvider, confirm: bool) -> Result<VectorIndexReport> {
+    pub fn build(
+        &self,
+        provider: &dyn EmbeddingProvider,
+        confirm: bool,
+    ) -> Result<VectorIndexReport> {
         let started = Instant::now();
         if !confirm {
             return Err(AppError::new(
@@ -331,7 +388,8 @@ impl VectorIndexService {
         let to_embed: Vec<&PendingChunk> = pending
             .iter()
             .filter(|chunk| {
-                existing.get(&(chunk.note_id.clone(), chunk.chunk_index)) != Some(&chunk.content_hash)
+                existing.get(&(chunk.note_id.clone(), chunk.chunk_index))
+                    != Some(&chunk.content_hash)
             })
             .collect();
         let skipped = total_chunks - to_embed.len() as i64;
@@ -385,7 +443,7 @@ impl VectorIndexService {
     }
 
     pub fn clear(&self) -> Result<usize> {
-        let removed = self.ctx.db.with_conn(|conn| VectorStore::clear(conn))?;
+        let removed = self.ctx.db.with_conn(VectorStore::clear)?;
         self.ctx.db.with_conn(|conn| {
             SqliteSettingsRepository.set_raw(conn, VECTOR_BUILT_AT_KEY, "")?;
             SqliteSettingsRepository.set_raw(conn, VECTOR_MODEL_KEY, "")
@@ -401,7 +459,10 @@ impl VectorIndexService {
         limit: usize,
     ) -> Result<Vec<RetrievedChunk>> {
         let model = provider.id();
-        let stored = self.ctx.db.with_conn(|conn| VectorStore::load(conn, &model))?;
+        let stored = self
+            .ctx
+            .db
+            .with_conn(|conn| VectorStore::load(conn, &model))?;
         if stored.is_empty() {
             return Ok(Vec::new());
         }
@@ -413,11 +474,18 @@ impl VectorIndexService {
         let mut scored: Vec<(f32, String, i64)> = stored
             .into_iter()
             .map(|(note_id, chunk_index, vector)| {
-                (cosine_similarity(&query_vector, &vector), note_id, chunk_index)
+                (
+                    cosine_similarity(&query_vector, &vector),
+                    note_id,
+                    chunk_index,
+                )
             })
             .collect();
         scored.sort_by(|left, right| {
-            right.0.partial_cmp(&left.0).unwrap_or(std::cmp::Ordering::Equal)
+            right
+                .0
+                .partial_cmp(&left.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         scored.truncate(limit.max(1));
 
@@ -440,7 +508,11 @@ impl VectorIndexService {
                     .map(str::to_string)
                     .collect(),
                 snippet: crate::core::text::truncate_chars(
-                    &chunk_text(&body, row.char_start.max(0) as usize, row.char_end.max(0) as usize),
+                    &chunk_text(
+                        &body,
+                        row.char_start.max(0) as usize,
+                        row.char_end.max(0) as usize,
+                    ),
                     180,
                 ),
                 char_start: row.char_start,
@@ -453,7 +525,11 @@ impl VectorIndexService {
     }
 
     fn note_body(&self, file_path: &str) -> Option<String> {
-        self.ctx.storage.read_note(file_path).ok().map(|stored| stored.body)
+        self.ctx
+            .storage
+            .read_note(file_path)
+            .ok()
+            .map(|stored| stored.body)
     }
 
     fn chunk_meta(&self, note_id: &str, chunk_index: i64) -> Result<Option<ChunkMeta>> {
@@ -528,9 +604,20 @@ mod tests {
     fn cosine_similarity_handles_edges() {
         assert!((cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]) - 1.0).abs() < 1e-6);
         assert!((cosine_similarity(&[1.0, 0.0], &[0.0, 1.0])).abs() < 1e-6);
-        assert!((cosine_similarity(&[2.0, 0.0], &[3.0, 0.0]) - 1.0).abs() < 1e-6, "只看方向");
-        assert_eq!(cosine_similarity(&[0.0, 0.0], &[1.0, 1.0]), 0.0, "零向量不算相似");
-        assert_eq!(cosine_similarity(&[1.0], &[1.0, 2.0]), 0.0, "维度不同直接 0");
+        assert!(
+            (cosine_similarity(&[2.0, 0.0], &[3.0, 0.0]) - 1.0).abs() < 1e-6,
+            "只看方向"
+        );
+        assert_eq!(
+            cosine_similarity(&[0.0, 0.0], &[1.0, 1.0]),
+            0.0,
+            "零向量不算相似"
+        );
+        assert_eq!(
+            cosine_similarity(&[1.0], &[1.0, 2.0]),
+            0.0,
+            "维度不同直接 0"
+        );
     }
 
     #[test]

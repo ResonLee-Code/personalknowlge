@@ -9,6 +9,7 @@
 //! **发布前必跑（Track E2）**：一条命令入口是 `pnpm bench`（脚本 `scripts/bench/run.sh`），
 //! 它按 **3 万篇**规格跑本基准并在**超阈值时以非零码退出**。阈值可用环境变量覆盖：
 //! `BENCH_MAX_GRAPH_MS`（默认 1500，M3 红线）、`BENCH_SCAN_TIMEOUT_S`（默认 600）。
+//! 10 万篇使用首屏红线 `BENCH_MAX_GRAPH_100K_MS`（默认 3000）。
 //! 基准最后会打印一行机器可读的 `PKOS_BENCH graph …`，脚本靠它确认「基准真的跑了」。
 
 use std::sync::Arc;
@@ -63,6 +64,7 @@ fn dir_size(path: &std::path::Path) -> u64 {
 #[ignore = "性能基准，手动执行：cargo test --offline --test graph_bench -- --ignored --nocapture"]
 fn bench_graph_with_3000_notes() {
     let max_graph_ms = env_f64("BENCH_MAX_GRAPH_MS", 1500.0);
+    let max_graph_100k_ms = env_f64("BENCH_MAX_GRAPH_100K_MS", 3000.0);
     let scan_timeout_s = env_f64("BENCH_SCAN_TIMEOUT_S", 600.0);
     let data = tempfile::tempdir().expect("应用数据目录");
     let workspace: TempDir = tempfile::tempdir().expect("工作区目录");
@@ -89,8 +91,7 @@ fn bench_graph_with_3000_notes() {
 
     // 直接写文件，再走真实路径「扫描采纳 → 建索引 → 解析链接」：
     // 既避免逐篇 create 与文件监听扫描竞争（会被标记缺失），也更接近「导入一个已有目录」的场景。
-    let category_dirs: Vec<String> =
-        category_ids.iter().map(|_| String::new()).collect();
+    let category_dirs: Vec<String> = category_ids.iter().map(|_| String::new()).collect();
     let categories = CategoryService::new(Arc::clone(&context));
     let dirs: Vec<String> = categories
         .list()
@@ -117,8 +118,15 @@ fn bench_graph_with_3000_notes() {
 
     // 扫描采纳：文件监听与显式扫描可能并发（同一路径重复插入会触发唯一约束），
     // 因此这里按「重试 + 轮询」等待全部笔记进入库，测的是真实落地时间。
-    let disk_files = context.storage.list_markdown_files().map(|files| files.len()).unwrap_or(0);
-    println!("磁盘上可识别的 Markdown 文件：{disk_files}（期望 {}）", note_total + 1);
+    let disk_files = context
+        .storage
+        .list_markdown_files()
+        .map(|files| files.len())
+        .unwrap_or(0);
+    println!(
+        "磁盘上可识别的 Markdown 文件：{disk_files}（期望 {}）",
+        note_total + 1
+    );
     let started = Instant::now();
     let index_service = IndexService::new(Arc::clone(&context));
     let mut last_error = String::new();
@@ -138,7 +146,9 @@ fn bench_graph_with_3000_notes() {
         assert!(
             started.elapsed().as_secs_f64() < scan_timeout_s,
             "扫描超时（{scan_timeout_s} s）：入库 {} 篇，active={}，最后一次错误：{}",
-            added, active, last_error
+            added,
+            active,
+            last_error
         );
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
@@ -155,11 +165,15 @@ fn bench_graph_with_3000_notes() {
 
     // 链接全量重建：代表最坏情况（首次打开已有目录）
     let started = Instant::now();
-    let report = LinkService::new(Arc::clone(&context)).rebuild().expect("重建链接");
+    let report = LinkService::new(Arc::clone(&context))
+        .rebuild()
+        .expect("重建链接");
     let link_elapsed = started.elapsed();
 
     let started = Instant::now();
-    let index = IndexService::new(Arc::clone(&context)).rebuild().expect("重建索引");
+    let index = IndexService::new(Arc::clone(&context))
+        .rebuild()
+        .expect("重建索引");
     let index_elapsed = started.elapsed();
 
     let graph = GraphService::new(Arc::clone(&context));
@@ -188,7 +202,10 @@ fn bench_graph_with_3000_notes() {
 
     let started = Instant::now();
     let orphans_off = graph
-        .graph(GraphQuery { include_orphans: Some(false), ..Default::default() })
+        .graph(GraphQuery {
+            include_orphans: Some(false),
+            ..Default::default()
+        })
         .expect("关闭孤立节点");
     let orphans_elapsed = started.elapsed();
 
@@ -221,6 +238,15 @@ fn bench_graph_with_3000_notes() {
         all.total_edges
     );
     println!(
+        "graph_get 首屏抽样      : {:?}（10 万篇红线 {:.0} ms）",
+        all_elapsed,
+        if note_total >= 100_000 {
+            max_graph_100k_ms
+        } else {
+            max_graph_ms
+        }
+    );
+    println!(
         "graph_get 分类过滤      : {:?}（{} 节点 / {} 边）",
         filtered_elapsed,
         filtered.nodes.len(),
@@ -238,16 +264,30 @@ fn bench_graph_with_3000_notes() {
         orphans_off.nodes.len(),
         orphans_off.edges.len()
     );
-    println!("database.sqlite         : {:.1} MB", db_bytes as f64 / 1024.0 / 1024.0);
-    println!(".knowledge 目录合计     : {:.1} MB", knowledge_bytes as f64 / 1024.0 / 1024.0);
-    println!("护栏（发布前必跑）      : graph_get 全量 < {max_graph_ms:.0} ms、节点数 == 笔记数 + 1");
+    println!(
+        "database.sqlite         : {:.1} MB",
+        db_bytes as f64 / 1024.0 / 1024.0
+    );
+    println!(
+        ".knowledge 目录合计     : {:.1} MB",
+        knowledge_bytes as f64 / 1024.0 / 1024.0
+    );
+    let all_limit = if note_total >= 100_000 {
+        max_graph_100k_ms
+    } else {
+        max_graph_ms
+    };
+    println!(
+        "护栏（发布前必跑）      : graph_get 全量 / 首屏 < {all_limit:.0} ms、节点数 == 笔记数 + 1"
+    );
     println!("=================================================\n");
 
     // 机器可读摘要：`scripts/bench/run.sh` 靠这一行确认基准真的跑完（防「空跑变绿灯」）
     println!(
-        "PKOS_BENCH graph notes={note_total} graph_all_ms={:.1} graph_filtered_ms={:.1} \
+        "PKOS_BENCH graph notes={note_total} graph_first_screen_ms={:.1} graph_all_ms={:.1} graph_filtered_ms={:.1} \
          graph_focus2hop_ms={:.1} graph_no_orphans_ms={:.1} scan_s={:.2} links_rebuild_s={:.2} \
          fts_s={:.2} db_mb={:.2} nodes={} edges={} total_nodes={} total_edges={}",
+        all_elapsed.as_secs_f64() * 1000.0,
         all_elapsed.as_secs_f64() * 1000.0,
         filtered_elapsed.as_secs_f64() * 1000.0,
         focused_elapsed.as_secs_f64() * 1000.0,
@@ -265,8 +305,8 @@ fn bench_graph_with_3000_notes() {
     // 基准同时充当回归护栏：全量查询必须在 1.5s 内返回（M3 验收口径，可用 BENCH_MAX_GRAPH_MS 覆盖）
     let all_ms = all_elapsed.as_secs_f64() * 1000.0;
     assert!(
-        all_ms < max_graph_ms,
-        "graph_get 全量查询 {all_ms:.1} ms 超过红线 {max_graph_ms:.0} ms"
+        all_ms < all_limit,
+        "graph_get 全量查询 {all_ms:.1} ms 超过红线 {all_limit:.0} ms"
     );
     assert_eq!(all.total_nodes, note_total + 1, "欢迎笔记 + 合成笔记");
 }

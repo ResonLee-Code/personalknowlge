@@ -38,6 +38,10 @@ pub enum ErrorCode {
     AiDisabled,
     /// 联网档位为「仅本地」，或本次外发未获确认
     NetworkDisabled,
+    /// 同步远端已变化，拒绝覆盖；需要重新预览或人工解决冲突
+    SyncConflict,
+    /// 同步传输 / 配置 / 加解密失败
+    SyncFailed,
 }
 
 impl ErrorCode {
@@ -65,6 +69,8 @@ impl ErrorCode {
             ErrorCode::InternalError => "INTERNAL_ERROR",
             ErrorCode::AiDisabled => "AI_DISABLED",
             ErrorCode::NetworkDisabled => "NETWORK_DISABLED",
+            ErrorCode::SyncConflict => "SYNC_CONFLICT",
+            ErrorCode::SyncFailed => "SYNC_FAILED",
         }
     }
 }

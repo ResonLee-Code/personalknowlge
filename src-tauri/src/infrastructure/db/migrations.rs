@@ -90,9 +90,14 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "organize_undo_hash",
         sql: include_str!("../../../migrations/015_organize_undo_hash.sql"),
     },
+    Migration {
+        version: 16,
+        name: "search_shards",
+        sql: include_str!("../../../migrations/016_search_shards.sql"),
+    },
 ];
 
-pub const SCHEMA_VERSION: i64 = 15;
+pub const SCHEMA_VERSION: i64 = 16;
 
 /// 创建迁移记录表。
 fn ensure_migration_table(conn: &Connection) -> Result<()> {
@@ -142,7 +147,12 @@ pub fn run_migrations(conn: &Connection) -> Result<Vec<i64>> {
         newly_applied.push(migration.version);
     }
 
-    let version = applied.iter().chain(newly_applied.iter()).copied().max().unwrap_or(0);
+    let version = applied
+        .iter()
+        .chain(newly_applied.iter())
+        .copied()
+        .max()
+        .unwrap_or(0);
     conn.pragma_update(None, "user_version", version)?;
     Ok(newly_applied)
 }

@@ -78,3 +78,114 @@ pub struct GraphData {
     pub total_edges: usize,
     pub duration_ms: u64,
 }
+
+/// Graph 2.0 洞察查询。
+///
+/// 洞察只在当前图谱抽样子图上计算，避免 10 万库上做全量两两比较。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphInsightsQuery {
+    #[serde(default)]
+    pub category_id: Option<String>,
+    #[serde(default)]
+    pub tag_id: Option<String>,
+    #[serde(default)]
+    pub keyword: Option<String>,
+    #[serde(default)]
+    pub updated_after: Option<String>,
+    /// 以哪篇笔记为中心找近邻；为空时仍返回重复、桥梁与孤岛结构洞察。
+    #[serde(default)]
+    pub focus_note_id: Option<String>,
+    /// 图谱抽样上限（1..=5000，缺省 2000）。
+    #[serde(default)]
+    pub max_nodes: Option<usize>,
+    /// 近邻数量（1..=20，缺省 10）。
+    #[serde(default)]
+    pub neighbor_limit: Option<usize>,
+    /// 近重复阈值（0.6..=0.99，缺省 0.82）。
+    #[serde(default)]
+    pub duplicate_threshold: Option<f64>,
+}
+
+/// 一条可解释的连接原因。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphEvidence {
+    /// `reference` / `sharedReference` / `sharedTag` / `sharedTopic` / `similarContent`
+    pub kind: String,
+    /// 面向用户的一句话原因。
+    pub label: String,
+    /// 证据涉及的其它笔记 id（用于界面展开与跳转）。
+    pub note_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticNeighbor {
+    pub note_id: String,
+    pub title: String,
+    pub category_id: Option<String>,
+    /// 0..=1；结构证据可加分，但最终会夹取到 1。
+    pub score: f64,
+    pub evidence: Vec<GraphEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateMember {
+    pub note_id: String,
+    pub title: String,
+    pub excerpt: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateCluster {
+    pub id: String,
+    /// 簇内最相近的一对笔记的分数。
+    pub similarity: f64,
+    pub reason: String,
+    pub members: Vec<DuplicateMember>,
+    /// 只做预览；真正合并必须用户在界面二次确认。
+    pub requires_confirmation: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeNote {
+    pub note_id: String,
+    pub title: String,
+    pub category_id: Option<String>,
+    pub connected_categories: usize,
+    pub bridge_score: f64,
+    pub explanation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IslandCategory {
+    pub category_id: String,
+    pub category_path: String,
+    pub note_count: usize,
+    pub internal_edges: usize,
+    pub external_edges: usize,
+    pub explanation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphInsights {
+    /// `vector` = 使用本地已建向量；`local` = 标题/分块词项与结构证据。
+    pub mode: String,
+    pub neighbors: Vec<SemanticNeighbor>,
+    pub duplicate_clusters: Vec<DuplicateCluster>,
+    pub orphan_notes: Vec<GraphNode>,
+    pub bridge_notes: Vec<BridgeNote>,
+    pub island_categories: Vec<IslandCategory>,
+    pub sampled_nodes: usize,
+    pub total_nodes: usize,
+    pub truncated: bool,
+    pub warnings: Vec<String>,
+    pub duration_ms: u64,
+}

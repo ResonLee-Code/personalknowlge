@@ -18,10 +18,12 @@ pub mod organize_commands;
 pub mod relation_commands;
 pub mod research_commands;
 pub mod search_commands;
+pub mod sync_commands;
 pub mod tag_commands;
 pub mod template_commands;
 pub mod update_commands;
 pub mod workspace_commands;
+pub mod writing_commands;
 
 use crate::core::error::{AppError, Result};
 

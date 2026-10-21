@@ -171,6 +171,7 @@ pub fn run() {
             commands::link_commands::links_get_counts,
             commands::link_commands::links_rebuild,
             commands::graph_commands::graph_get,
+            commands::graph_commands::graph_insights,
             commands::relation_commands::relations_list,
             commands::relation_commands::relations_add,
             commands::relation_commands::relations_remove,
@@ -189,6 +190,19 @@ pub fn run() {
             commands::template_commands::templates_list,
             commands::template_commands::template_render,
             commands::template_commands::template_save,
+            commands::sync_commands::sync_settings_get,
+            commands::sync_commands::sync_settings_update,
+            commands::sync_commands::sync_preview,
+            commands::sync_commands::sync_run,
+            commands::sync_commands::sync_conflicts,
+            commands::sync_commands::sync_conflict_detail,
+            commands::sync_commands::sync_conflict_merge_preview,
+            commands::sync_commands::sync_conflict_resolve,
+            commands::sync_commands::sync_history,
+            commands::sync_commands::sync_history_restore,
+            commands::writing_commands::writing_draft,
+            commands::writing_commands::writing_apply_preview,
+            commands::writing_commands::writing_apply,
         ])
         .run(tauri::generate_context!())
         .expect("Personal Knowledge OS 启动失败");

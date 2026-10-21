@@ -878,12 +878,20 @@ mod tests {
             })
             .max()
             .unwrap_or(0);
-        assert_eq!(max, 15, "迁移目录的最大编号变了");
+        let expected_schema = crate::infrastructure::db::SCHEMA_VERSION;
+        assert_eq!(
+            max,
+            expected_schema as u32,
+            "迁移目录的最大编号与 SCHEMA_VERSION 不一致"
+        );
         let db = std::fs::read_to_string(
             root.join("src-tauri/src/infrastructure/db/migrations.rs"),
         )
         .expect("读 migrations.rs");
-        assert!(db.contains("SCHEMA_VERSION: i64 = 15"), "SCHEMA_VERSION 变了");
+        assert!(
+            db.contains(&format!("SCHEMA_VERSION: i64 = {expected_schema}")),
+            "SCHEMA_VERSION 与迁移目录不一致"
+        );
         let policy =
             std::fs::read_to_string(root.join("src-tauri/src/application/ai/policy.rs")).expect("读 policy.rs");
         assert!(policy.contains("api.perplexity.ai"), "决策档默认端点变了");

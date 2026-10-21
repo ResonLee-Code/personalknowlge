@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { codepointRangeToUtf16, codepointToUtf16 } from '@/lib/highlightRange';
+import { codepointRangeToUtf16, codepointToUtf16, utf16ToCodepoint } from '@/lib/highlightRange';
 
 /**
  * N5：后端给的是**码点**区间，CodeMirror 要的是 **UTF-16** 下标。
@@ -30,5 +30,12 @@ describe('码点区间 → UTF-16 下标', () => {
 
     expect(codepointRangeToUtf16(text, 99, 3)).toEqual({ from: 4, to: 4 });
     expect(codepointRangeToUtf16(text, -5, 1)).toEqual({ from: 0, to: 1 });
+  });
+
+  it('UTF-16 选择下标可换算回码点下标', () => {
+    const text = '甲🙂乙';
+    const from = text.indexOf('乙');
+    expect(utf16ToCodepoint(text, from)).toBe(2);
+    expect(utf16ToCodepoint(text, text.length)).toBe(3);
   });
 });

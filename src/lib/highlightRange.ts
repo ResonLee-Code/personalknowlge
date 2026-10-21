@@ -29,3 +29,9 @@ export function codepointRangeToUtf16(
   const to = Math.max(from, codepointToUtf16(text, end));
   return { from, to };
 }
+
+/** CodeMirror / JS 的 UTF-16 下标 → Rust 使用的码点下标。 */
+export function utf16ToCodepoint(text: string, utf16Index: number): number {
+  if (utf16Index <= 0) return 0;
+  return Array.from(text.slice(0, Math.min(text.length, utf16Index))).length;
+}

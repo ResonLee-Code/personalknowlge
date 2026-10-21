@@ -7,11 +7,12 @@ import { GraphPage } from '@/features/graph/GraphPage';
 import { toast } from 'sonner';
 import { graphService } from '@/services/graphService';
 import { useCategoriesStore } from '@/stores/categoriesStore';
+import { useNotesStore } from '@/stores/notesStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import type { GraphData } from '@/types';
+import type { GraphData, GraphInsights } from '@/types';
 
 vi.mock('@/services/graphService', () => ({
-  graphService: { get: vi.fn() },
+  graphService: { get: vi.fn(), insights: vi.fn() },
 }));
 
 vi.mock('sonner', () => ({
@@ -19,6 +20,7 @@ vi.mock('sonner', () => ({
 }));
 
 const getGraph = vi.mocked(graphService.get);
+const getInsights = vi.mocked(graphService.insights);
 
 function payload(overrides: Partial<GraphData> = {}): GraphData {
   return {
@@ -51,6 +53,55 @@ function payload(overrides: Partial<GraphData> = {}): GraphData {
   };
 }
 
+function insightsPayload(overrides: Partial<GraphInsights> = {}): GraphInsights {
+  return {
+    mode: 'local',
+    neighbors: [
+      {
+        noteId: 'note_b',
+        title: '孤立笔记',
+        categoryId: null,
+        score: 0.71,
+        evidence: [
+          { kind: 'sharedTopic', label: '共同主题：搜索、索引', noteIds: ['note_b'] },
+          { kind: 'similarContent', label: '正文词项相似度 71%', noteIds: ['note_b'] },
+        ],
+      },
+    ],
+    duplicateClusters: [
+      {
+        id: 'duplicate-note_a',
+        similarity: 0.9,
+        reason: '正文词项相似度至少 90%，合并前请核对差异。',
+        members: [
+          {
+            noteId: 'note_a',
+            title: '索引设计',
+            excerpt: '倒排索引与分块。',
+            updatedAt: '2026-10-07T09:00:00+08:00',
+          },
+          {
+            noteId: 'note_b',
+            title: '索引设计旧版',
+            excerpt: '倒排索引与分块检索。',
+            updatedAt: '2026-10-06T09:00:00+08:00',
+          },
+        ],
+        requiresConfirmation: true,
+      },
+    ],
+    orphanNotes: [],
+    bridgeNotes: [],
+    islandCategories: [],
+    sampledNodes: 2,
+    totalNodes: 2,
+    truncated: false,
+    warnings: ['本轮使用本地词项降级通道。'],
+    durationMs: 4,
+    ...overrides,
+  };
+}
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -63,6 +114,7 @@ describe('GraphPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getGraph.mockResolvedValue(payload());
+    getInsights.mockResolvedValue(insightsPayload());
     useCategoriesStore.setState({
       flat: [
         {
@@ -101,9 +153,7 @@ describe('GraphPage', () => {
 
     await userEvent.click(screen.getByRole('checkbox', { name: '孤立节点' }));
     await waitFor(() =>
-      expect(getGraph).toHaveBeenLastCalledWith(
-        expect.objectContaining({ includeOrphans: false }),
-      ),
+      expect(getGraph).toHaveBeenLastCalledWith(expect.objectContaining({ includeOrphans: false })),
     );
   });
 
@@ -121,6 +171,20 @@ describe('GraphPage', () => {
     renderPage();
 
     expect(await screen.findByText(/节点或连接过多/)).toBeInTheDocument();
+  });
+
+  it('洞察展示可解释近邻，重复只打开只读预览', async () => {
+    useWorkspaceStore.setState({ workspace: { id: 'ws_a' } as never });
+    useNotesStore.setState({ selectedId: 'note_a' });
+    renderPage();
+    await screen.findByTestId('graph-canvas');
+    await userEvent.click(screen.getByRole('button', { name: '洞察' }));
+
+    expect(await screen.findByText('共同主题：搜索、索引')).toBeInTheDocument();
+    expect(screen.getByText(/本轮使用本地词项降级通道/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /索引设计.*2 篇/ }));
+    expect(await screen.findByTestId('duplicate-preview')).toBeInTheDocument();
+    expect(screen.getByText(/不会自动改写任何笔记/)).toBeInTheDocument();
   });
 
   it('切换知识库后自动重新查询（不再需要手动刷新）', async () => {
@@ -163,9 +227,7 @@ describe('GraphPage', () => {
     await userEvent.click(screen.getByRole('button', { name: '导出 PNG' }));
 
     await waitFor(() =>
-      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
-        expect.stringContaining('不支持 Canvas'),
-      ),
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(expect.stringContaining('不支持 Canvas')),
     );
   });
 });

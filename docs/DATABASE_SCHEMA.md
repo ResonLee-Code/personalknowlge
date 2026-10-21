@@ -496,7 +496,15 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 `012_decision_cache`（D2/N6 决策缓存：内容寻址的键 + 过期时间）、
 `013_chunk_embeddings`（D3/N7 向量索引：分块向量 + 内容指纹）、
 `014_ai_organize`（Organize 建议队列 + 持久化任务）、
-`015_organize_undo_hash`（撤销冲突保护），`SCHEMA_VERSION = 15`。
+`015_organize_undo_hash`（撤销冲突保护）、
+`016_search_shards`（4 个稳定 FTS 分片 + 映射表 shard 列），`SCHEMA_VERSION = 16`。
+
+Sync 2.0 与 Writing 2.0 本身没有新增业务表：
+
+- Writing 草稿只在内存 / IPC 中传递；确认写入后走现有 `notes`、标签、关系、FTS 与历史路径；
+- Sync 基线、队列、冲突和应用数据凭据放在应用数据目录
+  `sync/<workspace-hash>/{config,credentials,state}.json` 与 `history/`；
+- 这些同步文件不属于知识库备份内容；关闭同步或删除该目录不会删除工作区笔记。
 
 ## 6. 数据恢复能力
 

@@ -288,6 +288,9 @@ scripts/bench/measure-macos-app.sh \
   --binary "$PWD/src-tauri/target/release/bundle/macos/Personal Knowledge OS.app/Contents/MacOS/personal-knowledge-os"
 pnpm bench -- --search-notes 2000 --graph-notes 3000   # 冒烟（约 10 s）
 pnpm bench -- --only search                    # 只跑检索（或 --only graph）
+BENCH_NOTES=100000 BENCH_STOP_WATCHER=1 BENCH_SCAN_TIMEOUT_S=900 \
+  cargo test --offline --manifest-path src-tauri/Cargo.toml \
+  --test graph_bench -- --ignored --nocapture   # 10 万节点 Graph 首屏
 ```
 
 脚本是 `scripts/bench/run.sh`，它依次跑两个已有基准（`src-tauri/tests/search_bench.rs`、
@@ -298,6 +301,7 @@ pnpm bench -- --only search                    # 只跑检索（或 --only graph
 | 检索 p95 延迟（1 万篇） | < 200 ms | `BENCH_MAX_P95_MS` |
 | 检索 recall@5（1 万篇） | ≥ 100% | `BENCH_MIN_RECALL_PCT` |
 | 图谱全量查询（3 万篇） | < 1500 ms（M3 口径） | `BENCH_MAX_GRAPH_MS` |
+| 图谱首屏（10 万篇） | < 3000 ms | `BENCH_MAX_GRAPH_100K_MS` |
 | 扫描采纳超时 | < 600 s | `BENCH_SCAN_TIMEOUT_S` |
 | 10 万篇后端重开 | < 2000 ms | `BENCH_MAX_STARTUP_MS` |
 | 10 万篇进程 RSS | < 1536 MB | `BENCH_MAX_RSS_MB` |
@@ -310,6 +314,14 @@ pnpm bench -- --only search                    # 只跑检索（或 --only graph
 检索 1 万篇 **p95 8.06 ms / 平均 6.31 ms / recall@5 100%**、库 34.5 MB；
 图谱 3 万篇全量 **821.5 ms**、分类过滤 327.7 ms、2 跳聚焦 606.9 ms。数字用于发版记录，
 不是硬编码期望值——**换机器只比红线，不比具体毫秒**。
+
+10 万 Graph 实测（2026-10-22）：全量查询 / 首屏抽样 **2866.6 ms**，返回 2000 节点 /
+3708 边，库内 100001 节点。记录见
+[V2_P1_GRAPH_100K_20261022.md](./acceptance/V2_P1_GRAPH_100K_20261022.md)。
+
+4 分片后的检索复测（2026-10-22）：1 万篇 p95 **18.09 ms**、recall@5 **100%**；
+10 万篇 p95 **190.69 ms**、recall@5 **100%**、重开 **1246.09 ms**、RSS **344.64 MB**。
+接近 200 ms 红线，后续再增加每查询分片工作量时必须重跑 10 万档。
 
 10 万篇实测（2026-10-21，macOS arm64，24 GB / 15 核）：
 

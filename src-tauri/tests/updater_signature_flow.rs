@@ -8,6 +8,19 @@ use minisign_verify::{PublicKey, Signature};
 
 #[test]
 fn signed_updater_payload_verifies_and_tampering_is_rejected() {
+    // 常规 `cargo test` 不携带一次性签名夹具；专门的 `pnpm test:update-signature`
+    // 会生成并设置全部变量。三项都缺失时明确跳过，变量只缺一部分仍然失败。
+    if [
+        "PKOS_TEST_UPDATER_PUBKEY",
+        "PKOS_TEST_UPDATER_SIGNATURE",
+        "PKOS_TEST_UPDATER_PAYLOAD",
+    ]
+    .iter()
+    .all(|name| std::env::var_os(name).is_none())
+    {
+        eprintln!("跳过 updater 验签夹具：请用 pnpm test:update-signature 执行");
+        return;
+    }
     let decode = |name: &str| -> String {
         let path = std::env::var(name).unwrap_or_else(|_| panic!("缺少环境变量 {name}"));
         let encoded = fs::read_to_string(path).expect("读取签名夹具");
@@ -18,8 +31,7 @@ fn signed_updater_payload_verifies_and_tampering_is_rejected() {
     };
     let public_key = decode("PKOS_TEST_UPDATER_PUBKEY");
     let signature = decode("PKOS_TEST_UPDATER_SIGNATURE");
-    let payload_path =
-        std::env::var("PKOS_TEST_UPDATER_PAYLOAD").expect("缺少更新夹具载荷路径");
+    let payload_path = std::env::var("PKOS_TEST_UPDATER_PAYLOAD").expect("缺少更新夹具载荷路径");
     let payload = fs::read(payload_path).expect("读取更新夹具");
 
     let public_key = PublicKey::decode(&public_key).expect("解析公钥");

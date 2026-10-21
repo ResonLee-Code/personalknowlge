@@ -11,6 +11,7 @@ import {
   Link2,
   Pencil,
   Save,
+  Sparkles,
   Unlink2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -26,6 +27,7 @@ import { RelationsPanel } from '@/components/editor/RelationsPanel';
 import { HistoryDialog } from '@/components/editor/HistoryDialog';
 import { RenameFileDialog } from '@/components/editor/RenameFileDialog';
 import { SaveTemplateDialog } from '@/components/editor/SaveTemplateDialog';
+import { WritingPanel } from '@/components/editor/WritingPanel';
 import { SelectionContextMenu } from '@/components/editor/SelectionContextMenu';
 import { ExportNoteDialog } from '@/components/notes/ExportNoteDialog';
 import { SourceDialog } from '@/components/editor/SourceDialog';
@@ -38,7 +40,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/badge';
 import { useAutosave } from '@/hooks/useAutosave';
-import { codepointRangeToUtf16 } from '@/lib/highlightRange';
+import { codepointRangeToUtf16, utf16ToCodepoint } from '@/lib/highlightRange';
 import {
   attachmentAltText,
   buildImageMarkdown,
@@ -154,6 +156,12 @@ export function NoteEditorPage() {
   /** 当前光标所在标题的偏移，用于大纲高亮 */
   const [activeHeadingOffset, setActiveHeadingOffset] = useState<number | null>(null);
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number } | null>(null);
+  const [writingContext, setWritingContext] = useState<{
+    selection: string | null;
+    selectionStart: number | null;
+    selectionEnd: number | null;
+    baseContentHash: string;
+  } | null>(null);
   const editorViewRef = useRef<ReactCodeMirrorRef | null>(null);
 
   const signature = `${content}\u0000${title}\u0000${tags.join(',')}`;
@@ -207,9 +215,11 @@ export function NoteEditorPage() {
         void reveal();
         break;
       case 'duplicate':
-        void notes.duplicate(current.id).then((ok) =>
-          reportAction(ok, '已创建副本', useNotesStore.getState().error, '创建副本失败'),
-        );
+        void notes
+          .duplicate(current.id)
+          .then((ok) =>
+            reportAction(ok, '已创建副本', useNotesStore.getState().error, '创建副本失败'),
+          );
         break;
       case 'delete':
         void notes.remove(current.id).then((ok) => {
@@ -230,13 +240,7 @@ export function NoteEditorPage() {
         });
         break;
     }
-  }, [
-    noteActionRequest,
-    clearNoteAction,
-    navigate,
-    showPath,
-    reveal,
-  ]);
+  }, [noteActionRequest, clearNoteAction, navigate, showPath, reveal]);
 
   const bumpLinkRevision = useCallback(() => setLinkRevision((value) => value + 1), []);
 
@@ -354,6 +358,40 @@ export function NoteEditorPage() {
     navigate(ROUTES.research);
   }, [detail, navigate, openResearchDraft]);
 
+  const openWriting = useCallback(() => {
+    if (!activeNoteId) return;
+    const view = editorViewRef.current?.view;
+    if (!view) {
+      setWritingContext({
+        selection: null,
+        selectionStart: null,
+        selectionEnd: null,
+        baseContentHash: baseHash.current ?? detail?.note.contentHash ?? '',
+      });
+      return;
+    }
+    const { from, to } = view.state.selection.main;
+    if (to <= from) {
+      setWritingContext({
+        selection: null,
+        selectionStart: null,
+        selectionEnd: null,
+        baseContentHash: baseHash.current ?? detail?.note.contentHash ?? '',
+      });
+      view.focus();
+      return;
+    }
+    const selection = view.state.sliceDoc(from, to);
+    const selectionStart = utf16ToCodepoint(content, from);
+    const selectionEnd = utf16ToCodepoint(content, to);
+    setWritingContext({
+      selection: Array.from(selection).slice(0, 4000).join('').trim(),
+      selectionStart,
+      selectionEnd,
+      baseContentHash: baseHash.current ?? detail?.note.contentHash ?? '',
+    });
+  }, [activeNoteId, content, detail]);
+
   const openSelectionContextMenu = useCallback((event: MouseEvent) => {
     setSelectionMenu({ x: event.clientX, y: event.clientY });
   }, []);
@@ -365,7 +403,6 @@ export function NoteEditorPage() {
     attachKindRef.current = kind;
     attachInputRef.current?.click();
   }, []);
-
 
   const jumpToHeading = useCallback((offset: number) => {
     const view = editorViewRef.current?.view;
@@ -428,7 +465,10 @@ export function NoteEditorPage() {
     // 发布大纲给「笔记列表那一栏」（见 stores/outlineStore.ts 的说明）。
     // 跳转函数放进 ref：订阅方拿到的是稳定引用，同时这里（effect 里）更新它也不算"渲染期写 ref"。
     outlineJumpRef.current = (offset) =>
-      jumpFromOutline(offset, headings.findIndex((item) => item.offset === offset));
+      jumpFromOutline(
+        offset,
+        headings.findIndex((item) => item.offset === offset),
+      );
     publishOutline({
       noteId: activeNoteId,
       title,
@@ -468,9 +508,7 @@ export function NoteEditorPage() {
     if (!activeNoteId) return;
     let cancelled = false;
     void Promise.all([
-      noteService
-        .list({ status: 'active', sort: 'titleAsc', pageSize: 500 })
-        .catch(() => null),
+      noteService.list({ status: 'active', sort: 'titleAsc', pageSize: 500 }).catch(() => null),
       linkService.outgoing(activeNoteId).catch(() => []),
     ]).then(([list, outgoing]) => {
       if (cancelled) return;
@@ -551,8 +589,7 @@ export function NoteEditorPage() {
     const switchingNote = loadedId.current !== detail.note.id;
     // 同一篇笔记内容哈希变了 = 磁盘内容被别处改过（历史版本还原、外部编辑器、
     // 冲突后重新加载）。此时也要同步，否则界面会停在被覆盖掉的旧内容上。
-    const changedOnDisk =
-      !switchingNote && baseHash.current !== (detail.note.contentHash ?? null);
+    const changedOnDisk = !switchingNote && baseHash.current !== (detail.note.contentHash ?? null);
     const hasLocalEdits = saveStatus === 'dirty' || saveStatus === 'saving';
     // 用户正在输入时不覆盖他的内容（保存时再走冲突流程）
     if (!switchingNote && (!changedOnDisk || hasLocalEdits)) return;
@@ -744,7 +781,6 @@ export function NoteEditorPage() {
   const relationOut = relations?.outgoing.length ?? 0;
   const relationIn = relations?.incoming.length ?? 0;
 
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
@@ -788,6 +824,16 @@ export function NoteEditorPage() {
         >
           <Save className="h-3.5 w-3.5" />
           保存
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => void flush().then(() => openWriting())}
+          disabled={readOnly}
+          title="带引用生成大纲、续写、改写、缩短或扩写"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          写作
         </Button>
         {/*
           插入菜单里「图片…／附件…」用的隐藏文件选择框（2026-10-18 补回）：
@@ -898,10 +944,7 @@ export function NoteEditorPage() {
           ) : null}
           {relations
             ? (() => {
-                const highlights = relationHighlights(
-                  relations.outgoing,
-                  relations.incoming,
-                );
+                const highlights = relationHighlights(relations.outgoing, relations.incoming);
                 return (
                   <>
                     {highlights.supersededBy ? (
@@ -929,7 +972,10 @@ export function NoteEditorPage() {
               })()
             : null}
           {freshnessState(note.validUntil) === 'expired' ? (
-            <span className="flex items-center gap-1 text-amber-600" title={`有效期至 ${note.validUntil}`}>
+            <span
+              className="flex items-center gap-1 text-amber-600"
+              title={`有效期至 ${note.validUntil}`}
+            >
               <AlertTriangle className="h-3 w-3" />
               可能已过期
             </span>
@@ -970,16 +1016,16 @@ export function NoteEditorPage() {
               )}
               style={editorMode === 'split' ? { width: `${editorSplitRatio * 100}%` } : undefined}
             >
-            <MarkdownEditor
-              key={editorEpoch}
-              viewRef={editorViewRef}
-              value={content}
-              theme={theme}
-              fontSize={fontSize}
-              readOnly={readOnly}
-              onAttachFiles={readOnly ? undefined : handleAttachFiles}
-              getWikilinkTitles={readOnly ? undefined : getWikilinkTitles}
-              onSelectionContextMenu={readOnly ? undefined : openSelectionContextMenu}
+              <MarkdownEditor
+                key={editorEpoch}
+                viewRef={editorViewRef}
+                value={content}
+                theme={theme}
+                fontSize={fontSize}
+                readOnly={readOnly}
+                onAttachFiles={readOnly ? undefined : handleAttachFiles}
+                getWikilinkTitles={readOnly ? undefined : getWikilinkTitles}
+                onSelectionContextMenu={readOnly ? undefined : openSelectionContextMenu}
                 onChange={(value) => {
                   setContent(value);
                   markDirty();
@@ -1001,18 +1047,18 @@ export function NoteEditorPage() {
             />
           ) : null}
           {editorMode !== 'edit' ? (
-          <div
-            ref={previewPaneRef}
-            data-testid="preview-pane"
-            className="min-w-0 flex-1 overflow-auto"
-          >
-            <MarkdownPreview
-              content={content}
-              noteId={note.id}
-              resolveWikilink={resolveWikilink}
-              onOpenWikilink={(target) => void openWikilink(target)}
-            />
-          </div>
+            <div
+              ref={previewPaneRef}
+              data-testid="preview-pane"
+              className="min-w-0 flex-1 overflow-auto"
+            >
+              <MarkdownPreview
+                content={content}
+                noteId={note.id}
+                resolveWikilink={resolveWikilink}
+                onOpenWikilink={(target) => void openWikilink(target)}
+              />
+            </div>
           ) : null}
         </div>
         {/* 右侧独立一列的大纲：只在「钉在右侧」这种位置下渲染（默认位置是与列表共用一栏） */}
@@ -1021,7 +1067,12 @@ export function NoteEditorPage() {
             key={note.id}
             headings={headings}
             activeOffset={activeHeadingOffset}
-            onJump={(offset) => jumpFromOutline(offset, headings.findIndex((item) => item.offset === offset))}
+            onJump={(offset) =>
+              jumpFromOutline(
+                offset,
+                headings.findIndex((item) => item.offset === offset),
+              )
+            }
             onCollapse={() => setOutlineMode('mini')}
             onMoveToList={() => {
               setOutlinePlacement('list');
@@ -1063,7 +1114,12 @@ export function NoteEditorPage() {
               key={`mini-${note.id}`}
               headings={headings}
               activeOffset={activeHeadingOffset}
-              onJump={(offset) => jumpFromOutline(offset, headings.findIndex((item) => item.offset === offset))}
+              onJump={(offset) =>
+                jumpFromOutline(
+                  offset,
+                  headings.findIndex((item) => item.offset === offset),
+                )
+              }
               pinned={false}
               onPin={() => {
                 setOutlineHover(false);
@@ -1212,6 +1268,28 @@ export function NoteEditorPage() {
             researchAboutSelection();
           }}
           onClose={() => setSelectionMenu(null)}
+        />
+      ) : null}
+      {writingContext ? (
+        <WritingPanel
+          noteId={note.id}
+          noteTitle={title}
+          content={content}
+          baseContentHash={writingContext.baseContentHash}
+          selection={writingContext.selection}
+          selectionStart={writingContext.selectionStart}
+          selectionEnd={writingContext.selectionEnd}
+          onClose={() => setWritingContext(null)}
+          onApplied={(updated) => {
+            setContent(updated.content);
+            setTitle(updated.note.title);
+            setTags(updated.tags.map((tag) => tag.name));
+            baseHash.current = updated.note.contentHash ?? null;
+            setEditorEpoch((value) => value + 1);
+            setWritingContext(null);
+            bumpLinkRevision();
+            void useNotesStore.getState().refresh();
+          }}
         />
       ) : null}
     </div>

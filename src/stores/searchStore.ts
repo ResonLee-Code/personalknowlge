@@ -19,7 +19,11 @@ interface SearchState {
   loading: boolean;
   error: string | null;
   setKeyword: (keyword: string) => void;
-  setFilters: (filters: Partial<Pick<SearchState, 'categoryId' | 'tagId' | 'favoriteOnly' | 'updatedAfter' | 'sort'>>) => void;
+  setFilters: (
+    filters: Partial<
+      Pick<SearchState, 'categoryId' | 'tagId' | 'favoriteOnly' | 'updatedAfter' | 'sort'>
+    >,
+  ) => void;
   setPage: (page: number) => void;
   resetFilters: () => void;
   run: () => Promise<void>;
@@ -38,7 +42,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   updatedAfter: null,
   sort: 'relevance',
   page: 1,
-  pageSize: 50,
+  pageSize: 100,
   response: null,
   status: null,
   loading: false,

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
-import { SearchResultItem } from '@/components/search/SearchResultItem';
+import { VirtualSearchResults } from '@/components/search/VirtualSearchResults';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -173,89 +173,19 @@ export function SearchPage() {
                     data-testid="recent-search"
                     className="max-w-[240px] truncate rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] text-[var(--ink-muted)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]"
                     title={describeSearch(item.condition, {
-                      categoryName: categories.find((c) => c.id === item.condition.categoryId)?.name,
+                      categoryName: categories.find((c) => c.id === item.condition.categoryId)
+                        ?.name,
                       tagName: tags.find((t) => t.id === item.condition.tagId)?.name,
                     })}
                     onClick={() => applyCondition(item.condition)}
                   >
                     {describeSearch(item.condition, {
-                      categoryName: categories.find((c) => c.id === item.condition.categoryId)?.name,
+                      categoryName: categories.find((c) => c.id === item.condition.categoryId)
+                        ?.name,
                       tagName: tags.find((t) => t.id === item.condition.tagId)?.name,
                     })}
                   </button>
                 ))}
-              </div>
-            ) : null}
-
-            {saved.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] text-[var(--ink-subtle)]">收藏的搜索</span>
-                {saved.map((item) => (
-                  <span
-                    key={item.id}
-                    className="flex items-center gap-1 rounded-full bg-[var(--brand-soft)] px-2 py-0.5 text-[11px] text-[var(--brand)]"
-                  >
-                    <button
-                      type="button"
-                      data-testid="saved-search"
-                      className="max-w-[220px] truncate"
-                      title={describeSearch(item, {
-                        categoryName: categories.find((c) => c.id === item.categoryId)?.name,
-                        tagName: tags.find((t) => t.id === item.tagId)?.name,
-                      })}
-                      onClick={() => applyCondition(item)}
-                    >
-                      {item.name}
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`删除收藏的搜索：${item.name}`}
-                      className="opacity-70 hover:opacity-100"
-                      onClick={() => removeSaved(item.id)}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-
-            {isMeaningfulSearch(condition) ? (
-              <button
-                type="button"
-                data-testid="save-search"
-                className="text-[11px] text-[var(--brand)] underline decoration-dotted"
-                onClick={() => setSaveDialogOpen(true)}
-              >
-                保存当前搜索条件
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {(recent.length > 0 || saved.length > 0 || isMeaningfulSearch(condition)) ? (
-          <div className="space-y-1.5">
-            {recent.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] text-[var(--ink-subtle)]">最近搜索</span>
-                {recent.slice(0, 6).map((item) => {
-                  const label = describeSearch(item.condition, {
-                    categoryName: categories.find((c) => c.id === item.condition.categoryId)?.name,
-                    tagName: tags.find((t) => t.id === item.condition.tagId)?.name,
-                  });
-                  return (
-                    <button
-                      key={`${item.at}-${item.condition.keyword}-${item.condition.categoryId}-${item.condition.tagId}-${item.condition.favoriteOnly}`}
-                      type="button"
-                      data-testid="recent-search"
-                      className="max-w-[240px] truncate rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] text-[var(--ink-muted)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]"
-                      title={label}
-                      onClick={() => applyCondition(item.condition)}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
               </div>
             ) : null}
 
@@ -336,9 +266,7 @@ export function SearchPage() {
             <select
               aria-label="排序方式"
               value={sort}
-              onChange={(event) =>
-                setFilters({ sort: event.target.value as typeof sort })
-              }
+              onChange={(event) => setFilters({ sort: event.target.value as typeof sort })}
               className="h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-sm"
             >
               <option value="relevance">相关度优先</option>
@@ -364,7 +292,9 @@ export function SearchPage() {
 
         <div className="flex flex-wrap items-center gap-3 text-[11px] text-[var(--ink-subtle)]">
           <span>
-            {response ? `共 ${response.total} 条结果，用时 ${response.tookMs} ms` : '输入关键词开始搜索'}
+            {response
+              ? `共 ${response.total} 条结果，用时 ${response.tookMs} ms`
+              : '输入关键词开始搜索'}
           </span>
           <span>索引：{status?.state ?? 'ready'}</span>
           {response?.indexStale ? (
@@ -387,7 +317,7 @@ export function SearchPage() {
         {error ? <p className="text-xs text-red-500">{error}</p> : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div className="min-h-0 flex-1 p-3">
         {loading && !response ? (
           <p className="p-4 text-xs text-[var(--ink-subtle)]">正在搜索…</p>
         ) : !response || response.hits.length === 0 ? (
@@ -402,13 +332,7 @@ export function SearchPage() {
             className="h-full"
           />
         ) : (
-          <ul className="space-y-1.5">
-            {response.hits.map((hit) => (
-              <li key={hit.note.id}>
-                <SearchResultItem hit={hit} keyword={keyword} />
-              </li>
-            ))}
-          </ul>
+          <VirtualSearchResults hits={response.hits} keyword={keyword} />
         )}
       </div>
 
@@ -418,7 +342,12 @@ export function SearchPage() {
             第 {page} / {totalPages} 页
           </span>
           <span className="flex gap-2">
-            <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={page <= 1}
+              onClick={() => setPage(page - 1)}
+            >
               上一页
             </Button>
             <Button
@@ -430,7 +359,9 @@ export function SearchPage() {
               下一页
             </Button>
           </span>
-          <span>最近更新：{response.hits[0] ? formatRelative(response.hits[0].note.updatedAt) : '—'}</span>
+          <span>
+            最近更新：{response.hits[0] ? formatRelative(response.hits[0].note.updatedAt) : '—'}
+          </span>
         </div>
       ) : null}
 

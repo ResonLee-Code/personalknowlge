@@ -475,3 +475,31 @@ Jev 正对应用户需求里的「**AI Decision Layer**」中的**决策**部分
 | 检索原料 | ✅ FTS5（中文双字方案），向量为可选增强 |
 | 联网工具与来源分级 | ❌ 新增（D3），也是本能力唯一的新依赖 |
 
+### 9.11 Writing 2.0 引用草稿（2026-10-22）
+
+Writing 使用与 Ask 同一套 AI 总开关、检索、证据分级、模型候选链、出站确认、token 预算与审计。
+它不建立第二套“写作模型路由”：
+
+```text
+WritingService::draft
+  → AskService::retrieve（当前笔记 + 相关笔记）
+  → GenerationRequest（每段必须 [n]）
+  → generation_candidates（在线 → 本地）
+  → parse_segments → citation_numbers / build_citations
+  → WritingDraft（只读）
+
+WritingService::apply_preview / apply
+  → 每个接受段落必须有引用
+  → 来源字符区间与 snippet 重新核对
+  → 目标笔记 content_hash 重新核对
+  → 用户确认后才 NoteService::save
+```
+
+不变量：
+
+1. 任意生成段落零引用、未知引用编号、非法区间或来源漂移，都使该草稿不可写；
+2. 生成与预览均为只读；最终 `writing_apply(confirm=true)` 才进入常规保存路径；
+3. 未确认在线外发时，在线档不构造；模板 / 本地不可用时明确降级；
+4. 审计记录 capability、是否外发、耗时和来源数，不记录正文；
+5. Graph 聚类摘要复用同一草稿与引用契约，只在用户再次确认后创建普通笔记。
+

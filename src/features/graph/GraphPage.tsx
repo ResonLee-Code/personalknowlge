@@ -1,4 +1,12 @@
-import { Crosshair, ExternalLink, Maximize2, Network, RefreshCw, Unlink } from 'lucide-react';
+import {
+  Crosshair,
+  ExternalLink,
+  Lightbulb,
+  Maximize2,
+  Network,
+  RefreshCw,
+  Unlink,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -19,9 +27,10 @@ import { useCategoriesStore } from '@/stores/categoriesStore';
 import { useNotesStore } from '@/stores/notesStore';
 import { useTagsStore } from '@/stores/tagsStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import type { GraphData } from '@/types';
+import type { GraphData, GraphInsights } from '@/types';
 
 import { ForceGraph } from './ForceGraph';
+import { GraphInsightsPanel } from './GraphInsightsPanel';
 
 /** 知识图谱视图（V1.1 M3 / 设计文档 27 章）。 */
 export function GraphPage() {
@@ -49,7 +58,12 @@ export function GraphPage() {
   const [resolution, setResolution] = useState(1);
   /** 导出时是否标注全部节点标题 */
   const [exportAllLabels, setExportAllLabels] = useState(false);
+  const [sideTab, setSideTab] = useState<'details' | 'insights'>('details');
+  const [insights, setInsights] = useState<GraphInsights | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
   const requestRef = useRef(0);
+  const insightsRequestRef = useRef(0);
 
   const load = useCallback(async () => {
     const requestId = requestRef.current + 1;
@@ -81,8 +95,50 @@ export function GraphPage() {
     // 切换 / 打开 / 新建知识库后自动重新查询，避免残留上一个库的图谱
   }, [load, workspaceId]);
 
+  const insightFocusId = useMemo(() => {
+    const candidate = selectedId ?? currentNoteId;
+    return candidate && data?.nodes.some((node) => node.id === candidate) ? candidate : null;
+  }, [currentNoteId, data, selectedId]);
+
+  const loadInsights = useCallback(async () => {
+    const requestId = insightsRequestRef.current + 1;
+    insightsRequestRef.current = requestId;
+    setInsightsLoading(true);
+    const updatedAfter = recent
+      ? new Date(Date.now() - Number(recent) * 24 * 60 * 60 * 1000).toISOString()
+      : null;
+    try {
+      const next = await graphService.insights({
+        categoryId: categoryId || null,
+        tagId: tagId || null,
+        updatedAfter,
+        focusNoteId: insightFocusId,
+        neighborLimit: 10,
+      });
+      if (requestId !== insightsRequestRef.current) return;
+      setInsights(next);
+      setInsightsError(null);
+    } catch (cause) {
+      if (requestId !== insightsRequestRef.current) return;
+      setInsightsError(errorMessage(cause));
+    } finally {
+      if (requestId === insightsRequestRef.current) setInsightsLoading(false);
+    }
+  }, [categoryId, insightFocusId, recent, tagId]);
+
+  useEffect(() => {
+    if (sideTab !== 'insights' || !data) return;
+    const timer = window.setTimeout(() => void loadInsights(), 0);
+    return () => window.clearTimeout(timer);
+  }, [data, loadInsights, sideTab, workspaceId]);
+
   const communities = useMemo(
-    () => detectCommunities((data?.nodes ?? []).map((node) => node.id), data?.edges ?? [], { resolution }),
+    () =>
+      detectCommunities(
+        (data?.nodes ?? []).map((node) => node.id),
+        data?.edges ?? [],
+        { resolution },
+      ),
     [data, resolution],
   );
   const nodeColors = useMemo(() => {
@@ -123,7 +179,7 @@ export function GraphPage() {
         id,
         count,
         color: categoryColor(id || null),
-        label: id ? (pathOf(id) || '未命名分类') : '未分类',
+        label: id ? pathOf(id) || '未命名分类' : '未分类',
       }));
   }, [data, pathOf, colorMode, communities]);
 
@@ -281,8 +337,8 @@ export function GraphPage() {
       {data?.truncated ? (
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
           节点或连接过多（共 {formatCount(data.totalNodes)} 个节点 / {formatCount(data.totalEdges)}{' '}
-          条连接），当前显示 {formatCount(data.nodes.length)} 个节点：
-          已按**分类配额 + 连接优先**抽样——每个分类都保留代表，并把高连接节点的邻居一起带进来，
+          条连接），当前显示 {formatCount(data.nodes.length)} 个节点： 已按**分类配额 +
+          连接优先**抽样——每个分类都保留代表，并把高连接节点的邻居一起带进来，
           因此看到的是成片的簇而不是散点。想看得更细可按分类 / 标签筛选，或聚焦到某篇笔记。
         </div>
       ) : null}
@@ -332,68 +388,117 @@ export function GraphPage() {
           )}
         </div>
 
-        <aside className="hidden w-56 shrink-0 flex-col gap-3 border-l border-[var(--border-subtle)] p-3 lg:flex">
-          <section className="space-y-1.5">
-            <h2 className="text-xs font-medium text-[var(--ink)]">图例</h2>
-            {legend.length === 0 ? (
-              <p className="text-[11px] text-[var(--ink-subtle)]">暂无节点</p>
-            ) : (
-              <ul className="space-y-1">
-                {legend.map((item) => (
-                  <li key={item.id || 'inbox'} className="flex items-center gap-2 text-[11px]">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: item.color }}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-[var(--ink-muted)]">
-                      {item.label}
-                    </span>
-                    <span className="tabular-nums text-[var(--ink-subtle)]">{item.count}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p className="text-[11px] text-[var(--ink-subtle)]">
-              节点大小 = 连接数；未分类节点为灰色；当前有 {orphanCount} 个孤立节点。
-            </p>
-          </section>
-
-          <section className="space-y-1.5 border-t border-[var(--border-subtle)] pt-3">
-            <h2 className="text-xs font-medium text-[var(--ink)]">选中的笔记</h2>
-            {selectedNode ? (
-              <>
-                <p className="text-xs text-[var(--ink)]">{selectedNode.title}</p>
-                <p className="text-[11px] text-[var(--ink-subtle)]">
-                  {selectedNode.degree} 个邻居
-                  {selectedNode.tags.length > 0 ? ` · ${selectedNode.tags.join('、')}` : ''}
-                </p>
-                <div className="flex gap-1.5">
-                  <Button size="sm" variant="secondary" onClick={() => setFocusId(selectedNode.id)}>
-                    <Crosshair className="h-3 w-3" /> 聚焦
-                  </Button>
-                  <Button size="sm" onClick={() => navigate(ROUTES.note(selectedNode.id))}>
-                    <ExternalLink className="h-3 w-3" /> 打开
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <p className="text-[11px] text-[var(--ink-subtle)]">
-                单击节点查看详情，双击直接打开笔记。
-              </p>
-            )}
-          </section>
-
-          <section className="mt-auto space-y-1 border-t border-[var(--border-subtle)] pt-3">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="w-full justify-start"
-              onClick={() => toast.info('用滚轮缩放、拖拽平移，按 F 可让整张图适应窗口')}
+        <aside className="hidden w-72 shrink-0 flex-col gap-3 border-l border-[var(--border-subtle)] p-3 lg:flex">
+          <div className="grid grid-cols-2 gap-1 rounded-md bg-[var(--surface-muted)] p-0.5">
+            <button
+              type="button"
+              className={cn(
+                'rounded px-2 py-1 text-[11px]',
+                sideTab === 'details'
+                  ? 'bg-[var(--surface)] text-[var(--ink)] shadow-sm'
+                  : 'text-[var(--ink-subtle)]',
+              )}
+              onClick={() => setSideTab('details')}
             >
-              <Maximize2 className="h-3.5 w-3.5" />
-              操作说明
-            </Button>
-          </section>
+              节点详情
+            </button>
+            <button
+              type="button"
+              className={cn(
+                'flex items-center justify-center gap-1 rounded px-2 py-1 text-[11px]',
+                sideTab === 'insights'
+                  ? 'bg-[var(--surface)] text-[var(--ink)] shadow-sm'
+                  : 'text-[var(--ink-subtle)]',
+              )}
+              onClick={() => setSideTab('insights')}
+            >
+              <Lightbulb className="h-3 w-3" />
+              洞察
+            </button>
+          </div>
+          {sideTab === 'insights' ? (
+            <GraphInsightsPanel
+              insights={insights}
+              loading={insightsLoading}
+              error={insightsError}
+              focusTitle={
+                insightFocusId
+                  ? (data?.nodes.find((node) => node.id === insightFocusId)?.title ?? null)
+                  : null
+              }
+              onRetry={() => void loadInsights()}
+              onOpen={(id) => navigate(ROUTES.note(id))}
+              onFocus={(id) => setSelectedId(id)}
+            />
+          ) : (
+            <>
+              <section className="space-y-1.5">
+                <h2 className="text-xs font-medium text-[var(--ink)]">图例</h2>
+                {legend.length === 0 ? (
+                  <p className="text-[11px] text-[var(--ink-subtle)]">暂无节点</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {legend.map((item) => (
+                      <li key={item.id || 'inbox'} className="flex items-center gap-2 text-[11px]">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: item.color }}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-[var(--ink-muted)]">
+                          {item.label}
+                        </span>
+                        <span className="tabular-nums text-[var(--ink-subtle)]">{item.count}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="text-[11px] text-[var(--ink-subtle)]">
+                  节点大小 = 连接数；未分类节点为灰色；当前有 {orphanCount} 个孤立节点。
+                </p>
+              </section>
+
+              <section className="space-y-1.5 border-t border-[var(--border-subtle)] pt-3">
+                <h2 className="text-xs font-medium text-[var(--ink)]">选中的笔记</h2>
+                {selectedNode ? (
+                  <>
+                    <p className="text-xs text-[var(--ink)]">{selectedNode.title}</p>
+                    <p className="text-[11px] text-[var(--ink-subtle)]">
+                      {selectedNode.degree} 个邻居
+                      {selectedNode.tags.length > 0 ? ` · ${selectedNode.tags.join('、')}` : ''}
+                    </p>
+                    <div className="flex gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setFocusId(selectedNode.id)}
+                      >
+                        <Crosshair className="h-3 w-3" /> 聚焦
+                      </Button>
+                      <Button size="sm" onClick={() => navigate(ROUTES.note(selectedNode.id))}>
+                        <ExternalLink className="h-3 w-3" /> 打开
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-[var(--ink-subtle)]">
+                    单击节点查看详情，双击直接打开笔记。
+                  </p>
+                )}
+              </section>
+
+              <section className="mt-auto space-y-1 border-t border-[var(--border-subtle)] pt-3">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="w-full justify-start"
+                  onClick={() => toast.info('用滚轮缩放、拖拽平移，按 F 可让整张图适应窗口')}
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                  操作说明
+                </Button>
+              </section>
+            </>
+          )}
         </aside>
       </div>
     </div>

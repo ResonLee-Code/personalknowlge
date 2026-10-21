@@ -221,11 +221,78 @@ app_diagnostic_export
   → 不读取笔记正文
 ```
 
+### 3.10 Graph 2.0 洞察（V2.0.x P1）
+
+```text
+graph_insights
+  → GraphService 先按分类配额 + 连接优先抽样（默认 2000，硬上限 5000）
+  → 读取抽样正文；按当前 AI 策略决定是否使用本地已建向量
+  → 近邻：直接链接 / 类型化关系 / 共同引用 / 共同标签 / 共同主题 /
+           向量或本地词项相似度
+  → 近重复：正文签名 + 主题倒排候选 → 余弦阈值 → 并查集聚类
+  → 桥梁：跨分类邻居比例；孤岛分类：分类内连边且没有跨分类边
+  → GraphInsights（只读、证据必填、带抽样警告与耗时）
+```
+
+洞察不落库。近重复弹窗只并排展示版本；聚类摘要复用 Writing 的引用草稿，
+只有用户再次确认才通过普通 `note_create` 写入。
+
+### 3.11 Writing 2.0（V2.0.x P2）
+
+```text
+writing_draft
+  → AI 总开关 + Ask 同一套检索 / 证据分级 / token 预算
+  → 当前笔记 + 相关笔记材料
+  → 在线（已授权且确认）→ 本地 → 模板
+  → 按段落 / 列表项拆分，逐段解析 [n]；零引用或未知编号整份作废
+
+writing_apply_preview
+  → 目标笔记内容哈希
+  → 每个接受段落的引用编号、note_id、字符区间、snippet 重新核对
+  → 生成完整替换 / 插入结果（不写文件）
+
+writing_apply（confirm=true）
+  → 再跑一次 preview
+  → NoteService::save(baseContentHash)
+  → 历史留档、索引、链接与关系更新
+```
+
+浏览器预览中的生成使用明确的模板降级；真实模型质量属于人工验收。
+
+### 3.12 Sync 2.0（V2.0.x P1）
+
+```text
+应用数据目录/sync/<workspace-hash>/
+  config.json       非秘密配置
+  credentials.json  WebDAV / S3 凭据（0600，不进工作区）
+  state.json        同步基线、持久队列、冲突记录
+  history/          local / remote / base / before-write / before-delete 留档
+
+远端（用户自己的 endpoint）
+  pkos-sync/v2/library/profile.json   Argon2id 随机 salt（无秘密）
+  pkos-sync/v2/library/manifest.enc   AES-256-GCM 加密的路径 / 哈希 / 墓碑
+  pkos-sync/v2/library/objects/<pathHash>-<contentHash>.enc
+
+dry-run
+  → 扫描当前 active Markdown / attachments / 可选索引缓存
+  → 解密远端 manifest（不遍历目录）
+  → 本地基线三方比较 → upload / download / delete / conflict
+
+run
+  → 先加密上传不可变对象
+  → 以 ETag If-Match 提交新 manifest；412 → SYNC_CONFLICT
+  → manifest 成功后才应用本地下载 / 删除
+  → 失败进入持久队列；关闭同步不触碰本地功能
+```
+
+删除通过 tombstone 传播，不直接抹掉历史对象。文本冲突提供保守逐行三方合并；
+重叠区不自动拼接。附件冲突只能选择本地或远端版本。远端不托管账号、不提供官方云。
+
 ## 4. 可替换性设计
 
 | 关注点 | 边界 | 当前实现 |
 | --- | --- | --- |
-| 全文搜索 | `infrastructure::fts::SearchIndex` trait | `SqliteSearchIndex`（FTS5） |
+| 全文搜索 | `infrastructure::fts::SearchIndex` trait | `SqliteSearchIndex`（FTS5，4 个稳定分片） |
 | 元数据存储 | `repositories::*Repository` trait | SQLite 实现 |
 | 文件正文 | `infrastructure::markdown_storage::MarkdownStorage` | 本地文件 + 原子写入 |
 | 文档导出 | `application::export_service::ExportService` + `infrastructure::docx` | Markdown / HTML / Word(docx) / PDF 打印视图 |

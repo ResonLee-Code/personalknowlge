@@ -1,4 +1,5 @@
 import {
+  Cloud,
   Database,
   FolderOpen,
   HardDrive,
@@ -16,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { AiSettingsPanel } from '@/features/settings/AiSettingsPanel';
+import { SyncSettingsPanel } from '@/features/settings/SyncSettingsPanel';
 import { reportAction, reportFailure } from '@/lib/actionFeedback';
 import { AUTOSAVE_DELAY_OPTIONS, FONT_SIZE_OPTIONS, ROUTES, THEME_OPTIONS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
@@ -36,7 +38,7 @@ import type { BackupInfo, BackupValidation } from '@/types';
  * 搜索时右边把所有分节都摆出来，只留命中的行（分节整体不命中就整节藏掉）。
  * `keywords` 是这一节行的关键词集合，供搜索判断"这一节还有没有命中"。
  */
-type SettingsSectionId = 'editor' | 'index' | 'backup' | 'ai' | 'about';
+type SettingsSectionId = 'editor' | 'index' | 'backup' | 'sync' | 'ai' | 'about';
 
 const SETTINGS_GROUPS: Array<{
   label: string;
@@ -59,6 +61,12 @@ const SETTINGS_GROUPS: Array<{
     items: [
       { id: 'index', label: '索引与数据', icon: Database, keywords: '索引 重建 扫描 工作区目录' },
       { id: 'backup', label: '备份与导出', icon: HardDrive, keywords: '备份 校验 恢复 导出 Markdown' },
+      {
+        id: 'sync',
+        label: '加密同步',
+        icon: Cloud,
+        keywords: 'WebDAV S3 同步 加密 冲突 离线队列 口令 凭据',
+      },
     ],
   },
   { label: '关于', items: [{ id: 'about', label: '关于本应用', icon: ShieldCheck, keywords: '版本 数据 日志 运行模式 工作区 ID' }] },
@@ -486,6 +494,16 @@ export function SettingsPage() {
             )}
           </div>
         </Section>
+        ) : null}
+
+        {section === 'sync' || query ? (
+          <Section
+            title="加密同步"
+            icon={Cloud}
+            searchText="WebDAV S3 兼容 同步 加密 冲突 离线队列 口令"
+          >
+            <SyncSettingsPanel />
+          </Section>
         ) : null}
 
         {section === 'ai' || query ? (

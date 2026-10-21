@@ -560,6 +560,55 @@ payload, sourceHash, createdAt, updatedAt, appliedAt, undoneAt, error, undoAvail
 - 进度事件 `ai://organize-progress`：
   `{ jobId, status, total, completed, failed, currentNoteId }`，不含正文。
 
+## 23.3 Graph 2.0 洞察（V2.0.x P1）
+
+`graph_insights(query)` 在现有图谱抽样子图上计算，不改变图谱派生数据：
+
+| 字段 | 说明 |
+| --- | --- |
+| `focusNoteId` | 焦点笔记；为空时只返回重复/结构洞察 |
+| `maxNodes` | 抽样上限，1–5000，默认 2000 |
+| `neighborLimit` | 近邻上限，1–20，默认 10 |
+| `duplicateThreshold` | 近重复阈值，0.6–0.99，默认 0.82 |
+
+返回 `GraphInsights`：`mode`（`vector` / `local`）、`neighbors`、`duplicateClusters`、
+`orphanNotes`、`bridgeNotes`、`islandCategories`、抽样总数与警告。每条近邻证据为
+`reference / relation / sharedReference / sharedTag / sharedTopic / similarContent` 之一；
+无证据结果不会返回。近重复只提供只读预览和人工确认入口，不自动合并正文。
+
+聚类摘要复用 Writing 的引用草稿；用户预览后再次点击“确认新建摘要笔记”才创建普通笔记。
+
+## 23.4 Writing 2.0（V2.0.x P2）
+
+| 命令 | 说明 |
+| --- | --- |
+| `writing_draft` | 生成只读草稿；支持 `outline / continue / rewrite / shorten / expand` |
+| `writing_apply_preview` | 校验目标哈希、逐段引用和来源区间，返回完整写入预览 |
+| `writing_apply` | `confirm=true` 后写入；走现有 `NoteService.save`、历史留档与索引更新 |
+
+`WritingDraft.segments[]` 每项都带 `citations: AskCitation[]`；任一段没有可解析引用，
+或模型使用未知编号，整份草稿作废。`acceptedSegments` 由用户逐段选择；未先调用
+`writing_apply_preview` 时 UI 不允许确认写入。来源笔记在生成后被修改、目标笔记哈希变化
+都会返回 `NOTE_CONFLICT`。
+
+## 23.5 Sync 2.0（V2.0.x P1）
+
+同步只支持用户自己的 WebDAV / S3 兼容对象存储：
+
+| 命令 | 说明 |
+| --- | --- |
+| `sync_settings_get` / `sync_settings_update` | 非秘密配置与可选范围；密码只写不读 |
+| `sync_preview` | 必须口令；返回上传/下载/删除/冲突计数，不写任何文件 |
+| `sync_run` | `confirm=true` 后执行，manifest 使用 ETag 乐观并发保护 |
+| `sync_conflicts` / `sync_conflict_detail` | 冲突摘要与本地/远端/共同祖先文本 |
+| `sync_conflict_merge_preview` | 保守逐行三方合并；重叠修改返回冲突数 |
+| `sync_conflict_resolve` | 选择 `local / remote / merged` |
+| `sync_history` / `sync_history_restore` | 列出与恢复覆盖/删除前留档 |
+
+远端对象名为路径哈希 + 内容哈希；manifest、正文、附件和可选索引缓存均用
+AES-256-GCM 加密，密钥由 Argon2id 从用户口令派生。口令不落盘；WebDAV/S3 凭据只存在
+应用数据目录。删除使用 manifest 墓碑，离线或认证失败时本地变更进入持久重试队列。
+
 ## 24. 研究助手（V1.2.1 阶段 D1 / AI_ARCHITECTURE_PLAN §9）
 
 五步固定流程，每步一个命令，便于界面逐步推进、显示进度、随时中止。

@@ -1,7 +1,7 @@
 //! 升级路径验收：旧版本工作区打开后应完成迁移并自动重建搜索索引。
 //!
 //! 场景：库停留在迁移 005（没有 FTS rowid 映射表，索引里是旧格式记录），
-//! 用当前版本打开，期望：schema → **15**（006 映射表 / 007–010 层级与展示 / 011–015 AI 数据）、
+//! 用当前版本打开，期望：schema → **16**（006 映射表 / 007–010 层级与展示 / 011–016 AI 与分片）、
 //! 映射表建立、FTS 自动重建（已索引 == 总数）、检索可用。
 
 use std::sync::Arc;
@@ -56,14 +56,17 @@ fn opening_a_v1_1_workspace_migrates_and_rebuilds_search_index() {
             .with_conn(|conn| {
                 conn.execute("DROP TABLE IF EXISTS search_documents_map", [])?;
                 conn.execute("DELETE FROM search_documents_fts", [])?;
+                conn.execute("DROP TABLE IF EXISTS search_documents_fts_1", [])?;
+                conn.execute("DROP TABLE IF EXISTS search_documents_fts_2", [])?;
+                conn.execute("DROP TABLE IF EXISTS search_documents_fts_3", [])?;
                 conn.execute("DELETE FROM search_documents_fts WHERE 1=0", [])?;
                 conn.execute(
                     "INSERT INTO search_documents_fts (note_id, title, content, keywords)
                      VALUES (?1, ?2, ?3, ?4)",
                     rusqlite::params!["note_legacy", "旧索引记录", "旧正文", "旧"],
                 )?;
-                // 删除 006 的迁移记录即可让下次打开重跑它（005 的记录保留）
-                conn.execute("DELETE FROM schema_migrations WHERE version = 6", [])?;
+                // 回退 FTS 映射与分片迁移；007–015 的列已存在，保留其迁移记录。
+                conn.execute("DELETE FROM schema_migrations WHERE version IN (6, 16)", [])?;
                 Ok(())
             })
             .expect("构造旧库状态");
@@ -80,8 +83,8 @@ fn opening_a_v1_1_workspace_migrates_and_rebuilds_search_index() {
     let context = app.context().expect("上下文");
     assert_eq!(
         context.db.schema_version().expect("schema 版本"),
-        15,
-        "应自动迁移到最新 schema（011 分块 / 012 决策缓存 / 013 向量索引 / 014 Organize / 015 撤销哈希）"
+        16,
+        "应自动迁移到最新 schema（011 分块 / 012 决策缓存 / 013 向量索引 / 014 Organize / 015 撤销哈希 / 016 FTS 分片）"
     );
     let (has_map, fts_rows, map_rows): (i64, i64, i64) = context
         .db
@@ -91,13 +94,24 @@ fn opening_a_v1_1_workspace_migrates_and_rebuilds_search_index() {
                 [],
                 |row| row.get(0),
             )?;
-            let fts: i64 = conn.query_row("SELECT COUNT(*) FROM search_documents_fts", [], |row| row.get(0))?;
+            let fts: i64 = conn.query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM search_documents_fts)
+                    + (SELECT COUNT(*) FROM search_documents_fts_1)
+                    + (SELECT COUNT(*) FROM search_documents_fts_2)
+                    + (SELECT COUNT(*) FROM search_documents_fts_3)",
+                [],
+                |row| row.get(0),
+            )?;
             let mapped: i64 = conn.query_row("SELECT COUNT(*) FROM search_documents_map", [], |row| row.get(0))?;
             Ok((map, fts, mapped))
         })
         .expect("检查索引状态");
     assert_eq!(has_map, 1, "006 应建立 rowid 映射表");
-    assert_eq!(reopened.index_status.indexed_notes, reopened.index_status.total_notes, "打开后应完成索引重建");
+    assert_eq!(
+        reopened.index_status.indexed_notes, reopened.index_status.total_notes,
+        "打开后应完成索引重建"
+    );
     assert_eq!(fts_rows, map_rows, "FTS 记录应与映射表一一对应");
     assert!(
         fts_rows >= 3,
@@ -106,12 +120,17 @@ fn opening_a_v1_1_workspace_migrates_and_rebuilds_search_index() {
 
     // 检索仍可用（迁移后功能不退化）
     let hits = SearchService::new(Arc::clone(&context))
-        .search(SearchQuery { keyword: "倒排索引".into(), ..Default::default() })
+        .search(SearchQuery {
+            keyword: "倒排索引".into(),
+            ..Default::default()
+        })
         .expect("检索");
     assert!(
         hits.hits.iter().any(|hit| hit.note.id == first.note.id),
         "迁移后应能检索到原有笔记"
     );
-    let db_size = std::fs::metadata(&db_path).map(|meta| meta.len()).unwrap_or(0);
+    let db_size = std::fs::metadata(&db_path)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
     assert!(db_size > 0, "数据库文件应存在");
 }

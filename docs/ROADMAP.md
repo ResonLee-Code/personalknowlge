@@ -14,15 +14,20 @@
 - **分支约定**（2026-10-19 起）：`develop` 集成日常改动，`main` 只放**已发布 / 待打标签**的状态；
   发版时在 `develop` 上改版本号与 CHANGELOG，快进合并到 `main`，**在 `main` 上打标签**，两边随后保持同步（详见 [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)）
 - **上一阶段**：~~[PLAN_V1.2.1.md](./PLAN_V1.2.1.md)~~ 已收口（真机验收 10 条 9 通过 + 1 不适用）
-- **当前阶段**：**V2.0.x P0 代码收口中**（2026-10-20）。Ask 引用式问答已落地：
+- **当前阶段**：**V2.0.x P0 / P1 / P2 代码收口中**（2026-10-22）。Ask 引用式问答已落地：
   四类作用域、精确段落引用、未知引用编号整份拒绝、在线→本地→模板降级与浏览器预览实现；
   多轮追问、选中文字 / 命令面板入口与答案笔记确认写入也已落地；后续补问答评测集与门禁。
   Organize 的建议队列、批量任务、接受/拒绝/撤销与持久化恢复也已完成代码闭环；
   标签精确率、关联接受率仍需统一人工评测。
   Research 2.0 的三入口、可编辑计划、模板、重跑对比和续跑，以及 Platform 2.0 的
   Tauri 签名更新 / 诊断导出均已落地；证书、签名包、真实设备与在线模型质量仍待统一人工验收。
-  V1.3.0 的 AI 增强 + 语义检索十项任务已全部收口，
-  见 [PLAN_V1.3.0.md](./PLAN_V1.3.0.md) §7
+  Graph 2.0 的可解释近邻 / 重复 / 结构洞察、WebDAV / S3 加密同步、
+  10 万 Graph 首屏门禁和 Writing 五种模式 + 逐段 diff 已落地。
+  自动门禁与剩余人工项见 [PLAN_V2_P1_P2_EXECUTION.md](./PLAN_V2_P1_P2_EXECUTION.md)
+  与 [V2_P1_P2_MANUAL_ACCEPTANCE.md](./V2_P1_P2_MANUAL_ACCEPTANCE.md)。
+  Scale 2.0 已完成 4 个稳定 FTS 分片、后台扫描、虚拟列表和 10 万 Graph / 检索门禁；
+  剩签名发布机与 Windows/Linux 真机人工项。V1.3.0 的 AI 增强 +
+  语义检索十项任务已全部收口，见 [PLAN_V1.3.0.md](./PLAN_V1.3.0.md) §7
 - **变更明细**：见 [CHANGELOG.md](./CHANGELOG.md) · **构建命令**：见 [BUILD_COMMANDS.md](./BUILD_COMMANDS.md)
 - **上手文档**：[完全指南（中文）](./GUIDE.md) · [Complete Guide (English)](./GUIDE.en.md)
 

@@ -9,8 +9,8 @@
 //! 因此额外写入「单字 + 双字」扩展，查询时把中文关键词转换成双字短语，
 //! 从而既能支持单字查询，也能按连续短语精确匹配。
 
-use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
+use rusqlite::OptionalExtension;
 use rusqlite::{params_from_iter, Connection};
 
 use crate::core::error::Result;
@@ -22,6 +22,28 @@ use crate::core::text::cjk_search_tokens;
 /// 很低，却要求 SQLite 为全部命中算分并排序。保留小结果集的完整相关度排序，
 /// 高频结果改为按 FTS rowid 流式分页，以稳定控制交互延迟。
 const MAX_RANKED_MATCHES: i64 = 5_000;
+
+/// 4 个稳定分片。按 `note_id` 的 FNV-1a 哈希路由，保证重建前后位置可复现。
+pub const SEARCH_SHARDS: [&str; 4] = [
+    "search_documents_fts",
+    "search_documents_fts_1",
+    "search_documents_fts_2",
+    "search_documents_fts_3",
+];
+
+fn shard_of(note_id: &str) -> usize {
+    let hash = note_id
+        .as_bytes()
+        .iter()
+        .fold(2_166_136_261u32, |hash, byte| {
+            (hash ^ u32::from(*byte)).wrapping_mul(16_777_619)
+        });
+    hash as usize % SEARCH_SHARDS.len()
+}
+
+fn shard_table(shard: usize) -> &'static str {
+    SEARCH_SHARDS[shard.min(SEARCH_SHARDS.len() - 1)]
+}
 
 /// 写入索引的文档。
 #[derive(Debug, Clone)]
@@ -112,8 +134,8 @@ impl SqliteSearchIndex {
             || request.scope_note_id.is_some()
     }
 
-    fn build_where(request: &FtsRequest<'_>, params: &mut Vec<Value>) -> String {
-        let mut conditions = vec!["search_documents_fts MATCH ?".to_string()];
+    fn build_where(table: &str, request: &FtsRequest<'_>, params: &mut Vec<Value>) -> String {
+        let mut conditions = vec![format!("{table} MATCH ?")];
         params.push(Value::Text(request.match_expression.to_string()));
         conditions.push("n.status = 'active'".to_string());
 
@@ -160,27 +182,42 @@ impl SqliteSearchIndex {
 
     fn count_matches_fast(conn: &Connection, request: &FtsRequest<'_>) -> Result<i64> {
         if !Self::has_note_filters(request) {
-            // 正常索引只包含 active 笔记，且删除路径同步移除 FTS 行；高频热路径
-            // 因此无需为 COUNT 再对 10 万篇 notes 做一次 JOIN。
-            let count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM search_documents_fts
-                 WHERE search_documents_fts MATCH ?1",
-                [Value::Text(request.match_expression.to_string())],
+            let counts = SEARCH_SHARDS
+                .iter()
+                .enumerate()
+                .map(|(index, table)| {
+                    format!(
+                        "(SELECT COUNT(*) FROM {table} WHERE {table} MATCH ?{index})",
+                        index = index + 1
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" + ");
+            let params =
+                vec![Value::Text(request.match_expression.to_string()); SEARCH_SHARDS.len()];
+            let total: i64 = conn.query_row(
+                &format!("SELECT {counts}"),
+                params_from_iter(params),
                 |row| row.get(0),
             )?;
-            return Ok(count);
+            return Ok(total);
         }
-        let mut params: Vec<Value> = Vec::new();
-        let where_clause = Self::build_where(request, &mut params);
-        let sql = format!(
-            "SELECT COUNT(*)
-             FROM search_documents_fts f
-             JOIN notes n ON n.id = f.note_id
-             WHERE {where_clause}"
-        );
-        let mut statement = conn.prepare(&sql)?;
-        let count: i64 = statement.query_row(params_from_iter(params.iter()), |row| row.get(0))?;
-        Ok(count)
+        let mut total = 0i64;
+        for table in SEARCH_SHARDS {
+            let mut params: Vec<Value> = Vec::new();
+            let where_clause = Self::build_where(table, request, &mut params);
+            let sql = format!(
+                "SELECT COUNT(*)
+                 FROM {table} f
+                 JOIN notes n ON n.id = f.note_id
+                 WHERE {where_clause}"
+            );
+            let mut statement = conn.prepare(&sql)?;
+            let count: i64 =
+                statement.query_row(params_from_iter(params.iter()), |row| row.get(0))?;
+            total = total.saturating_add(count);
+        }
+        Ok(total)
     }
 
     fn search_by_rowid(
@@ -190,30 +227,29 @@ impl SqliteSearchIndex {
         total: i64,
     ) -> Result<(Vec<FtsHit>, i64)> {
         let mut params: Vec<Value> = Vec::new();
-        let sql = if !Self::has_note_filters(request) {
-            params.push(Value::Text(request.match_expression.to_string()));
-            "SELECT note_id, 0.0 AS score
-             FROM search_documents_fts
-             WHERE search_documents_fts MATCH ?
-             ORDER BY rowid ASC
-             LIMIT ? OFFSET ?"
-                .to_string()
-        } else {
-            let where_clause = Self::build_where(request, &mut params);
-            format!(
-                "SELECT f.note_id AS note_id, 0.0 AS score
-                 FROM search_documents_fts f
-                 JOIN notes n ON n.id = f.note_id
-                 WHERE {where_clause}
-                 ORDER BY {}
-                 LIMIT ? OFFSET ?",
-                Self::order_clause(&FtsRequest {
-                    by_relevance: false,
-                    sort_by_updated_desc: true,
-                    ..request.clone()
-                }),
-            )
-        };
+        let mut selects = Vec::new();
+        for table in SEARCH_SHARDS {
+            if !Self::has_note_filters(request) {
+                params.push(Value::Text(request.match_expression.to_string()));
+                selects.push(format!(
+                    "SELECT note_id, 0.0 AS score
+                     FROM {table}
+                     WHERE {table} MATCH ?"
+                ));
+            } else {
+                let where_clause = Self::build_where(table, request, &mut params);
+                selects.push(format!(
+                    "SELECT f.note_id AS note_id, 0.0 AS score
+                     FROM {table} f
+                     JOIN notes n ON n.id = f.note_id
+                     WHERE {where_clause}"
+                ));
+            }
+        }
+        let sql = format!(
+            "SELECT note_id, score FROM ({}) ORDER BY note_id ASC LIMIT ? OFFSET ?",
+            selects.join(" UNION ALL ")
+        );
         params.push(Value::Integer(request.limit));
         params.push(Value::Integer(request.offset));
         let mut statement = conn.prepare(&sql)?;
@@ -236,25 +272,29 @@ impl SearchIndex for SqliteSearchIndex {
         // note_id 在 FTS5 里是 UNINDEXED 列：按它 DELETE 会全表扫描（O(N)），
         // 逐篇保存/采纳于是退化成 O(N²)。这里用映射表拿到 rowid，删除改按主键。
         // 注意 rowid 的分配也必须 O(1)：早先版本的 `MAX(row_id)+1` 同样是全表扫描。
-        let existing: Option<i64> = conn
+        let existing: Option<(i64, usize)> = conn
             .query_row(
-                "SELECT row_id FROM search_documents_map WHERE note_id = ?1",
+                "SELECT row_id, shard FROM search_documents_map WHERE note_id = ?1",
                 rusqlite::params![document.note_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get::<_, i64>(1)?.max(0) as usize)),
             )
             .optional()?;
+        let target_shard = shard_of(&document.note_id);
+        let target_table = shard_table(target_shard);
 
-        if let Some(row_id) = existing {
+        if let Some((row_id, shard)) = existing {
             conn.execute(
-                "DELETE FROM search_documents_fts WHERE rowid = ?1",
+                &format!("DELETE FROM {} WHERE rowid = ?1", shard_table(shard)),
                 rusqlite::params![row_id],
             )?;
         }
 
         // 不指定 rowid，交给 FTS5 自增分配，再用 last_insert_rowid 回填映射
         conn.execute(
-            "INSERT INTO search_documents_fts (note_id, title, content, keywords)
-             VALUES (?1, ?2, ?3, ?4)",
+            &format!(
+                "INSERT INTO {target_table} (note_id, title, content, keywords)
+                 VALUES (?1, ?2, ?3, ?4)"
+            ),
             rusqlite::params![
                 document.note_id,
                 document.title,
@@ -266,29 +306,29 @@ impl SearchIndex for SqliteSearchIndex {
 
         if existing.is_some() {
             conn.execute(
-                "UPDATE search_documents_map SET row_id = ?2 WHERE note_id = ?1",
-                rusqlite::params![document.note_id, row_id],
+                "UPDATE search_documents_map SET row_id = ?2, shard = ?3 WHERE note_id = ?1",
+                rusqlite::params![document.note_id, row_id, target_shard as i64],
             )?;
         } else {
             conn.execute(
-                "INSERT INTO search_documents_map (note_id, row_id) VALUES (?1, ?2)",
-                rusqlite::params![document.note_id, row_id],
+                "INSERT INTO search_documents_map (note_id, row_id, shard) VALUES (?1, ?2, ?3)",
+                rusqlite::params![document.note_id, row_id, target_shard as i64],
             )?;
         }
         Ok(())
     }
 
     fn remove(&self, conn: &Connection, note_id: &str) -> Result<()> {
-        let existing: Option<i64> = conn
+        let existing: Option<(i64, usize)> = conn
             .query_row(
-                "SELECT row_id FROM search_documents_map WHERE note_id = ?1",
+                "SELECT row_id, shard FROM search_documents_map WHERE note_id = ?1",
                 rusqlite::params![note_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get::<_, i64>(1)?.max(0) as usize)),
             )
             .optional()?;
-        if let Some(row_id) = existing {
+        if let Some((row_id, shard)) = existing {
             conn.execute(
-                "DELETE FROM search_documents_fts WHERE rowid = ?1",
+                &format!("DELETE FROM {} WHERE rowid = ?1", shard_table(shard)),
                 rusqlite::params![row_id],
             )?;
             conn.execute(
@@ -300,23 +340,33 @@ impl SearchIndex for SqliteSearchIndex {
     }
 
     fn clear(&self, conn: &Connection) -> Result<()> {
-        conn.execute("DELETE FROM search_documents_fts", [])?;
+        for table in SEARCH_SHARDS {
+            conn.execute(&format!("DELETE FROM {table}"), [])?;
+        }
         conn.execute("DELETE FROM search_documents_map", [])?;
         Ok(())
     }
 
     fn optimize(&self, conn: &Connection) -> Result<()> {
-        conn.execute(
-            "INSERT INTO search_documents_fts (search_documents_fts) VALUES ('optimize')",
-            [],
-        )?;
+        for table in SEARCH_SHARDS {
+            conn.execute(
+                &format!("INSERT INTO {table} ({table}) VALUES ('optimize')"),
+                [],
+            )?;
+        }
         Ok(())
     }
 
     fn count(&self, conn: &Connection) -> Result<i64> {
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM search_documents_fts", [], |row| row.get(0))?;
-        Ok(count)
+        let mut total = 0i64;
+        for table in SEARCH_SHARDS {
+            let count: i64 =
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })?;
+            total = total.saturating_add(count);
+        }
+        Ok(total)
     }
 
     fn search(&self, conn: &Connection, request: &FtsRequest<'_>) -> Result<(Vec<FtsHit>, i64)> {
@@ -325,15 +375,24 @@ impl SearchIndex for SqliteSearchIndex {
             return self.search_by_rowid(conn, request, total);
         }
         let mut params: Vec<Value> = Vec::new();
-        let where_clause = Self::build_where(request, &mut params);
+        let mut selects = Vec::new();
+        for table in SEARCH_SHARDS {
+            let where_clause = Self::build_where(table, request, &mut params);
+            selects.push(format!(
+                "SELECT f.note_id AS note_id,
+                        bm25({table}, 0.0, 6.0, 1.0, 2.0) AS score,
+                        n.updated_at AS updated_at
+                 FROM {table} f
+                 JOIN notes n ON n.id = f.note_id
+                 WHERE {where_clause}"
+            ));
+        }
         let sql = format!(
-            "SELECT f.note_id AS note_id,
-                    bm25(search_documents_fts, 0.0, 6.0, 1.0, 2.0) AS score
-             FROM search_documents_fts f
-             JOIN notes n ON n.id = f.note_id
-             WHERE {where_clause}
+            "SELECT note_id, score
+             FROM ({})
              ORDER BY {}
              LIMIT ? OFFSET ?",
+            selects.join(" UNION ALL "),
             Self::order_clause(request),
         );
         params.push(Value::Integer(request.limit));

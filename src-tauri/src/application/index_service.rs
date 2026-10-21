@@ -158,7 +158,10 @@ impl IndexService {
             .with_conn(|conn| {
                 conn.query_row(
                     "SELECT
-                        (SELECT COUNT(*) FROM search_documents_fts),
+                        (SELECT COUNT(*) FROM search_documents_fts)
+                        + (SELECT COUNT(*) FROM search_documents_fts_1)
+                        + (SELECT COUNT(*) FROM search_documents_fts_2)
+                        + (SELECT COUNT(*) FROM search_documents_fts_3),
                         (SELECT COUNT(*) FROM notes
                           WHERE workspace_id = ?1 AND status = 'active'),
                         (SELECT COUNT(*) FROM note_chunks)",

@@ -38,6 +38,7 @@ pub mod tools;
 pub mod traits;
 pub mod vector_index;
 pub mod web_search;
+pub mod writing;
 
 pub use policy::AiPolicyService;
 pub use ask::AskService;

@@ -27,7 +27,11 @@ export type ErrorCode =
   /** AI 能力总开关关闭 */
   | 'AI_DISABLED'
   /** 联网档位为「仅本地」或本次外发未确认 */
-  | 'NETWORK_DISABLED';
+  | 'NETWORK_DISABLED'
+  /** 同步远端已变化，拒绝覆盖 */
+  | 'SYNC_CONFLICT'
+  /** 同步传输、配置或加解密失败 */
+  | 'SYNC_FAILED';
 
 export interface AppError {
   code: ErrorCode;
@@ -948,13 +952,7 @@ export interface KbHit {
 
 /** 研究会话状态（与 Rust `ResearchStatus` 一致，只能单向推进） */
 export type ResearchStatus =
-  | 'planned'
-  | 'collected'
-  | 'verified'
-  | 'composed'
-  | 'proposed'
-  | 'written'
-  | 'aborted';
+  'planned' | 'collected' | 'verified' | 'composed' | 'proposed' | 'written' | 'aborted';
 
 /** 来源权威性级别 A–E（§9.3） */
 export type ResearchSourceLevel = 'A' | 'B' | 'C' | 'D' | 'E';
@@ -979,12 +977,7 @@ export type ResearchWarningKind =
 
 /** 证据缺口的一类（D5/N9） */
 export type ResearchEvidenceGapKind =
-  | 'noMaterial'
-  | 'partialCoverage'
-  | 'noCrossCheck'
-  | 'thinEvidence'
-  | 'weakOnly'
-  | 'staleOnly';
+  'noMaterial' | 'partialCoverage' | 'noCrossCheck' | 'thinEvidence' | 'weakOnly' | 'staleOnly';
 
 /** 一处证据缺口：差在哪、影响哪些子问题、涉及哪些来源 */
 export interface ResearchEvidenceGap {
@@ -1462,12 +1455,7 @@ export interface OrganizeBatchReport {
 }
 
 export type OrganizeJobStatus =
-  | 'queued'
-  | 'running'
-  | 'paused'
-  | 'canceled'
-  | 'completed'
-  | 'failed';
+  'queued' | 'running' | 'paused' | 'canceled' | 'completed' | 'failed';
 
 export type OrganizeJobItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
@@ -1617,4 +1605,251 @@ export interface GraphData {
   totalNodes: number;
   totalEdges: number;
   durationMs: number;
+}
+
+/** Graph 2.0 洞察查询：只在当前抽样子图上计算。 */
+export interface GraphInsightsQuery {
+  categoryId?: string | null;
+  tagId?: string | null;
+  keyword?: string | null;
+  updatedAfter?: string | null;
+  focusNoteId?: string | null;
+  maxNodes?: number | null;
+  neighborLimit?: number | null;
+  duplicateThreshold?: number | null;
+}
+
+export type GraphEvidenceKind =
+  'reference' | 'relation' | 'sharedReference' | 'sharedTag' | 'sharedTopic' | 'similarContent';
+
+export interface GraphEvidence {
+  kind: GraphEvidenceKind;
+  label: string;
+  noteIds: string[];
+}
+
+export interface SemanticNeighbor {
+  noteId: string;
+  title: string;
+  categoryId?: string | null;
+  score: number;
+  evidence: GraphEvidence[];
+}
+
+export interface DuplicateMember {
+  noteId: string;
+  title: string;
+  excerpt: string;
+  updatedAt: string;
+}
+
+export interface DuplicateCluster {
+  id: string;
+  similarity: number;
+  reason: string;
+  members: DuplicateMember[];
+  requiresConfirmation: boolean;
+}
+
+export interface BridgeNote {
+  noteId: string;
+  title: string;
+  categoryId?: string | null;
+  connectedCategories: number;
+  bridgeScore: number;
+  explanation: string;
+}
+
+export interface IslandCategory {
+  categoryId: string;
+  categoryPath: string;
+  noteCount: number;
+  internalEdges: number;
+  externalEdges: number;
+  explanation: string;
+}
+
+export interface GraphInsights {
+  mode: 'vector' | 'local';
+  neighbors: SemanticNeighbor[];
+  duplicateClusters: DuplicateCluster[];
+  orphanNotes: GraphNode[];
+  bridgeNotes: BridgeNote[];
+  islandCategories: IslandCategory[];
+  sampledNodes: number;
+  totalNodes: number;
+  truncated: boolean;
+  warnings: string[];
+  durationMs: number;
+}
+
+/** Sync 2.0：非秘密配置。密码与密钥只写不读。 */
+export interface SyncSettings {
+  enabled: boolean;
+  provider: 'webdav' | 's3';
+  endpoint?: string | null;
+  bucket?: string | null;
+  region: string;
+  usernameSet: boolean;
+  accessKeySet: boolean;
+  syncNotes: boolean;
+  syncAttachments: boolean;
+  syncIndex: boolean;
+  deviceId: string;
+  pendingQueue: number;
+}
+
+export interface UpdateSyncSettingsInput {
+  enabled?: boolean;
+  provider?: 'webdav' | 's3';
+  endpoint?: string;
+  bucket?: string;
+  region?: string;
+  username?: string;
+  password?: string;
+  accessKey?: string;
+  secretKey?: string;
+  clearCredentials?: boolean;
+  syncNotes?: boolean;
+  syncAttachments?: boolean;
+  syncIndex?: boolean;
+}
+
+export interface SyncPlanItem {
+  kind: 'upload' | 'download' | 'deleteLocal' | 'deleteRemote' | 'conflict';
+  path: string;
+  sizeBytes: number;
+  reason: string;
+}
+
+export interface SyncPreview {
+  uploads: SyncPlanItem[];
+  downloads: SyncPlanItem[];
+  localDeletes: SyncPlanItem[];
+  remoteDeletes: SyncPlanItem[];
+  conflicts: SyncPlanItem[];
+  totalBytes: number;
+  pendingQueue: number;
+  warnings: string[];
+}
+
+export interface SyncRunInput {
+  passphrase: string;
+  confirm: boolean;
+}
+
+export interface SyncRunReport {
+  preview: SyncPreview;
+  uploaded: number;
+  downloaded: number;
+  localDeleted: number;
+  remoteDeleted: number;
+  conflictsCreated: number;
+  queued: number;
+  durationMs: number;
+}
+
+export interface SyncConflictSummary {
+  id: string;
+  path: string;
+  kind: 'bothModified' | 'modifyDelete' | 'bothAdded';
+  localHash?: string | null;
+  remoteHash?: string | null;
+  baseHash?: string | null;
+  detectedAt: string;
+  canMergeText: boolean;
+}
+
+export interface SyncConflictDetail {
+  summary: SyncConflictSummary;
+  localContent?: string | null;
+  remoteContent?: string | null;
+  baseContent?: string | null;
+}
+
+export interface SyncMergePreview {
+  mergedContent?: string | null;
+  conflictCount: number;
+  note: string;
+}
+
+export interface SyncHistoryEntry {
+  relativePath: string;
+  originalPath: string;
+  category:
+    'local' | 'remote' | 'base' | 'before-write' | 'before-delete' | 'before-restore' | string;
+  savedAt: string;
+  sizeBytes: number;
+}
+
+export interface RestoreSyncHistoryInput {
+  relativePath: string;
+  confirm: boolean;
+}
+
+export type WritingMode = 'outline' | 'continue' | 'rewrite' | 'shorten' | 'expand';
+
+export interface WritingRequest {
+  noteId: string;
+  mode?: WritingMode | null;
+  instruction?: string;
+  selection?: string | null;
+  selectionStart?: number | null;
+  selectionEnd?: number | null;
+  confirmOutbound?: boolean;
+}
+
+export interface WritingSegment {
+  id: string;
+  text: string;
+  citations: AskCitation[];
+}
+
+export interface WritingDraft {
+  noteId: string;
+  mode: WritingMode;
+  text: string;
+  segments: WritingSegment[];
+  citations: AskCitation[];
+  provider: string;
+  tier: 'online' | 'local' | 'template' | string;
+  evidenceSufficient: boolean;
+  warnings: string[];
+  baseContentHash: string;
+  targetStart: number;
+  targetEnd: number;
+  inputTokens: number;
+  tookMs: number;
+}
+
+export interface WritingApplyInput {
+  noteId: string;
+  baseContentHash: string;
+  mode: WritingMode;
+  targetStart: number;
+  targetEnd: number;
+  acceptedSegments: WritingSegment[];
+  confirm: boolean;
+}
+
+export interface WritingApplyPreview {
+  noteId: string;
+  content: string;
+  addedChars: number;
+  removedChars: number;
+  acceptedSegments: number;
+  citations: AskCitation[];
+  warnings: string[];
+}
+
+export interface WritingApplyResult {
+  detail: NoteDetail;
+  acceptedSegments: number;
+  sourceCount: number;
+}
+
+export interface ResolveSyncConflictInput {
+  conflictId: string;
+  resolution: 'local' | 'remote' | 'merged';
+  mergedContent?: string | null;
 }
