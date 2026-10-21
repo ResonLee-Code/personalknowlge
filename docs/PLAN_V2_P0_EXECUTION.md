@@ -89,7 +89,7 @@ M0-A 契约与持久化
 | `ai_suggestions` 表：kind/status/model/promptVersion/evidence/sourceHash/撤销前后哈希 | ✅ 已实现 | 迁移 014 / 015 + schema 文档 |
 | 同一笔记同一类只保留最新 pending | ✅ 已实现 | 部分唯一索引 + repository 测试 |
 | `ai_jobs` / `ai_job_items` 持久化队列 | ✅ 已实现 | 迁移 + 状态机测试 |
-| 进程重启后恢复 / 暂停状态 | ✅ 已实现 | 关闭重开工作区测试 |
+| 进程重启后恢复 / 暂停状态 | ✅ 已实现 | 真实子进程 `abort()` → 重开工作区 → paused → 续跑完成 |
 | 接受时外部修改冲突检查 | ✅ 已实现 | 哈希变化返回 `NOTE_CONFLICT` |
 | 接受前文件字节不变 | ✅ 已实现 | 生成 / 拒绝路径文件字节断言 |
 | 接受后一键撤销 | ✅ 已实现 | raw bytes 快照 + 接受后哈希冲突拦截 + 字节级恢复测试 |

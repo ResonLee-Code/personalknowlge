@@ -2,6 +2,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -720,4 +721,77 @@ fn reopening_a_workspace_pauses_an_interrupted_job_and_requeues_its_running_item
     let resumed = reopened.resume_job(&job.id).expect("恢复执行");
     assert_eq!(resumed.status, AiJobStatus::Completed);
     assert_eq!(resumed.completed, 3);
+}
+
+#[test]
+fn forced_process_termination_is_recovered_on_the_next_open() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    let ids: Vec<String> = (0..3)
+        .map(|index| fixture.note(&format!("强杀恢复 {index}"), "SQLite 索引摘录。"))
+        .collect();
+    let job = fixture
+        .organize()
+        .create_job(SuggestionKind::Summary, &ids)
+        .expect("创建任务");
+    let root = fixture.root();
+    WorkspaceService::new(Arc::clone(&fixture.app))
+        .close()
+        .expect("关闭父进程工作区");
+
+    let output = Command::new(std::env::current_exe().expect("测试二进制"))
+        .args([
+            "--exact",
+            "organize_crash_fixture_child",
+            "--nocapture",
+        ])
+        .env("PKOS_TEST_ORGANIZE_CRASH_ROOT", &root)
+        .env(
+            "PKOS_TEST_ORGANIZE_CRASH_DATA",
+            fixture.data.path().to_string_lossy().as_ref(),
+        )
+        .env("PKOS_TEST_ORGANIZE_CRASH_JOB", &job.id)
+        .output()
+        .expect("启动强杀子进程");
+    assert!(
+        !output.status.success(),
+        "子进程必须被真实终止，而不是正常退出"
+    );
+
+    WorkspaceService::new(Arc::clone(&fixture.app))
+        .open(&root)
+        .expect("重启并恢复工作区");
+    let service = OrganizeService::new(fixture.context());
+    let paused = service.get_job(&job.id).expect("读取恢复后的任务");
+    assert_eq!(paused.status, AiJobStatus::Paused);
+    let resumed = service.resume_job(&job.id).expect("从强杀状态继续");
+    assert_eq!(resumed.status, AiJobStatus::Completed);
+    assert_eq!(resumed.completed, 3);
+}
+
+/// 由 `forced_process_termination_is_recovered_on_the_next_open` 以子进程方式调用。
+/// 无测试环境变量时是普通 no-op，保证全量测试运行时也能通过。
+#[test]
+fn organize_crash_fixture_child() {
+    let Some(root) = std::env::var_os("PKOS_TEST_ORGANIZE_CRASH_ROOT") else {
+        return;
+    };
+    let data = std::env::var_os("PKOS_TEST_ORGANIZE_CRASH_DATA").expect("子进程数据目录");
+    let job_id = std::env::var("PKOS_TEST_ORGANIZE_CRASH_JOB").expect("子进程任务 id");
+    let app = AppInner::new(data.into(), Arc::new(NoopEventSink)).expect("子进程应用状态");
+    WorkspaceService::new(Arc::clone(&app))
+        .open(&root.to_string_lossy())
+        .expect("子进程打开工作区");
+    let context = app.context().expect("子进程上下文");
+    context
+        .db
+        .with_conn(|conn| {
+            let repo = SqliteAiOrganizeRepository;
+            repo.set_job_status(conn, &job_id, AiJobStatus::Running, None)?;
+            repo.next_pending_item(conn, &job_id)?
+                .expect("子进程领取任务项");
+            Ok(())
+        })
+        .expect("准备强杀状态");
+    std::process::abort();
 }
