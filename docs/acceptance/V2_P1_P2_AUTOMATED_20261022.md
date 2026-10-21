@@ -13,18 +13,19 @@
 | 门禁 | 结果 |
 | --- | --- |
 | Rust 全量测试 | 通过；library 204 passed / 1 ignored，全部集成测试通过 |
-| 前端 Vitest | **81 文件 / 412 用例通过** |
+| 前端 Vitest | **82 文件 / 413 用例通过** |
 | ESLint | 通过 |
 | TypeScript / Vite production build | 通过 |
 | Playwright E2E | **7/7 通过**（含 Ask 保存、Research 计划/模板/重跑、Graph 洞察、Writing diff、Sync 设置） |
+| macOS 原生自动验收 | **238 步通过 / 0 失败 / 13 条含人工判断** |
 | updater 正负验签 | 有效载荷通过、篡改拒绝、版本绑定 `2.0.0` |
 | 前端生产依赖审计 | `pnpm audit --prod --audit-level high`：**No known vulnerabilities** |
 | Rust 依赖审计 | `cargo-audit 0.22.2`：**0 vulnerabilities**；6 个上游 unmaintained/unsound warnings |
 | Graph 10 万首屏 | **2866.6 ms**（< 3 s） |
 | 检索 1 万 | p95 **18.09 ms**、recall@5 **100%** |
 | 检索 10 万（4 分片） | p95 **190.69 ms**、recall@5 **100%**、重开 **1246.09 ms**、RSS **344.64 MB** |
-| release 二进制 | **13,553,840 B**；SHA-256 `0b47752d3897970da3d792e7a2b7fed4cb6e760f59645bcc31f52e8569f69361` |
-| `.app` 包内二进制 / 包文件合计 | **13,553,840 B / 13,713,206 B**；包内二进制 SHA-256 `9b878b2d8bd59c20bc59220b91735c3fec7f98bc33eadf21e8535d0da84767bd` |
+| release 二进制 | **13,553,840 B**；SHA-256 `99fa5b26763b845f2fcae285abe1f72a92e3be7efddd620fd31bf4f47b6c71f6` |
+| `.app` 包内二进制 / 包文件合计 | **13,553,840 B / 13,713,206 B**；包内二进制 SHA-256 `bb5df9ba5b18826bed072bc859e87acaf1a2eb05fd80e88695c714152665bbd5` |
 | macOS `.app` 构建 | ad-hoc 签名成功；公证因无凭据跳过 |
 | macOS `.app` 后端启动冒烟 | 进程存活，迁移 1–16 全部完成，文件监听启动，主窗口存在 |
 
@@ -56,6 +57,8 @@ CI preflight 固定安装 `cargo-audit 0.22.2` 并以 `cargo audit --no-yanked` 
   本地收集 → 同课题重跑 → 查看新增/消失来源与结论变化”。
 - Organize 恢复：真实子进程在任务项 running 时 `abort()`，父进程重开工作区后恢复为
   paused，并可从持久队列续跑完成。
+- 外部文件扫描现在同时刷新笔记、统计、分类和标签 store；修复新标签已入库但侧边栏
+  仍显示“暂无标签”的 UI 缓存问题（hook 回归 1/1）。
 - Organize：后台任务 UI 覆盖运行中暂停、暂停后继续、失败后重试、运行中取消；
   Rust 集成测试补齐失败任务在阻塞解除后的重试完成。
 - 安全边界：AI / 同步凭据改为同目录原子私有写入，Unix 创建即 `0600`，不跟随预置
@@ -76,9 +79,13 @@ CI preflight 固定安装 `cargo-audit 0.22.2` 并以 `cargo audit --no-yanked` 
 - 发布 workflow 通过 `actionlint 1.7.12` 语义检查；Release job 直接依赖 `preflight`，
   可合法读取版本 output 生成 `latest.json`。
 
-真机验收脚手架另有 4 个 Node 测试通过：错误 workspace 在任何 UI 写入前中止；
+真机验收脚手架另有 5 个 Node 测试通过：错误 workspace 在任何 UI 写入前中止；
 “最近生成 + 正文匹配”必须命中同一个最新文件。真实 App 复测用例 1 为 10/10、
 用例 4 为 39/39。
+
+2026-10-22 解锁后又在全新隔离工作区运行完整 macOS 原生套件：自动步骤 **238 通过 / 0 失败**，
+13 条仅因包含主观观感、原生面板或真实网络确认而待人工。验收器已能自动创建目标笔记、
+过期时效笔记、唯一分类和标签夹具，不再依赖旧 `/private/tmp/pkos-acceptance` 的残留数据。
 
 2026-10-22 最后一轮重验时 macOS 会话已锁屏。进程级启动、数据库迁移、文件监听和主窗口
 创建可验证，但锁屏会屏蔽窗口内容、辅助功能树和截图，因此最新 `.app` 的“内容可见且可

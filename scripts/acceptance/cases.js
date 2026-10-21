@@ -39,6 +39,11 @@ const APP_NAME = 'Personal Knowledge OS';
 
 /** 验收用的固定标题：每次跑都会新建一篇，便于断言。 */
 const NOTE_TITLE = 'ACCEPT-NOTE-A';
+/** 每轮唯一后缀，避免夹具覆盖旧文件。 */
+const RUN_TAG = Date.now().toString(36);
+const OUTLINE_TITLE = `大纲栏位（真机验收）-${RUN_TAG}`;
+const CATEGORY_NAME = `技术-${RUN_TAG}`;
+const TAG_NAME = '入门';
 
 /**
  * 把「大纲位置」摆回默认（与笔记列表共用一栏）。
@@ -131,7 +136,11 @@ const CASES = [
       { op: 'click', frame: { role: 'AXButton', title: '校验' } },
       { op: 'pause', ms: 2500 },
       { op: 'expectElement', query: { title: '清单文件存在' }, label: '备份校验：清单文件存在' },
-      { op: 'expectElement', query: { title: 'Markdown 数量一致' }, label: '备份校验：Markdown 数量一致' },
+      {
+        op: 'expectElement',
+        query: { title: 'Markdown 数量一致' },
+        label: '备份校验：Markdown 数量一致',
+      },
       { op: 'shot', name: '03-backup-created.png' },
       {
         op: 'manual',
@@ -154,10 +163,10 @@ const CASES = [
        *    （"打开笔记时这一栏默认是列表"这条由浏览器预览的 E2E 从干净状态断言，见 `e2e/app.spec.ts` 步骤 18。）
        */
       ...ENSURE_OUTLINE_PLACEMENT_LIST,
-      { op: 'keys', combo: 'cmd+p' },
-      { op: 'paste', text: '目标笔记' },
-      { op: 'keyCode', code: 36 },
-      { op: 'pause', ms: 600 },
+      { op: 'click', frame: { role: 'AXButton', title: '新建笔记' } },
+      { op: 'paste', text: OUTLINE_TITLE },
+      { op: 'click', frame: { role: 'AXButton', title: '创建笔记' } },
+      { op: 'pause', ms: 1200 },
       /**
        * V1.3.0 布局调整后的三处「位置」都要有机器证据，不能只看截图：
        * - 「返回笔记列表」只存在于**列表栏里的大纲** → 它出现 = 大纲占着列表那一栏；
@@ -305,7 +314,11 @@ const CASES = [
         query: { role: 'AXButton', description: '返回笔记列表' },
         label: '挪回来之后，栏头仍有「返回笔记列表」',
       },
-      { op: 'drag', from: { role: 'AXSplitter', title: '调整笔记列表宽度' }, to: { dx: 60, dy: 0 } },
+      {
+        op: 'drag',
+        from: { role: 'AXSplitter', title: '调整笔记列表宽度' },
+        to: { dx: 60, dy: 0 },
+      },
       { op: 'shot', name: '04-outline-split.png' },
       {
         op: 'manual',
@@ -408,17 +421,15 @@ const CASES = [
       { op: 'app' },
       { op: 'keyCode', code: 53 },
       /**
-       * 前提：验收库里得有一篇**有效期已过**的笔记（`00_Inbox/…验收-待复核笔记.md`）。
-       *
-       * 为什么这条前提只能人工准备（2026-10-16 查清）：设有效期的控件是原生
-       * `<input type="date">`——它在无障碍树里**完全不可见**（只有它的标签文字是 AXStaticText，
-       * 输入框本身连个 role 都没有），AXPress 点不到、Tab 走过去再敲数字也写不进去（实测过两轮）。
-       * 手工准备的那篇笔记里写清了来龙去脉；后面两条断言仍然是机器判定的。
+       * 原生 `<input type="date">` 在 AX 树里不可操作，因此用工作区内唯一文件写入夹具；
+       * `writeFile` 只允许写当前已核验工作区内的相对路径，不会波及验收库之外。
        */
       {
-        op: 'manual',
-        note: '前提：库里要有一篇有效期已过的笔记（人工准备，见用例注释与 docs/ACCEPTANCE_V1.3.0.md）。缺了它下面两条断言会失败——那是"前提没摆好"，不是卡片坏了',
+        op: 'writeFile',
+        path: `00_Inbox/ACCEPT-OVERDUE-${RUN_TAG}.md`,
+        content: `---\nid: note_acceptance_overdue_${RUN_TAG}\ntitle: 验收-待复核笔记-${RUN_TAG}\ntype: note\nstatus: active\nvalid_until: 2000-01-01\n---\n\n# 验收待复核\n\n用于自动准备“已过期”夹具。\n`,
       },
+      { op: 'pause', ms: 2500 },
       { op: 'click', frame: { title: '首页' } },
       { op: 'pause', ms: 1200 },
       { op: 'expectElement', query: { title: '待复核' }, label: '首页的「待复核」卡片' },
@@ -502,26 +513,55 @@ const CASES = [
         query: { role: 'AXButton', description: '收起侧边栏' },
         label: '展开回来了（开关还在原处）',
       },
-      // 分类 / 标签区块可折叠（折叠后条目不在了，展开后回来）
-      { op: 'click', frame: { role: 'AXButton', description: '折叠分类' } },
       {
-        op: 'expectAbsent',
-        query: { role: 'AXButton', description: '技术' },
-        label: '折叠后分类条目不在了',
+        op: 'click',
+        frame: { role: 'AXButton', title: '新建分类' },
+        label: '打开新建分类对话框',
       },
-      { op: 'click', frame: { role: 'AXButton', description: '展开分类' } },
+      { op: 'pause', ms: 900 },
+      { op: 'paste', text: CATEGORY_NAME },
+      { op: 'keyCode', code: 36 },
+      { op: 'pause', ms: 1800 },
       {
         op: 'expectElement',
-        query: { role: 'AXButton', description: '技术' },
+        query: { role: 'AXButton', description: CATEGORY_NAME },
+        label: '每轮唯一分类已创建',
+      },
+      {
+        op: 'writeFile',
+        path: `00_Inbox/ACCEPT-TAG-${RUN_TAG}.md`,
+        content: `---\nid: note_acceptance_tag_${RUN_TAG}\ntitle: 验收标签-${RUN_TAG}\ntype: note\nstatus: active\ntags:\n  - ${TAG_NAME}\n---\n\n# 验收标签\n`,
+      },
+      { op: 'pause', ms: 2500 },
+      // 分类 / 标签区块可折叠（折叠后条目不在了，展开后回来）
+      {
+        op: 'ensureHidden',
+        target: { role: 'AXButton', description: CATEGORY_NAME },
+        press: { role: 'AXButton', description: '折叠分类' },
+        pressLabel: '折叠分类',
+        label: '折叠后分类条目不在了',
+      },
+      {
+        op: 'ensure',
+        until: { role: 'AXButton', description: CATEGORY_NAME },
+        press: { role: 'AXButton', description: '展开分类' },
+        pressLabel: '展开分类',
         label: '展开后分类条目回来了',
       },
-      { op: 'click', frame: { role: 'AXButton', description: '折叠标签' } },
       {
-        op: 'expectAbsent',
-        query: { role: 'AXButton', description: '入门' },
+        op: 'ensureHidden',
+        target: { role: 'AXButton', description: TAG_NAME },
+        press: { role: 'AXButton', description: '折叠标签' },
+        pressLabel: '折叠标签',
         label: '折叠后标签条目不在了',
       },
-      { op: 'click', frame: { role: 'AXButton', description: '展开标签' } },
+      {
+        op: 'ensure',
+        until: { role: 'AXButton', description: TAG_NAME },
+        press: { role: 'AXButton', description: '展开标签' },
+        pressLabel: '展开标签',
+        label: '展开后标签条目回来了',
+      },
       { op: 'shot', name: '11-sections.png' },
       /**
        * 长标题 + 窄列表：条目行**不能溢出**这一栏。
@@ -542,7 +582,11 @@ const CASES = [
       },
       { op: 'click', frame: { role: 'AXButton', title: '创建笔记' } },
       { op: 'pause', ms: 1500 },
-      { op: 'drag', from: { role: 'AXSplitter', title: '调整笔记列表宽度' }, to: { dx: -80, dy: 0 } },
+      {
+        op: 'drag',
+        from: { role: 'AXSplitter', title: '调整笔记列表宽度' },
+        to: { dx: -80, dy: 0 },
+      },
       { op: 'pause', ms: 600 },
       // 看条目行之前再确认一次这一栏是列表（列表条目只在列表态才渲染）
       {
@@ -684,7 +728,11 @@ const CASES = [
        */
       // Radix 菜单只认 pointerdown：AXPress 打不开 → 先聚焦触发按钮，再用回车展开
       // （这也是键盘用户的真实路径；菜单项此时会作为 AXMenuItem 出现）
-      { op: 'focus', query: { role: 'AXPopUpButton', description: '插入内容' }, label: '「＋ 插入内容」' },
+      {
+        op: 'focus',
+        query: { role: 'AXPopUpButton', description: '插入内容' },
+        label: '「＋ 插入内容」',
+      },
       { op: 'pause', ms: 400 },
       { op: 'keyCode', code: 36 },
       { op: 'pause', ms: 900 },

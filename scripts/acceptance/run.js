@@ -24,6 +24,7 @@ const { spawn } = require('node:child_process');
 const mac = require('./lib/mac');
 const report = require('./lib/report');
 const { runCheck } = require('./lib/file-check');
+const { resolveWorkspaceFile } = require('./lib/fixture');
 const { APP_NAME, CASES, MANUAL_ONLY } = require('./cases');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -73,8 +74,7 @@ function parseArgs(argv) {
         .split(',')
         .map((value) => Number(value.trim()))
         .filter((value) => Number.isFinite(value));
-    }
-    else if (arg === '--help' || arg === '-h') options.help = true;
+    } else if (arg === '--help' || arg === '-h') options.help = true;
   }
   return options;
 }
@@ -102,7 +102,11 @@ function resolvePoint(appName, target) {
   const found = mac.frameOf(appName, target);
   if (!found.ok) return { ok: false, error: found.error };
   const frame = found.frame;
-  return { ok: true, point: { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 }, frame };
+  return {
+    ok: true,
+    point: { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 },
+    frame,
+  };
 }
 
 /**
@@ -152,8 +156,12 @@ function ensureScene(appName, workspace) {
     if (!pid.ok) return { ok: false, error: pid.error };
     const found = mac.workspaceRootOf(pid.pid);
     if (!found.ok) return found;
-    const actual = fs.existsSync(found.root) ? fs.realpathSync(found.root) : path.resolve(found.root);
-    const expected = fs.existsSync(workspace) ? fs.realpathSync(workspace) : path.resolve(workspace);
+    const actual = fs.existsSync(found.root)
+      ? fs.realpathSync(found.root)
+      : path.resolve(found.root);
+    const expected = fs.existsSync(workspace)
+      ? fs.realpathSync(workspace)
+      : path.resolve(workspace);
     if (actual !== expected) {
       return {
         ok: false,
@@ -190,7 +198,10 @@ function ensureScene(appName, workspace) {
     );
   }
   if (!waitForFrame(appName, { role: 'AXButton', title: '创建知识库' }, 5000).ok) {
-    return finish(false, '界面既不是主界面（找不到「新建笔记」）也不是欢迎页（找不到「创建知识库」）');
+    return finish(
+      false,
+      '界面既不是主界面（找不到「新建笔记」）也不是欢迎页（找不到「创建知识库」）',
+    );
   }
 
   // 欢迎页：先在「最近打开」里**按路径**找目标工作区（按名字找会认错库）。
@@ -237,7 +248,9 @@ function ensureScene(appName, workspace) {
     const verified = verifyWorkspace();
     return finish(
       verified.ok,
-      verified.ok ? `已创建并打开工作区：${verified.root}` : `创建后工作区核验失败：${verified.error}`,
+      verified.ok
+        ? `已创建并打开工作区：${verified.root}`
+        : `创建后工作区核验失败：${verified.error}`,
     );
   }
   return finish(false, `创建 ${workspace} 之后主界面没有出现（可能路径已存在或创建失败）`);
@@ -269,7 +282,12 @@ function runCase(appName, workspace, outDir, item, dryRun) {
        * 应用里的标题是空的、后续断言全崩（18 步失败）——而报告里每个步骤都写着 ✅。
        * 这里的教训与「步骤通过 ≠ 动作生效」是同一条。
        */
-      if (step.op === 'paste' || step.op === 'keys' || step.op === 'keyCode' || step.op === 'type') {
+      if (
+        step.op === 'paste' ||
+        step.op === 'keys' ||
+        step.op === 'keyCode' ||
+        step.op === 'type'
+      ) {
         mac.activate(appName);
       }
       switch (step.op) {
@@ -277,6 +295,21 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           const pid = mac.pidOf(appName);
           record.status = pid.ok ? 'passed' : 'failed';
           record.detail = pid.ok ? `app=${appName} pid=${pid.pid}` : pid.error;
+          break;
+        }
+        case 'writeFile': {
+          try {
+            const target = resolveWorkspaceFile(workspace, step.path);
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.writeFileSync(target, step.content, { encoding: 'utf8', flag: 'wx' });
+            const relative = path.relative(workspace, target);
+            record.status = 'passed';
+            record.detail = `写入验收夹具：${relative}`;
+            record.evidence = `✓ 夹具已写入 ${relative}`;
+          } catch (error) {
+            record.status = 'failed';
+            record.detail = `写入验收夹具失败：${error.message}`;
+          }
           break;
         }
         case 'click': {
@@ -504,6 +537,40 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           }
           break;
         }
+        case 'ensureHidden': {
+          if (!step.target || !step.press) {
+            record.status = 'failed';
+            record.detail = 'ensureHidden 需要 target（应隐藏的元素）与 press（折叠控件）';
+            break;
+          }
+          const attempts = Math.max(1, Number(step.attempts) || 3);
+          let presses = 0;
+          let hidden = !mac.frameOf(appName, step.target).ok;
+          for (let index = 0; !hidden && index < attempts; index += 1) {
+            const point = resolvePoint(appName, step.press);
+            if (!point.ok) {
+              record.status = 'failed';
+              record.detail = `按不动「${step.pressLabel || '控件'}」：${point.error}`;
+              break;
+            }
+            mac.click(appName, point.point, step.press);
+            presses += 1;
+            sleepMs(1200);
+            hidden = !mac.frameOf(appName, step.target).ok;
+          }
+          if (hidden) {
+            record.status = 'passed';
+            record.detail =
+              presses === 0
+                ? `界面已在隐藏状态（${step.label || ''}）`
+                : `按了 ${presses} 次「${step.pressLabel || '控件'}」确认隐藏（${step.label || ''}）`;
+            record.evidence = `✓ 界面已隐藏「${step.label || ''}」`;
+          } else if (record.status !== 'failed') {
+            record.status = 'failed';
+            record.detail = `按了 ${presses} 次「${step.pressLabel || '控件'}」仍未隐藏「${step.label || ''}」`;
+          }
+          break;
+        }
         /**
          * 改一个**原生下拉**的值（设置页那些 `<select>`）。
          *
@@ -537,7 +604,8 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           }
           if (index < 0) {
             record.status = 'failed';
-            record.detail = 'selectOption 需要 options（按菜单顺序列出全部选项），且 option 必须在其内';
+            record.detail =
+              'selectOption 需要 options（按菜单顺序列出全部选项），且 option 必须在其内';
             break;
           }
           const opened = resolvePoint(appName, popupQuery);
@@ -559,11 +627,12 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           sleepMs(2500);
           const appliedLater = mac.frameOf(appName, probe).ok;
           record.status = appliedNow && appliedLater ? 'passed' : 'failed';
-          record.detail = appliedNow && appliedLater
-            ? `已选「${step.option}」，2.5 秒后复核仍是它`
-            : appliedNow
-              ? `选完之后被弹回去了（多半是 React 没收到 change 事件）：现在不是「${step.option}」`
-              : `选完之后下拉的值不是「${step.option}」`;
+          record.detail =
+            appliedNow && appliedLater
+              ? `已选「${step.option}」，2.5 秒后复核仍是它`
+              : appliedNow
+                ? `选完之后被弹回去了（多半是 React 没收到 change 事件）：现在不是「${step.option}」`
+                : `选完之后下拉的值不是「${step.option}」`;
           record.evidence =
             appliedNow && appliedLater ? `✓ 「${step.label || step.option}」= ${step.option}` : '';
           break;
@@ -586,7 +655,10 @@ function runCase(appName, workspace, outDir, item, dryRun) {
              * 上一次失败只写"没找到元素"，看不出是因为**这一栏当时显示的是大纲**（列表条目根本没渲染）。
              * 三个探针查的都是轻量元素，代价可忽略，但省掉一整轮排查。
              */
-            const paneState = mac.frameOf(appName, { role: 'AXButton', description: '返回笔记列表' }).ok
+            const paneState = mac.frameOf(appName, {
+              role: 'AXButton',
+              description: '返回笔记列表',
+            }).ok
               ? '列表栏=大纲'
               : mac.frameOf(appName, { role: 'AXButton', description: '收起大纲' }).ok
                 ? '正文右侧=大纲'
@@ -601,12 +673,15 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           const tolerance = Number(step.tolerance) || 8;
           const innerRight = inner.frame.x + inner.frame.width;
           const outerRight = outer.frame.x + outer.frame.width;
-          const ok = inner.frame.x >= outer.frame.x - tolerance && innerRight <= outerRight + tolerance;
+          const ok =
+            inner.frame.x >= outer.frame.x - tolerance && innerRight <= outerRight + tolerance;
           record.status = ok ? 'passed' : 'failed';
           record.detail =
             `内框 x=${Math.round(inner.frame.x)}..${Math.round(innerRight)}，` +
             `外框 x=${Math.round(outer.frame.x)}..${Math.round(outerRight)}` +
-            (ok ? '（在范围内）' : `（超出 ${Math.round(Math.max(0, innerRight - outerRight))}px）`);
+            (ok
+              ? '（在范围内）'
+              : `（超出 ${Math.round(Math.max(0, innerRight - outerRight))}px）`);
           record.evidence = ok ? `✓ ${step.label || '元素在范围内'}` : '';
           break;
         }
@@ -671,17 +746,25 @@ function runCase(appName, workspace, outDir, item, dryRun) {
 function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
-    console.log(fs.readFileSync(__filename, 'utf8').split('*/')[0].replace(/^\/\*\*?/, '').trim());
+    console.log(
+      fs
+        .readFileSync(__filename, 'utf8')
+        .split('*/')[0]
+        .replace(/^\/\*\*?/, '')
+        .trim(),
+    );
     return 0;
   }
   if (options.list) {
     for (const item of CASES) console.log(`${item.id}. ${item.title}`);
-    for (const item of MANUAL_ONLY) console.log(`${item.id}. ${item.title}（人工：${item.reason}）`);
+    for (const item of MANUAL_ONLY)
+      console.log(`${item.id}. ${item.title}（人工：${item.reason}）`);
     return 0;
   }
   if (options.preflight) {
     const checks = mac.preflight(options.app);
-    for (const check of checks) console.log(`${check.ok ? '✓' : '✗'} ${check.name}：${check.detail}`);
+    for (const check of checks)
+      console.log(`${check.ok ? '✓' : '✗'} ${check.name}：${check.detail}`);
     return checks.every((check) => check.ok) ? 0 : 1;
   }
 
@@ -700,10 +783,14 @@ function main() {
       for (const check of blocking) console.error(`✗ ${check.name}：${check.detail}`);
       return 1;
     }
-    keepAlive = spawn(process.execPath, [path.join(__dirname, 'lib', 'ax-keepalive.js'), options.app], {
-      stdio: 'ignore',
-      detached: false,
-    });
+    keepAlive = spawn(
+      process.execPath,
+      [path.join(__dirname, 'lib', 'ax-keepalive.js'), options.app],
+      {
+        stdio: 'ignore',
+        detached: false,
+      },
+    );
     const started = Date.now();
     const scene = ensureScene(options.app, options.workspace);
     for (const step of scene.steps) {
@@ -727,8 +814,11 @@ function main() {
     const checks = mac.preflight(options.app);
     const blocking = checks.filter((check) => !check.ok);
     if (blocking.length > 0) {
-      for (const check of checks) console.log(`${check.ok ? '✓' : '✗'} ${check.name}：${check.detail}`);
-      console.error('环境没准备好，已中止（没有生成结论表）。请先处理上面 ✗ 的项目，或先跑 --dry-run 看用例。');
+      for (const check of checks)
+        console.log(`${check.ok ? '✓' : '✗'} ${check.name}：${check.detail}`);
+      console.error(
+        '环境没准备好，已中止（没有生成结论表）。请先处理上面 ✗ 的项目，或先跑 --dry-run 看用例。',
+      );
       return 1;
     }
   }
@@ -739,10 +829,14 @@ function main() {
   if (!options.dryRun) {
     // AX 保活：不轮询的话 WebKit 会把无障碍树收起来，脚本读到的是"空树"
     // （详见 lib/ax-keepalive.js），结论表就会把"读不到界面"写成"功能有问题"。
-    keepAlive = spawn(process.execPath, [path.join(__dirname, 'lib', 'ax-keepalive.js'), options.app], {
-      stdio: 'ignore',
-      detached: false,
-    });
+    keepAlive = spawn(
+      process.execPath,
+      [path.join(__dirname, 'lib', 'ax-keepalive.js'), options.app],
+      {
+        stdio: 'ignore',
+        detached: false,
+      },
+    );
     scene = ensureScene(options.app, options.workspace);
     for (const step of scene.steps) {
       console.log(`${step.status === 'passed' ? '✓' : '✗'} 现场准备 · ${step.op}：${step.detail}`);
@@ -754,9 +848,7 @@ function main() {
   }
 
   // `--only 3,4` 只跑指定用例（调某一条时用；结论表里也只列这几条，避免把"没跑"看成"没测过"）
-  const selected = options.only
-    ? CASES.filter((item) => options.only.includes(item.id))
-    : CASES;
+  const selected = options.only ? CASES.filter((item) => options.only.includes(item.id)) : CASES;
   if (options.only && selected.length === 0) {
     console.error(`--only 没匹配到任何用例：${options.only.join(',')}`);
     return 1;

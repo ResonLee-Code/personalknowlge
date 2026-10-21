@@ -49,6 +49,8 @@ export function useWorkspaceEvents() {
         if (notice) toast.warning(notice);
         void useNotesStore.getState().refresh();
         void useWorkspaceStore.getState().refreshStats();
+        void useCategoriesStore.getState().refresh();
+        void useTagsStore.getState().refresh();
         const detail = useNotesStore.getState().detail;
         if (detail) void useNotesStore.getState().openDetail(detail.note.id);
       });
