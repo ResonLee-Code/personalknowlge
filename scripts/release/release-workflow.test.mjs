@@ -32,3 +32,16 @@ test('every external action is pinned to an immutable commit SHA', () => {
   const mutable = actionRefs.filter((reference) => !/@[0-9a-f]{40}$/.test(reference));
   assert.deepEqual(mutable, [], `Action 必须锁定完整 commit SHA：${mutable.join(', ')}`);
 });
+
+test('updater signature verification can bootstrap on a fresh runner', () => {
+  const script = fs.readFileSync(
+    path.join(root, 'scripts/release/verify-updater-signature.sh'),
+    'utf8',
+  );
+  assert.doesNotMatch(
+    script,
+    /cargo test --offline/,
+    '签名验签脚本不能假设 runner 已有 Rust 依赖缓存',
+  );
+  assert.match(script, /cargo test --locked/, '签名验签脚本必须使用锁文件，同时允许首次下载依赖');
+});

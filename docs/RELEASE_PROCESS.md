@@ -50,7 +50,8 @@ preflight 另运行 `pnpm test:release-manifest`、`pnpm test:release-workflow` 
 `contents: write` 仅授予最终创建 Release 的 job；同一条测试还要求每个外部 Action
 锁定完整 commit SHA，不能使用可移动的 `@v4` / `@stable` 标签。
 后者用临时测试密钥走同一条 Tauri signer + minisign 路径，验证有效载荷通过、篡改载荷拒绝，
-并校验签名绑定 `version:2.0.0`。它不读取或替代正式发布私钥。
+并校验签名绑定 `version:2.0.0`。它不读取或替代正式发布私钥。签名回归使用
+`cargo test --locked`，允许全新 runner 首次拉取依赖，同时拒绝锁文件漂移。
 
 ## 3. 发版步骤
 

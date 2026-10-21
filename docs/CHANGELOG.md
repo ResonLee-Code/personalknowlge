@@ -40,6 +40,8 @@
   仅授予最终创建 Release 的 job；新增静态权限回归测试防止后续放宽；
 - 发布工作流的外部 Action 全部锁定到完整 commit SHA，避免可移动 tag / branch 在发版时
   静默换入未经审查的代码；版本 tag 仅保留为可读注释；
+- updater 签名回归改用 `cargo test --locked`，修复全新 CI runner 因尚未建立 Rust
+  依赖缓存而在 `--offline` 下提前失败的问题，同时继续锁定依赖版本；
 - AI / 同步凭据改为同目录原子私有写入，Unix 创建时即 `0600`，替换时不跟随预置符号链接；
 - 修正本机地址判定：只接受解析后的真实回环 IP 与精确 `localhost`；
   `127.evil.com` 一类公网主机不能再绕过同步 HTTPS 要求；

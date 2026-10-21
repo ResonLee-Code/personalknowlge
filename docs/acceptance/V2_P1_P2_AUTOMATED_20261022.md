@@ -60,6 +60,8 @@ Rust 依赖审计未在本机执行：当前工具链没有安装 `cargo-audit`�
 - 发布安全：GitHub Actions 默认权限降为 `contents: read`，只有 Release job 获得
   `contents: write`；所有外部 Action 锁定完整 commit SHA；新增 workflow 权限与引用
   静态测试并接入 preflight。
+- updater 签名脚本使用 `cargo test --locked`，可在干净 runner 首次下载依赖并保持
+  `Cargo.lock` 不变；有效载荷与篡改拒绝路径继续通过。
 
 真机验收脚手架另有 4 个 Node 测试通过：错误 workspace 在任何 UI 写入前中止；
 “最近生成 + 正文匹配”必须命中同一个最新文件。真实 App 复测用例 1 为 10/10、
