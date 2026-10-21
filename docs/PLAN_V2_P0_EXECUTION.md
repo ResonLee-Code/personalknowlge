@@ -16,11 +16,12 @@
 | `pnpm test` | 76 文件 / 399 测试通过 |
 | `cargo test --offline` | 全部通过；仅既有环境探测 / 基准 / 真机探针按 `#[ignore]` 跳过 |
 | `pnpm lint` / `pnpm build` | 通过 |
-| `pnpm test:e2e` | 通过 |
+| `pnpm test:e2e` | 2 条通过，含 Ask/Research/Organize 入口冒烟 |
 | `pnpm tauri build --debug --no-bundle` | 桌面二进制构建通过 |
 | `pnpm test:ask-eval` | 50 正样本、20 负样本全部过门禁 |
 | `pnpm test:release-manifest` | 三平台映射、Linux `AppImage.tar.gz`、GitHub 资产名归一化与缺签名拒绝测试通过 |
 | `runtime_contract` / release App 实启 | updater 配置可反序列化；窗口位置恢复权限完整；macOS release 包真实打开 10 万篇工作区 |
+| macOS 真机关键 UI | 111 个自动步骤通过 / 0 失败；5 条视觉判断保留人工 |
 | `pnpm bench` | 1 万检索 p95 8.06ms；3 万图谱 821.5ms |
 | 10 万扩展门禁 | 检索 p95 77.76ms、recall@5 100%、后端重开 1140.77ms、RSS 350.84MB |
 | macOS 完整 App 10 万篇 | release/ad-hoc：稳定首帧 1001ms、RSS 224.23MB；重建后首次 2947ms 已单独记录；截图为 100001 篇就绪界面 |

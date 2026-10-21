@@ -55,6 +55,13 @@ scripts/acceptance/run.sh --only 3,4    # 只跑第 3、4 条（调某一条时�
 
 ## 真机验证状态
 
+### 2026-10-21：V2 P0 关键 UI
+
+- release/ad-hoc App、隔离工作区；用例 1、6、7、11、12。
+- 自动步骤 **111 通过 / 0 失败**；5 条只涉及观感/原生控件的主观判断仍待人工。
+- 同时修复用例 7 把“已有历史研究目录”误判成 AI 闸门放行的问题，改为直接断言界面 `AI 能力未开启`。
+- 报告：[`docs/acceptance/20261021-V2-P0-macOS/report.md`](../../docs/acceptance/20261021-V2-P0-macOS/report.md)。
+
 ### 2026-10-19：非全屏窗口纵向布局（V1.3.2）
 
 - **为什么手工量**：正文可见高度取决于 WebView 的滚动视口，而 AX 树里 CodeMirror 的

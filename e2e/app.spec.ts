@@ -1008,3 +1008,31 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
 
   expect(errors, `控制台错误：${errors.join('\n')}`).toHaveLength(0);
 });
+
+test('V2 P0 入口：选中文字右键 Ask、整理建议与研究助手页面', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('知识库名称').fill('P0 入口验收');
+  await page.getByLabel('保存目录（绝对路径）').fill('/Users/you/Documents/P0Workspace');
+  await page.getByRole('button', { name: '创建知识库' }).click();
+
+  await page.getByRole('button', { name: '新建笔记' }).first().click();
+  await page.getByLabel('标题', { exact: true }).fill('P0 选中文字');
+  await page.getByLabel('初始内容（可选）').fill('这段文字可以用于引用式问答。');
+  await page.getByRole('button', { name: '创建笔记' }).click();
+
+  const editor = page.locator('.cm-content');
+  await editor.click();
+  await page.keyboard.press('Meta+a');
+  await editor.dispatchEvent('contextmenu', { clientX: 320, clientY: 240, button: 2 });
+  const selectionMenu = page.getByTestId('selection-context-menu');
+  await expect(selectionMenu).toBeVisible();
+  await selectionMenu.getByRole('menuitem', { name: '就选中文字提问' }).click();
+  await expect(page.getByRole('heading', { name: '问知识库' })).toBeVisible();
+  await expect(page.getByLabel('问题')).toHaveValue('请解释并核对这段内容的要点。');
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('link', { name: /整理建议/ }).click();
+  await expect(page.getByRole('heading', { name: '整理建议', level: 1 })).toBeVisible();
+  await page.getByRole('link', { name: /研究助手/ }).click();
+  await expect(page.getByRole('heading', { name: '研究助手', level: 1 })).toBeVisible();
+});

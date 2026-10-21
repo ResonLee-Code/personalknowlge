@@ -373,8 +373,13 @@ const CASES = [
       { op: 'click', frame: { role: 'AXTextField', title: '课题' } },
       { op: 'paste', text: 'Rust 异步运行时的调度策略' },
       { op: 'click', frame: { role: 'AXButton', title: '生成研究计划' } },
+      { op: 'pause', ms: 800 },
       { op: 'shot', name: '07-research-plan.png' },
-      { op: 'check', path: '.knowledge/research', notExists: true },
+      {
+        op: 'expectElement',
+        query: { title: 'AI 能力未开启' },
+        label: '研究入口显示 AI 总开关闸门错误',
+      },
       {
         op: 'manual',
         note: '验收库的 AI 总开关默认关闭：本条机器断言的是**闸门挡住**（没有会话落盘）。打开 AI 后走完五步并确认写入，需要人眼确认报告六段与写入 diff',
