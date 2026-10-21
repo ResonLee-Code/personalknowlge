@@ -327,8 +327,24 @@ pub fn validate_archive(archive: &Path) -> Result<BackupValidation> {
     let mut attachment_count = 0i64;
     let mut internal_markdown_count = 0i64;
     let mut trash_count = 0i64;
+    let names = entry_names_from(&mut zip)?;
+    let unsafe_paths: Vec<&str> = names
+        .iter()
+        .map(String::as_str)
+        .filter(|name| is_unsafe_entry_name(name))
+        .collect();
+    checks.push(check(
+        "路径安全",
+        unsafe_paths.is_empty(),
+        if unsafe_paths.is_empty() {
+            "所有条目均为安全的相对路径"
+        } else {
+            "归档包含非法路径"
+        },
+    ));
+
     let mut database_present = false;
-    for name in entry_names_from(&mut zip)? {
+    for name in names {
         match classify_entry(&name) {
             EntryKind::Note => note_count += 1,
             EntryKind::Attachment => attachment_count += 1,
@@ -414,10 +430,10 @@ pub fn extract_archive(archive: &Path, target: &Path) -> Result<usize> {
             ));
         }
     }
-    fs::create_dir_all(target)?;
-
     let file = fs::File::open(archive)?;
     let mut zip = ZipArchive::new(file).map_err(zip_error)?;
+    ensure_safe_entry_names(&mut zip)?;
+    fs::create_dir_all(target)?;
     let mut count = 0usize;
 
     for index in 0..zip.len() {
@@ -429,7 +445,7 @@ pub fn extract_archive(archive: &Path, target: &Path) -> Result<usize> {
         if name.is_empty() || name == MANIFEST_NAME {
             continue;
         }
-        if name.split('/').any(|part| part == "..") || Path::new(&name).is_absolute() {
+        if is_unsafe_entry_name(&name) {
             return Err(AppError::new(
                 ErrorCode::PathInvalid,
                 format!("备份中包含非法路径：{name}"),
@@ -481,6 +497,35 @@ fn check(name: &str, passed: bool, detail: &str) -> BackupCheck {
 
 fn normalize_entry_name(name: &str) -> String {
     name.replace('\\', "/").trim_start_matches('/').to_string()
+}
+
+fn ensure_safe_entry_names<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<()> {
+    for index in 0..zip.len() {
+        let entry = zip.by_index(index).map_err(zip_error)?;
+        let name = entry.name();
+        if !entry.is_dir() && !name.is_empty() && name != MANIFEST_NAME && is_unsafe_entry_name(name) {
+            return Err(AppError::new(
+                ErrorCode::PathInvalid,
+                format!("备份中包含非法路径：{name}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_unsafe_entry_name(name: &str) -> bool {
+    let normalized = name.replace('\\', "/");
+    normalized.starts_with('/')
+        || normalized.split('/').any(|part| part == "..")
+        || Path::new(name).is_absolute()
+        || normalized
+            .as_bytes()
+            .get(1)
+            .is_some_and(|separator| *separator == b':')
+            && normalized
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphabetic)
 }
 
 fn zip_error(error: zip::result::ZipError) -> AppError {
