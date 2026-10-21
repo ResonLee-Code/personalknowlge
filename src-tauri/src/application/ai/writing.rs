@@ -610,7 +610,10 @@ fn append_source_section(content: &mut String, citations: &[AskCitation]) {
             headings.sort();
             format!(" · {}", headings.join("；"))
         };
-        content.push_str(&format!("- [[{title}]]{heading}\n"));
+        content.push_str(&format!(
+            "- [[{}]]{heading}\n",
+            crate::core::text::escape_wikilink_target(title)
+        ));
     }
 }
 

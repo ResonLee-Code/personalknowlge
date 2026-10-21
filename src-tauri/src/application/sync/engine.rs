@@ -388,6 +388,7 @@ impl SyncService {
         if config.endpoint.as_deref().is_none_or(str::is_empty) {
             return Err(AppError::invalid_input("请先填写 WebDAV / S3 endpoint。"));
         }
+        super::store::validate_sync_endpoint(config.endpoint.as_deref().unwrap_or_default())?;
         if config.provider == "s3" && config.bucket.as_deref().is_none_or(str::is_empty) {
             return Err(AppError::invalid_input("S3 兼容存储必须填写 bucket。"));
         }

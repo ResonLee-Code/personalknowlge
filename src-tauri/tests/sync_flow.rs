@@ -759,23 +759,68 @@ fn conditional_create_prevents_two_first_syncs_from_overwriting_manifest() {
 #[test]
 fn non_loopback_http_endpoint_is_rejected_before_credentials_cross_the_network() {
     let device = Device::new("明文 endpoint");
-    let error = device
-        .sync()
-        .update_settings(UpdateSyncSettingsInput {
-            enabled: Some(true),
-            provider: Some("webdav".to_string()),
-            endpoint: Some("http://dav.example.test/pkos".to_string()),
-            username: Some("user".to_string()),
-            password: Some("secret".to_string()),
-            ..Default::default()
-        })
-        .expect_err("公网明文 HTTP 必须拒绝");
-    assert_eq!(error.code, ErrorCode::InvalidInput);
-    assert!(error.message.contains("HTTPS"));
+    for (endpoint, expected) in [
+        ("http://dav.example.test/pkos", "HTTPS"),
+        ("https://user:secret@dav.example.test/pkos", "userinfo"),
+        ("https://dav.example.test/pkos?token=secret", "查询串"),
+        ("https:///missing-host", "主机名"),
+        ("https://dav.example.test/has space", "空白"),
+    ] {
+        let error = device
+            .sync()
+            .update_settings(UpdateSyncSettingsInput {
+                enabled: Some(true),
+                provider: Some("webdav".to_string()),
+                endpoint: Some(endpoint.to_string()),
+                username: Some("user".to_string()),
+                password: Some("secret".to_string()),
+                ..Default::default()
+            })
+            .expect_err("不安全 endpoint 必须拒绝");
+        assert_eq!(error.code, ErrorCode::InvalidInput, "{endpoint}");
+        assert!(
+            error.message.contains(expected),
+            "{endpoint}: {}",
+            error.message
+        );
+    }
     assert!(
         !device.data_root().join("sync").exists(),
         "被拒绝的配置不应落盘"
     );
+    let local = device
+        .sync()
+        .update_settings(UpdateSyncSettingsInput {
+            enabled: Some(true),
+            provider: Some("webdav".to_string()),
+            endpoint: Some("http://127.0.0.1:9/pkos".to_string()),
+            username: Some("user".to_string()),
+            password: Some("secret".to_string()),
+            ..Default::default()
+        })
+        .expect("回环 HTTP 允许用于本机验收");
+    assert_eq!(local.endpoint.as_deref(), Some("http://127.0.0.1:9/pkos"));
+
+    let config_path = std::fs::read_dir(device.data_root().join("sync"))
+        .expect("同步目录")
+        .flatten()
+        .map(|entry| entry.path().join("config.json"))
+        .find(|path| path.is_file())
+        .expect("同步配置");
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&config_path).expect("读取配置")).expect("解析配置");
+    config["endpoint"] = serde_json::Value::String("http://old.example.test/pkos".to_string());
+    std::fs::write(
+        &config_path,
+        serde_json::to_vec_pretty(&config).expect("序列化配置"),
+    )
+    .expect("模拟旧版不安全配置");
+    let runtime_error = device
+        .sync()
+        .preview(PASSPHRASE)
+        .expect_err("运行期也必须复核旧配置");
+    assert_eq!(runtime_error.code, ErrorCode::InvalidInput);
+    assert!(runtime_error.message.contains("HTTPS"));
 }
 
 #[test]

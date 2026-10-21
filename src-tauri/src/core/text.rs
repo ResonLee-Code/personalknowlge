@@ -191,6 +191,15 @@ pub fn count_words(text: &str) -> i64 {
     cjk + latin
 }
 
+/// 把标题安全地放进 `[[…]]`，转义别名、锚点和右括号等 wikilink 保留字符。
+pub fn escape_wikilink_target(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('|', "\\|")
+        .replace('#', "\\#")
+        .replace(']', "\\]")
+}
+
 /// 为 FTS5 生成中日韩检索词：单字（支持单字查询）+ 双字（支持短语查询）。
 ///
 /// SQLite 的 unicode61 分词器会把连续中文当成一个整词，
@@ -1053,6 +1062,14 @@ mod tests {
         assert_eq!(count_words("中文四个字"), 5);
         assert_eq!(count_words("hello world"), 2);
         assert_eq!(count_words("中文 hello 世界"), 4 + 1);
+    }
+
+    #[test]
+    fn wikilink_target_escapes_reserved_characters() {
+        assert_eq!(
+            escape_wikilink_target("A|B#C]D\\E"),
+            "A\\|B\\#C\\]D\\\\E"
+        );
     }
 
     #[test]

@@ -545,7 +545,10 @@ impl OrganizeService {
                     let stored = self.ctx.storage.read_note(&current.note.file_path)?;
                     let mut additions = Vec::new();
                     for relation in wiki_links {
-                        let link = format!("[[{}]]", escape_wikilink_text(&relation.target_title));
+                        let link = format!(
+                            "[[{}]]",
+                            crate::core::text::escape_wikilink_target(&relation.target_title)
+                        );
                         if stored.body.contains(&link) {
                             continue;
                         }
@@ -1056,13 +1059,6 @@ fn char_bigrams(text: &str) -> HashSet<String> {
         .windows(2)
         .map(|window| window.iter().collect::<String>())
         .collect()
-}
-
-fn escape_wikilink_text(value: &str) -> String {
-    value
-        .replace('|', "\\|")
-        .replace('#', "\\#")
-        .replace(']', "\\]")
 }
 
 fn jaccard(left: &HashSet<String>, right: &HashSet<String>) -> f32 {

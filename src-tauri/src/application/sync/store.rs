@@ -206,18 +206,8 @@ impl SyncStore {
         }
         if let Some(endpoint) = input.endpoint {
             let trimmed = endpoint.trim().trim_end_matches('/').to_string();
-            if !trimmed.is_empty()
-                && !(trimmed.starts_with("https://") || trimmed.starts_with("http://"))
-            {
-                return Err(AppError::invalid_input(
-                    "同步 endpoint 必须以 http:// 或 https:// 开头。",
-                ));
-            }
-            if trimmed.starts_with("http://") && !crate::core::net::is_loopback_target(&trimmed) {
-                return Err(AppError::invalid_input(
-                    "远程同步必须使用 HTTPS；明文 HTTP 只允许 localhost / 127.0.0.1 / ::1，\
-                     避免 WebDAV 密码或 S3 Access Key 在网络中裸传。",
-                ));
+            if !trimmed.is_empty() {
+                validate_sync_endpoint(&trimmed)?;
             }
             config.endpoint = (!trimmed.is_empty()).then_some(trimmed);
         }
@@ -410,6 +400,47 @@ fn secret_present(value: &Option<String>) -> bool {
     value
         .as_deref()
         .is_some_and(|value| !value.trim().is_empty())
+}
+
+pub(super) fn validate_sync_endpoint(endpoint: &str) -> Result<()> {
+    if !(endpoint.starts_with("https://") || endpoint.starts_with("http://")) {
+        return Err(AppError::invalid_input(
+            "同步 endpoint 必须以 http:// 或 https:// 开头。",
+        ));
+    }
+    let rest = endpoint
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or_default();
+    let authority = rest.split('/').next().unwrap_or_default();
+    if authority.is_empty() {
+        return Err(AppError::invalid_input("同步 endpoint 缺少主机名。"));
+    }
+    if authority.contains('@') {
+        return Err(AppError::invalid_input(
+            "同步 endpoint 不能包含 userinfo；请使用独立的用户名 / 密码或 Access Key 字段。",
+        ));
+    }
+    if endpoint
+        .chars()
+        .any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err(AppError::invalid_input(
+            "同步 endpoint 不能包含空白字符或控制字符。",
+        ));
+    }
+    if endpoint.contains('?') || endpoint.contains('#') {
+        return Err(AppError::invalid_input(
+            "同步 endpoint 不能包含查询串或片段；请只填写存储根地址。",
+        ));
+    }
+    if endpoint.starts_with("http://") && !crate::core::net::is_loopback_target(endpoint) {
+        return Err(AppError::invalid_input(
+            "远程同步必须使用 HTTPS；明文 HTTP 只允许 localhost / 127.0.0.1 / ::1，\
+             避免 WebDAV 密码或 S3 Access Key 在网络中裸传。",
+        ));
+    }
+    Ok(())
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>> {

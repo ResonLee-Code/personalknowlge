@@ -2026,7 +2026,7 @@ impl ResearchService {
         if let Some(source_title) = &source_note_title {
             body.push_str(&format!(
                 "\n\n## 来源清单\n\n[[{}]]\n",
-                escape_wikilink_text(source_title)
+                crate::core::text::escape_wikilink_target(source_title)
             ));
         }
         let appended = mode == WRITE_MODE_APPEND;
@@ -3069,17 +3069,12 @@ fn source_location(source: &ResearchSource) -> String {
         .as_deref()
         .filter(|value| !value.trim().is_empty())
     {
-        return format!("[[{}]]", escape_wikilink_text(&source.title));
+        return format!(
+            "[[{}]]",
+            crate::core::text::escape_wikilink_target(&source.title)
+        );
     }
     "本地".to_string()
-}
-
-/// 写进 `[[…]]` 的标题要转义 wikilink 的保留字符（与 `core/text.rs` 的解析规则对称）。
-fn escape_wikilink_text(value: &str) -> String {
-    value
-        .replace('|', "\\|")
-        .replace('#', "\\#")
-        .replace(']', "\\]")
 }
 
 fn escape_table(value: &str) -> String {
@@ -3164,7 +3159,7 @@ fn append_diff(existing: &str, body: &str) -> String {
 fn source_note_markdown(report: &ResearchReport, report_title: &str) -> String {
     let mut out = format!(
         "> 上级报告：[[{}]]\n>\n> 本清单由研究助手生成：每行是报告中引用过的一条来源，含分级依据与获取时间。\n\n",
-        escape_wikilink_text(report_title)
+        crate::core::text::escape_wikilink_target(report_title)
     );
     out.push_str(&format!("> 资料截至 {}。\n\n", report.data_cutoff));
     for source in &report.references {
