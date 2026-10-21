@@ -146,6 +146,7 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm test:release-manifest
+          pnpm test:update-signature
           pnpm test
           cd src-tauri
           # 基准用例是 #[ignore]，这里跑常规测试

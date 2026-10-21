@@ -20,6 +20,7 @@
 | `pnpm tauri build --debug --no-bundle` | 桌面二进制构建通过 |
 | `pnpm test:ask-eval` | 50 正样本、20 负样本全部过门禁 |
 | `pnpm test:release-manifest` | 三平台映射、Linux `AppImage.tar.gz`、GitHub 资产名归一化与缺签名拒绝测试通过 |
+| `pnpm test:update-signature` | 一次性测试密钥：有效载荷通过、篡改载荷拒绝、版本签名绑定校验通过 |
 | `runtime_contract` / release App 实启 | updater 配置可反序列化；窗口位置恢复权限完整；macOS release 包真实打开 10 万篇工作区 |
 | macOS 真机关键 UI + P0 原生入口 | 126 个自动步骤通过 / 0 失败；6 条视觉判断保留人工 |
 | `pnpm bench` | 1 万检索 p95 8.06ms；3 万图谱 821.5ms |
@@ -143,7 +144,7 @@ M0-A 契约与持久化
 | macOS Developer ID + 公证 | 🧑 凭据 / 待真机 | workflow 已接 Apple 环境变量；证书/账号待配置 |
 | Windows 代码签名 | 🧑 凭据 / CI 已接线 | PFX 导入 + thumbprint 注入；SmartScreen 待真机 |
 | Tauri updater 方案 | ✅ 已实现 | Tauri updater + GitHub `latest.json` |
-| 更新包签名校验，失败拒绝并保留旧版 | ✅ 代码完成 | updater 内置 minisign；安装失败不发生替换 |
+| 更新包签名校验，失败拒绝并保留旧版 | ✅ 代码 / 验签完成 | 有效载荷通过、篡改载荷拒绝；真机安装失败保留旧版仍需人工 |
 | 自动更新失败可回滚 | 🧑 人工 | 需真机验证“拒绝后旧版仍可启动”，并保留上一版安装包 |
 | 崩溃日志本地保存、默认不上传、可导出 | ✅ 已实现 | 本地 app.log + `app_diagnostic_export` |
 | Windows 真机安装 / 升级 / 卸载 / 便携版 | 🧑 人工 | 真机报告 |

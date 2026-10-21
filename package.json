@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:ask-eval": "cargo test --offline --manifest-path src-tauri/Cargo.toml --test ask_eval_flow -- --nocapture",
     "test:release-manifest": "node --test scripts/release/update-manifest.test.mjs",
+    "test:update-signature": "bash scripts/release/verify-updater-signature.sh",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "bench": "bash scripts/bench/run.sh",

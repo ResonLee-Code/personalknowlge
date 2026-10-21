@@ -37,6 +37,16 @@ Windows 使用同一 updater config，并额外用证书 thumbprint 的 JSON mer
 Linux 使用 `--config src-tauri/tauri.updater.conf.json --bundles appimage`。
 CI 会生成 `latest.json`；本地只有 updater 产物与 `.sig`，不能直接替代 GitHub Release 清单。
 
+不接触正式凭据的签名正负回归：
+
+```bash
+pnpm test:release-manifest
+pnpm test:update-signature
+```
+
+第二条命令生成一次性密钥和夹具，验证有效包通过、篡改包被拒绝，并要求签名 trusted comment
+包含与清单一致的版本号。
+
 ## 1. 前提条件（一次性）
 
 ```bash

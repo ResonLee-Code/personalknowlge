@@ -60,5 +60,7 @@ objc2 = "0.6.4"
 tauri-plugin-updater = "2.14.0"
 
 [dev-dependencies]
+base64 = "0.22.1"
+minisign-verify = "0.3.0"
 tempfile = "3.27.0"
 zip = { version = "4.2.0", default-features = false, features = ["deflate"] }

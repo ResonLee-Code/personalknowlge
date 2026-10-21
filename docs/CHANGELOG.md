@@ -54,6 +54,7 @@
   `PKOS_UPDATER_PUBKEY` + `TAURI_SIGNING_PRIVATE_KEY`；
 - 修正 Linux updater 工件映射为 Tauri 实际生成的 `*.AppImage.tar.gz`，并补缺签名拒绝测试；
 - 修正 `latest.json` 的 GitHub 资产下载名：空格按 Release 规则归一化为点，避免更新下载 404；
+- 新增一次性测试密钥的 updater 正负验签回归：有效包通过、篡改包拒绝、版本绑定校验；
 - 关于页新增检查、安装、下载 / 校验进度和重启入口；
 - 新增诊断日志导出，只包含运行元数据与 `app.log`，不读取笔记正文。
 
