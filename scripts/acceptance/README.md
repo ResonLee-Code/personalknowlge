@@ -17,6 +17,7 @@ scripts/acceptance/run.sh               # 真跑，产出截图 + 结论表
 ```bash
 scripts/acceptance/run.sh --list        # 列出 E 节 1–9 的用例
 scripts/acceptance/run.sh --dry-run     # 只出结论表骨架（不碰界面，可在任何时候跑）
+pnpm test:acceptance                    # 验收脚手架自身的文件断言 / workspace 解析测试
 scripts/acceptance/run.js --scene-only --app "Personal Knowledge OS" --workspace /path
                                         # 只准备并验证当前工作区现场
 scripts/acceptance/run.sh --out /tmp/pkos-accept-1   # 指定输出目录
@@ -78,6 +79,7 @@ scripts/acceptance/run.sh --only 3,4    # 只跑第 3、4 条（调某一条时�
   任何 UI 写入前中止；
 - `check` 同时指定“最近生成”与正文 `grep` 时，两项必须命中同一个最新文件；
 - 文件断言与 workspace 解析共 **4 个 Node 测试通过**；
+- 根命令：`pnpm test:acceptance`；
 - 真实 App 用错误 workspace 声明时已确认中止；正确 workspace 下用例 1 为
   **10 个自动步骤通过 / 0 失败**，并明确输出“刚生成且正文匹配”；
 - 证据：[`report.md`](../../docs/acceptance/20261022-V2-harness/report.md)。

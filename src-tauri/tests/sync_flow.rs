@@ -23,7 +23,7 @@ use personal_knowledge_os_lib::domain::graph::GraphQuery;
 use personal_knowledge_os_lib::domain::note::{CreateNoteInput, NoteListQuery, SaveNoteInput};
 use personal_knowledge_os_lib::domain::search::SearchQuery;
 use personal_knowledge_os_lib::domain::sync::{
-    ResolveSyncConflictInput, SyncRunInput, UpdateSyncSettingsInput,
+    ResolveSyncConflictInput, RestoreSyncHistoryInput, SyncRunInput, UpdateSyncSettingsInput,
 };
 use personal_knowledge_os_lib::domain::writing::{WritingMode, WritingRequest};
 use personal_knowledge_os_lib::state::AppInner;
@@ -828,5 +828,66 @@ fn attachments_and_optional_index_cache_sync_as_ciphertext() {
     assert!(
         !remote.contains_plaintext("hello attachment") && !remote.contains_plaintext("index-cache"),
         "附件与索引缓存不得以明文上传"
+    );
+}
+
+#[test]
+fn downloaded_overwrite_is_archived_and_can_be_restored_after_confirmation() {
+    let remote = LocalDav::start("Basic dXNlcjpwYXNz");
+    let device_a = Device::new("历史设备 A");
+    let device_b = Device::new("历史设备 B");
+    device_b.clear_initial_notes();
+    device_a.configure_webdav(&remote.endpoint);
+    device_b.configure_webdav(&remote.endpoint);
+    let note = device_a.note("同步历史", "# 同步历史\n\n第一版正文。");
+    device_a.run_sync();
+    device_b.run_sync();
+    let b_note = device_b.find_note("同步历史");
+    device_b.save_note(&b_note, "# 同步历史\n\n第二版正文。");
+    device_b.run_sync();
+    device_a.run_sync();
+    assert!(device_a
+        .notes()
+        .get(&note)
+        .expect("设备 A 下载第二版")
+        .content
+        .contains("第二版"));
+
+    let history = device_a.sync().history().expect("同步历史列表");
+    let archived = history
+        .iter()
+        .find(|entry| entry.category == "before-write" && entry.original_path.ends_with(".md"))
+        .expect("下载覆盖前必须留档旧版本");
+    assert!(archived.size_bytes > 0);
+    let rejected = device_a
+        .sync()
+        .restore_history(RestoreSyncHistoryInput {
+            relative_path: archived.relative_path.clone(),
+            confirm: false,
+        })
+        .expect_err("未确认时不能还原");
+    assert_eq!(rejected.code, ErrorCode::InvalidInput);
+    let restored_path = device_a
+        .sync()
+        .restore_history(RestoreSyncHistoryInput {
+            relative_path: archived.relative_path.clone(),
+            confirm: true,
+        })
+        .expect("确认后还原历史");
+    assert!(restored_path.ends_with(".md"));
+    assert!(device_a
+        .notes()
+        .get(&note)
+        .expect("还原后读取")
+        .content
+        .contains("第一版"));
+    assert!(
+        device_a
+            .sync()
+            .history()
+            .expect("还原后历史")
+            .iter()
+            .any(|entry| entry.category == "before-restore"),
+        "还原前也要先保存当前版本"
     );
 }
