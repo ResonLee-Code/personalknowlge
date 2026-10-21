@@ -7,7 +7,7 @@ import { OrganizePage } from '@/features/organize/OrganizePage';
 import { organizeService } from '@/services/organizeService';
 import { aiService } from '@/services/aiService';
 import { useNotesStore } from '@/stores/notesStore';
-import type { OrganizeSuggestion } from '@/types';
+import type { OrganizeJob, OrganizeJobStatus, OrganizeSuggestion } from '@/types';
 
 vi.mock('@/services/organizeService', () => ({
   organizeService: {
@@ -71,6 +71,24 @@ const suggestion: OrganizeSuggestion = {
   error: null,
   undoAvailable: false,
 };
+
+function job(status: OrganizeJobStatus): OrganizeJob {
+  return {
+    id: `job_${status}`,
+    workspaceId: 'workspace_1',
+    kind: 'summary',
+    status,
+    total: 100,
+    completed: 37,
+    failed: 2,
+    payload: {},
+    error: status === 'failed' ? '模型请求失败' : null,
+    createdAt: '2026-10-20T10:00:00+08:00',
+    updatedAt: '2026-10-20T10:01:00+08:00',
+    startedAt: '2026-10-20T10:00:10+08:00',
+    finishedAt: null,
+  };
+}
 
 describe('OrganizePage', () => {
   beforeEach(() => {
@@ -180,5 +198,51 @@ describe('OrganizePage', () => {
 
     expect(await screen.findByRole('checkbox', { name: /本次允许/ })).not.toBeChecked();
     expect(screen.getByText(/嵌入端点.*零请求/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['running', '暂停', 'pauseJob'],
+    ['paused', '继续', 'resumeJob'],
+    ['failed', '重试', 'retryJob'],
+  ] as const)('任务状态 %s 只执行允许的「%s」动作', async (status, label, command) => {
+    const current = job(status);
+    vi.mocked(organizeService.jobs).mockResolvedValue([current]);
+    vi.mocked(organizeService[command]).mockResolvedValue(current);
+
+    render(
+      <MemoryRouter>
+        <OrganizePage />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: label }));
+
+    await waitFor(() => expect(organizeService[command]).toHaveBeenCalledWith(current.id));
+    expect(organizeService.jobs).toHaveBeenCalled();
+  });
+
+  it('运行中与暂停中的任务可以取消，失败任务只允许重试', async () => {
+    const running = job('running');
+    vi.mocked(organizeService.jobs).mockResolvedValue([running]);
+    vi.mocked(organizeService.cancelJob).mockResolvedValue(running);
+
+    const { unmount } = render(
+      <MemoryRouter>
+        <OrganizePage />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: '取消' }));
+    await waitFor(() => expect(organizeService.cancelJob).toHaveBeenCalledWith(running.id));
+    unmount();
+
+    vi.mocked(organizeService.jobs).mockResolvedValue([job('failed')]);
+    render(
+      <MemoryRouter>
+        <OrganizePage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('button', { name: '重试' });
+    expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
   });
 });

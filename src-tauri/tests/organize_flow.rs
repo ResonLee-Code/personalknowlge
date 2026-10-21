@@ -661,6 +661,26 @@ fn hundred_item_jobs_pause_resume_and_cancel_with_persisted_status() {
 }
 
 #[test]
+fn failed_job_retry_requeues_items_and_completes_after_the_blocker_is_removed() {
+    let fixture = Fixture::new();
+    let note_id = fixture.note("重试任务", "SQLite 全文检索需要可重试的后台任务。");
+    let service = fixture.organize();
+    let job = service
+        .create_job(SuggestionKind::Summary, &[note_id])
+        .expect("创建任务");
+
+    let failed = service.run_job(&job.id).expect("首次执行返回失败状态");
+    assert_eq!(failed.status, AiJobStatus::Failed);
+    assert_eq!(failed.failed, 1);
+
+    fixture.enable_ai();
+    let retried = service.retry_job(&job.id).expect("解除阻塞后重试");
+    assert_eq!(retried.status, AiJobStatus::Completed);
+    assert_eq!(retried.completed, 1);
+    assert_eq!(retried.failed, 0);
+}
+
+#[test]
 fn reopening_a_workspace_pauses_an_interrupted_job_and_requeues_its_running_item() {
     let fixture = Fixture::new();
     fixture.enable_ai();
