@@ -94,6 +94,9 @@ DeepSeek Key 不能用于 Perplexity 的 `/v1/decisions` 契约。若没有 Perp
 
 后两者使用普通文本模型 JSON 打分，不会让专门的“System One 契约探针”通过。
 
+Ask 50 题完整在线评测与人工复核边界另见
+[V2 Ask 真实 DeepSeek 50 题评测](./V2_ASK_LIVE_DEEPSEEK_20261023.md)。
+
 ### 最终应用复验
 
 - 重新构建 macOS release `.app`，`codesign --verify --deep --strict` 通过；

@@ -130,9 +130,7 @@ impl AskService {
         if let Some(gap) = evidence_gap {
             let answer = AskAnswer {
                 question,
-                text: format!(
-                    "证据不足：{gap} 请补充相关笔记、核对时效、调整作用域或换一种问法。"
-                ),
+                text: format!("证据不足：{gap} 请补充相关笔记、核对时效、调整作用域或换一种问法。"),
                 citations: Vec::new(),
                 provider: "template.ask".to_string(),
                 tier: "template".to_string(),
@@ -169,6 +167,7 @@ impl AskService {
                  {context}{selection}\
                  只依据本轮给定材料作答；每条事实后必须用 [n] 标注本轮材料编号；\
                  不得引用未出现在本轮材料列表里的编号；历史回答不是事实来源；\
+                 每个编号都必须直接支撑紧邻的事实，不得引用仅出现于材料列表但与本条结论无关的来源；\
                  材料不足时明确写“证据不足”，不要猜测。"
             ),
             instructions: None,

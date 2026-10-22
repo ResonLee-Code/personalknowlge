@@ -4,6 +4,7 @@
 //! “库中没有”时的证据不足行为；人工仍须按 V2_P0_MANUAL_ACCEPTANCE.md 做断言级复核。
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use personal_knowledge_os_lib::application::ai::ask::AskService;
 use personal_knowledge_os_lib::application::ai::policy::AiPolicyService;
@@ -12,6 +13,7 @@ use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
 use personal_knowledge_os_lib::domain::ai::{AskQuestionInput, AskScope, UpdateAiPolicyInput};
 use personal_knowledge_os_lib::domain::note::CreateNoteInput;
+use personal_knowledge_os_lib::infrastructure::credential_store;
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -68,9 +70,7 @@ impl Fixture {
     }
 }
 
-#[test]
-fn fifty_labelled_questions_meet_citation_gates_and_twenty_negatives_are_insufficient() {
-    let fixture = Fixture::new();
+fn eval_cases(fixture: &Fixture) -> Vec<EvalCase> {
     let units = [
         (
             "SQLite FTS5 索引",
@@ -136,6 +136,13 @@ fn fifty_labelled_questions_meet_citation_gates_and_twenty_negatives_are_insuffi
             });
         }
     }
+    cases
+}
+
+#[test]
+fn fifty_labelled_questions_meet_citation_gates_and_twenty_negatives_are_insufficient() {
+    let fixture = Fixture::new();
+    let cases = eval_cases(&fixture);
     assert_eq!(cases.len(), 50);
 
     let service = AskService::new(fixture.context());
@@ -219,4 +226,172 @@ fn fifty_labelled_questions_meet_citation_gates_and_twenty_negatives_are_insuffi
             answer.text
         );
     }
+}
+
+/// 真实在线模型评测：需要显式提供 Key，默认不运行、不联网。
+///
+/// ```text
+/// PKOS_LIVE_REMOTE_KEY=sk-xxx \
+/// cargo test --offline --test ask_eval_flow \
+///   live_deepseek_fifty_labelled_questions -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "真机评测：需要 PKOS_LIVE_REMOTE_KEY（可选代理）"]
+fn live_deepseek_fifty_labelled_questions() {
+    let Some(key) = std::env::var("PKOS_LIVE_REMOTE_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        eprintln!("跳过：未设置 PKOS_LIVE_REMOTE_KEY");
+        return;
+    };
+    let base = std::env::var("PKOS_LIVE_REMOTE_BASE")
+        .unwrap_or_else(|_| "https://api.deepseek.com".into());
+    let model = std::env::var("PKOS_LIVE_REMOTE_MODEL").unwrap_or_else(|_| "deepseek-flash".into());
+    let fixture = Fixture::new();
+    credential_store::set_remote_model_key(fixture._data.path(), Some(&key))
+        .expect("写入临时在线模型 Key");
+    AiPolicyService::new(fixture.context())
+        .update(UpdateAiPolicyInput {
+            remote_model_base_url: Some(base),
+            remote_model_name: Some(model),
+            remote_model_compose: Some(true),
+            confirm_remote_model: Some(true),
+            ..Default::default()
+        })
+        .expect("授权在线模型");
+
+    let mut cases = eval_cases(&fixture);
+    if let Some(filter) = std::env::var("PKOS_LIVE_CASE_FILTER")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        cases.retain(|case| case.question.contains(&filter));
+    }
+    assert!(!cases.is_empty(), "在线评测过滤条件没有匹配任何问题");
+    let service = AskService::new(fixture.context());
+    let mut online_accepted = 0usize;
+    let mut delivered_with_expected_citation = 0usize;
+    let mut all_citations_supported_cases = 0usize;
+    let mut text_mentions_expected = 0usize;
+    let mut citation_total = 0usize;
+    let mut citation_supported = 0usize;
+    let mut online_citation_total = 0usize;
+    let mut online_citation_supported = 0usize;
+    let mut fallbacks = Vec::new();
+    let mut mismatches = Vec::new();
+    let started = Instant::now();
+
+    for case in &cases {
+        let answer = service
+            .answer(AskQuestionInput {
+                question: case.question.clone(),
+                scope: AskScope::All,
+                ..Default::default()
+            })
+            .expect("真实模型评测问题应正常执行");
+        if answer.tier == "online" {
+            online_accepted += 1;
+        } else {
+            fallbacks.push(format!(
+                "{} -> {}（{}）",
+                case.question,
+                answer.tier,
+                answer.warnings.join("；")
+            ));
+        }
+        let mut case_supported = !answer.citations.is_empty();
+        for citation in &answer.citations {
+            citation_total += 1;
+            if answer.tier == "online" {
+                online_citation_total += 1;
+            }
+            let supports = citation.note_id == case.note_id
+                && case
+                    .expected_terms
+                    .iter()
+                    .all(|term| citation.snippet.contains(term));
+            if supports {
+                citation_supported += 1;
+                if answer.tier == "online" {
+                    online_citation_supported += 1;
+                }
+            } else {
+                case_supported = false;
+                mismatches.push(format!(
+                    "{} [{}] -> 《{}》 {}\n答案：{}",
+                    case.question,
+                    citation.citation_id,
+                    citation.title,
+                    citation.snippet,
+                    answer.text
+                ));
+            }
+        }
+        let has_expected_citation = answer.citations.iter().any(|citation| {
+            citation.note_id == case.note_id
+                && case
+                    .expected_terms
+                    .iter()
+                    .all(|term| citation.snippet.contains(term))
+        });
+        if has_expected_citation {
+            delivered_with_expected_citation += 1;
+        } else {
+            mismatches.push(format!(
+                "{} -> 未交付期望来源的引用：{}",
+                case.question, answer.text
+            ));
+        }
+        if case_supported {
+            all_citations_supported_cases += 1;
+        }
+        if case
+            .expected_terms
+            .iter()
+            .all(|term| answer.text.contains(term))
+        {
+            text_mentions_expected += 1;
+        }
+    }
+
+    let precision = citation_supported as f64 / citation_total.max(1) as f64;
+    let online_precision = online_citation_supported as f64 / online_citation_total.max(1) as f64;
+    println!(
+        "PKOS_LIVE_ASK_EVAL cases={} online_accepted={} delivered_with_expected_citation={} \
+         all_citations_supported_cases={} text_mentions_expected={} \
+         citation_supported={}/{} precision={:.2}% online_citation_supported={}/{} \
+         online_precision={:.2}% elapsed_ms={}",
+        cases.len(),
+        online_accepted,
+        delivered_with_expected_citation,
+        all_citations_supported_cases,
+        text_mentions_expected,
+        citation_supported,
+        citation_total,
+        precision * 100.0,
+        online_citation_supported,
+        online_citation_total,
+        online_precision * 100.0,
+        started.elapsed().as_millis()
+    );
+    if !fallbacks.is_empty() {
+        println!("PKOS_LIVE_ASK_EVAL fallbacks=\n{}", fallbacks.join("\n"));
+    }
+    if !mismatches.is_empty() {
+        println!("PKOS_LIVE_ASK_EVAL mismatches=\n{}", mismatches.join("\n"));
+    }
+    assert_eq!(
+        delivered_with_expected_citation,
+        cases.len(),
+        "最终交付答案必须逐题含期望来源引用"
+    );
+    assert!(precision >= 0.95, "最终引用支持率低于 95%");
+    if online_citation_total > 0 {
+        assert!(online_precision >= 0.95, "在线引用支持率低于 95%");
+    }
+    assert!(
+        all_citations_supported_cases as f64 / cases.len() as f64 >= 0.95,
+        "逐题全引用支持率低于 95%"
+    );
 }

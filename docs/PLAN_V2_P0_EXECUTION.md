@@ -26,6 +26,7 @@
 | 本地 Ollama 真实模型 | `qwen2.5:7b` 100% Metal GPU、RSS 4.84GB；应用内 Ask `1769ms` / 追问 `905ms`，provider `local.ollama:qwen2.5:7b` |
 | 本机真实同步服务 | rclone WebDAV / S3 均完成 PUT / GET / DELETE；应用两逻辑设备上传、dry-run、下载解密通过，远端无明文 |
 | DeepSeek 在线模型 | `deepseek-flash` 首个正文 token 中位 1201.6ms、总耗时中位 1780.5ms；10 题最终引用正确 10/10，首轮在线引用合规 9/10，失败均安全降级 |
+| DeepSeek Ask 50 题 | 连续两轮在线接受 50/50、正确来源 50/50、引用支持 50/50；引用精确率均为 100% |
 | 决策 Key 持久化 | 修复后端忽略 `decisionApiKey` 与前端保存失败仍清空输入的问题；Rust 凭据测试和前端保留输入测试通过 |
 | macOS release `.app` 最终复建 | ad-hoc 签名校验通过；真实 `knowledge` 工作区打开成功；假决策 Key 可保存并清除，凭据文件仍为 `0600` |
 | `pnpm test:release-manifest` | 三平台映射、Linux `AppImage.tar.gz`、GitHub 资产名归一化与缺签名拒绝测试通过 |
