@@ -94,7 +94,8 @@
 
 ## E. 隐私与数据安全
 
-- [ ] AI 总开关关闭时，网络代理 / 抓包确认 0 外发。
+- [x] AI 总开关关闭时，系统级 `nettop` 对应用进程无 TCP / UDP 记录，审计为
+      `AI_DISABLED`（[证据](./acceptance/V2_AI_ON_SMOKE_20261022.md)）。
 - [ ] 在线模型未授权时，网络代理 / 抓包确认 0 外发。
 - [ ] “逐次外发确认”未勾选时，确认 0 请求。
 - [x] 审计日志不含笔记正文与 API Key（`ai_policy_flow.rs` / `remote_model_flow.rs`）。

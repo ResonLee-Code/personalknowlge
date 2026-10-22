@@ -22,6 +22,7 @@
 | Ask 作用域与追问隔离 | 10 条查询覆盖 Note / Category / Tag / All；5 轮虚构历史答案均未进入本轮结论或引用 |
 | Research 网络中断恢复 | 真实本机 TCP 中途断连后保留已完成来源、进入可恢复状态；恢复网络后补缺且不复制来源 |
 | AI 总开关本地链路 | 真实 UI 开启后自检为 `template.draft`；Ask `2ms`、Research 立项 / 收集 / 验证 / 汇总 `5/4/7/5ms`，审计均 `outbound=false`（[证据](./acceptance/V2_AI_ON_SMOKE_20261022.md)） |
+| AI 关闭 / 模板零外发 | 真实 Ask 交互下，AI 关闭与模板档均被 macOS `nettop` 观察为无 TCP / UDP 连接 |
 | `pnpm test:release-manifest` | 三平台映射、Linux `AppImage.tar.gz`、GitHub 资产名归一化与缺签名拒绝测试通过 |
 | `pnpm test:update-signature` | 一次性测试密钥：有效载荷通过、篡改载荷拒绝、版本签名绑定校验通过 |
 | `runtime_contract` / release App 实启 | updater 配置可反序列化；窗口位置恢复权限完整；macOS release 包真实打开 10 万篇工作区 |

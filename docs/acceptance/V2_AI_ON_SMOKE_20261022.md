@@ -47,9 +47,28 @@ research_verify   outbound=false durationMs=7 note=null
 research_compose  outbound=false durationMs=5 note=template.draft
 ```
 
+## 系统级零外发计数
+
+另用 macOS 自带 `nettop` 对应用主进程做了独立于应用审计的系统级检查：
+
+```bash
+nettop -P -L 2 -s 1 -p <Personal Knowledge OS pid>
+```
+
+两轮检查的输出都只有 CSV 表头，没有任何 TCP / UDP 连接行：
+
+1. AI 总开关关闭时，通过真实 Ask UI 发起问题；应用审计记录
+   `ask_answer denied AI_DISABLED`，`nettop` 无网络记录。
+2. AI 总开关开启、仅有模板档时，再次通过真实 Ask UI 提问；审计记录
+   `ask_answer ok durationMs=0 note=INSUFFICIENT_EVIDENCE`，`nettop` 仍无网络记录。
+
+该证据证明这两次具体交互没有产生系统可见的应用网络流量，但不能替代真实在线模型请求的
+抓包、认证头和请求体检查。
+
 ## 结论
 
 - AI 总开关开启、策略持久化、模型自检、Ask 和 Research 五步链路均正常。
 - 没有可用模型时如实降级到模板档，不把模板输出冒充模型输出。
 - 该轮 Ask / Research 的所有审计均为 `outbound=false`。
+- AI 关闭与 AI 开启模板档两轮真实交互均通过系统级 `nettop` 零网络计数。
 - 真实在线模型、本地 Ollama 模型、模型质量、真实网络抓包仍属于统一人工验收项。
