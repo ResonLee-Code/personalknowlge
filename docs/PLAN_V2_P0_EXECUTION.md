@@ -40,11 +40,14 @@
 | macOS P0 用例 4 状态污染复测 | 39 个自动步骤通过 / 0 失败；拖拽/悬停手感仍人工 |
 | macOS 当前候选完整原生套件 | `49de15f` 全新隔离工作区 321 步通过 / 0 失败；11 条视觉或外部条件待人工 |
 | 验收脚手架工作区核验 / 文件断言 | 4 个 Node 测试通过；错误 workspace 写入前中止；用例 1 为 10/10 |
-| `pnpm bench` | 1 万检索 p95 8.06ms；3 万图谱 821.5ms |
+| `pnpm bench` | 当前候选 1 万检索 p95 18.15ms、recall@5 100%；3 万图谱 843.8ms |
 | 10 万扩展门禁 | 检索 p95 77.76ms、recall@5 100%、后端重开 1140.77ms、RSS 350.84MB |
 | macOS 完整 App 10 万篇 | release/ad-hoc：稳定首帧 1001ms、RSS 224.23MB；重建后首次 2947ms 已单独记录；截图为 100001 篇就绪界面 |
 | updater manifest 脚本 / release.yml | 合成夹具通过；YAML 解析通过 |
 | 当前 V2 开发版 Windows / Linux 产物 | Windows PE / NSIS / 便携包结构通过；Ubuntu 22.04 x86_64 deb 安装启动与卸载数据保留通过；AppImage 解包启动通过 |
+
+当前候选的完整自动门禁汇总见
+[V2 当前候选发布门禁](./acceptance/V2_RELEASE_GATE_20261023.md)。
 
 人工执行时从
 [V2_P0_REPORT_TEMPLATE.md](./acceptance/V2_P0_REPORT_TEMPLATE.md)
