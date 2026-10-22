@@ -16,17 +16,19 @@
 
 | 字段 | 值 |
 | --- | --- |
-| Git commit | |
-| 版本号 / tag | |
-| 自动验收报告 | |
-| macOS 产物与 SHA-256 | |
-| Windows 产物与 SHA-256 | |
-| Linux 产物与 SHA-256 | |
-| `latest.json` SHA-256 | |
+| Git commit | `9504027cf80a4ad4275f930b86236d38bc1f3738` |
+| 版本号 / tag | `1.3.7`（V2 开发线，尚未创建 V2 tag） |
+| 自动验收报告 | [V2 P1/P2 自动验收](./V2_P1_P2_AUTOMATED_20261022.md) + [平台产物记录](./V2_PLATFORM_ARTIFACTS_20261022.md) |
+| macOS 产物与 SHA-256 | 包内二进制 `bb5df9ba5b18826bed072bc859e87acaf1a2eb05fd80e88695c714152665bbd5`；ad-hoc，非发布签名 |
+| Windows 产物与 SHA-256 | NSIS `8519ace53c39b916a82299f2584b1f633ef8c70fd7cbf8ce25e554e1e62af581`；便携版 `596daa01bc3cdd48ee5529c2b090247c549682662a4a71c9cb939885acd6fa2b` |
+| Linux 产物与 SHA-256 | deb `269471b11fa7921cf3b67868a9913ed459d6445737f29c16d974c5822bc9b1a6`；rpm `64f882f8b9a4aad57beb26397126698a13b5a665b4616eece7cf56602609b0fd`；AppImage `5ebfe875627321c0f8ba97fffc9adf49664ad13382a10825bd37700eb6ad27dd` |
+| `latest.json` SHA-256 | 尚未生成：等待正式 updater 签名密钥与 Release 资产 |
 
 当前候选开发版本 `9504027` 的三平台对象与哈希已记录在
 [跨平台产物记录](./V2_PLATFORM_ARTIFACTS_20261022.md)。这些对象尚未经过 Developer ID、
 公证、Windows 代码签名或真实设备安装，不能当成 Release 签名产物。
+
+人工测试开始前，再次核对本机文件哈希；任何不一致都必须停止并按新候选版本重新开始。
 
 在候选提交上先完成：
 
