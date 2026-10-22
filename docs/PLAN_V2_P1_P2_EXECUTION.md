@@ -110,6 +110,8 @@ P0 的状态与人工项仍以 [V2_P0_MANUAL_ACCEPTANCE.md](./V2_P0_MANUAL_ACCEP
 - [x] 前端覆盖逐段选择、diff、取消不写、失败可点开原因。
 - [x] 使用 DeepSeek 与 `qwen2.5:7b` 分别完成五种写作模式，所有草稿段落均有可解析引用
       （[证据](./acceptance/V2_WRITING_LIVE_MODELS_20261023.md)）。
+- [x] 未授权真实 DeepSeek 的 Writing 调用经系统级 `nettop` 验证零 TCP，并降级模板
+      （[证据](./acceptance/V2_WRITING_ZERO_OUTBOUND_20261023.md)）。
 - [ ] 人工使用真实模型评估结构、语气、引用准确性；逐段编辑体验需真机确认。
 
 ## 6. 收口顺序

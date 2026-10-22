@@ -390,3 +390,88 @@ fn run_live_writing_modes(
         );
     }
 }
+
+/// 真实 DeepSeek 已配置但未授权：Writing 必须零外发并降级模板。
+#[test]
+#[ignore = "真机抓包：需要 PKOS_LIVE_REMOTE_KEY；可设置 PKOS_LIVE_HOLD_MS"]
+fn live_unauthorized_deepseek_writing_keeps_zero_outbound() {
+    let Some(key) = std::env::var("PKOS_LIVE_REMOTE_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        eprintln!("跳过：未设置 PKOS_LIVE_REMOTE_KEY");
+        return;
+    };
+    let base = std::env::var("PKOS_LIVE_REMOTE_BASE")
+        .unwrap_or_else(|_| "https://api.deepseek.com".into());
+    let model = std::env::var("PKOS_LIVE_REMOTE_MODEL").unwrap_or_else(|_| "deepseek-flash".into());
+    let fixture = Fixture::new();
+    let target = fixture.note(
+        "未授权写作",
+        "# 未授权写作\n\n本地优先，引用必须可追溯，写入前必须预览并确认。",
+    );
+    credential_store::set_remote_model_key(fixture._data.path(), Some(&key))
+        .expect("写入临时在线模型 Key");
+    AiPolicyService::new(fixture.context())
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            remote_model_base_url: Some(base),
+            remote_model_name: Some(model),
+            remote_model_compose: Some(true),
+            ..Default::default()
+        })
+        .expect("保存在线模型配置");
+    let policy = AiPolicyService::new(fixture.context()).policy();
+    assert!(policy.remote_model_key_set);
+    assert!(
+        policy.remote_model_authorized_at.is_none(),
+        "本测试故意不授权在线模型"
+    );
+
+    let ready_ms = std::env::var("PKOS_LIVE_CAPTURE_READY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    println!(
+        "PKOS_LIVE_WRITING_ZERO_OUTBOUND pid={} stage=before-draft capture_ready_ms={}",
+        std::process::id(),
+        ready_ms
+    );
+    if ready_ms > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(ready_ms));
+    }
+
+    let draft = fixture
+        .writing()
+        .draft(WritingRequest {
+            note_id: target,
+            mode: Some(WritingMode::Outline),
+            instruction: "整理为三层大纲".to_string(),
+            confirm_outbound: true,
+            ..Default::default()
+        })
+        .expect("未授权写作应降级模板而不是失败");
+    assert_eq!(draft.tier, "template");
+    assert!(!draft.segments.is_empty());
+    let audit = serde_json::to_string(
+        &AiPolicyService::new(fixture.context())
+            .audit_tail(100)
+            .expect("审计"),
+    )
+    .expect("审计 JSON");
+    assert!(audit.contains("REMOTE_MODEL_UNCONFIRMED"));
+    assert!(!audit.contains(&key));
+
+    let hold_ms = std::env::var("PKOS_LIVE_HOLD_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    println!(
+        "PKOS_LIVE_WRITING_ZERO_OUTBOUND pid={} stage=after-draft hold_ms={} result=template",
+        std::process::id(),
+        hold_ms
+    );
+    if hold_ms > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(hold_ms));
+    }
+}
