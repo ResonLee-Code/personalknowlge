@@ -15,8 +15,10 @@
 - [ ] 记录引用精确率；目标 ≥ 95%。
 - [ ] 记录无依据断言率；目标 < 5%。
 - [x] 20 条“库中没有答案”的负样本均明确回答证据不足（`ask_eval_flow.rs` 20/20）。
-- [ ] 至少抽验 10 条不同笔记 / 分类 / 标签 / 全库作用域。
-- [ ] 至少抽验 5 条多轮追问，确认上一轮答案未被当成事实。
+- [x] 10 条查询覆盖不同笔记 / 分类 / 标签 / 全库作用域
+      （`ask_flow.rs::ten_queries_cover_note_category_tag_and_all_scopes`）。
+- [x] 5 条多轮追问使用不同虚构历史事实，确认上一轮答案未被当成事实
+      （`ask_flow.rs::five_follow_ups_never_treat_prior_answers_as_facts`）。
 
 ## B. Organize 质量与人工判断
 

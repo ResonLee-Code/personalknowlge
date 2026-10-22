@@ -8,12 +8,15 @@ use std::thread;
 
 use personal_knowledge_os_lib::application::ai::ask::AskService;
 use personal_knowledge_os_lib::application::ai::policy::AiPolicyService;
+use personal_knowledge_os_lib::application::category_service::CategoryService;
 use personal_knowledge_os_lib::application::note_service::NoteService;
+use personal_knowledge_os_lib::application::tag_service::TagService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
 use personal_knowledge_os_lib::domain::ai::{
     AskHistoryTurn, AskQuestionInput, AskSaveInput, AskScope, UpdateAiPolicyInput,
 };
+use personal_knowledge_os_lib::domain::category::CreateCategoryInput;
 use personal_knowledge_os_lib::domain::note::{
     CreateNoteInput, NoteListQuery, SaveNoteInput, SetSourceInput,
 };
@@ -56,16 +59,44 @@ impl Fixture {
     }
 
     fn note(&self, title: &str, content: &str) -> String {
+        self.note_in_scope(title, content, None, None)
+    }
+
+    fn note_in_scope(
+        &self,
+        title: &str,
+        content: &str,
+        category_id: Option<String>,
+        tags: Option<Vec<String>>,
+    ) -> String {
         NoteService::new(self.context())
             .create(CreateNoteInput {
                 title: title.to_string(),
-                category_id: None,
+                category_id,
                 initial_content: Some(content.to_string()),
-                tags: None,
+                tags,
                 parent_id: None,
             })
             .expect("新建笔记")
             .note
+            .id
+    }
+
+    fn category(&self, name: &str) -> String {
+        CategoryService::new(self.context())
+            .create(CreateCategoryInput {
+                name: name.to_string(),
+                parent_id: None,
+                create_directory: None,
+            })
+            .expect("创建分类")
+            .id
+    }
+
+    fn tag(&self, name: &str) -> String {
+        TagService::new(self.context())
+            .get_or_create(name)
+            .expect("创建标签")
             .id
     }
 
@@ -325,6 +356,181 @@ fn all_scope_uses_query_expansion_and_returns_insufficient_for_missing_material(
     assert!(!missing.evidence_sufficient);
     assert!(missing.citations.is_empty());
     assert!(missing.text.contains("证据不足"));
+}
+
+#[test]
+fn ten_queries_cover_note_category_tag_and_all_scopes() {
+    use std::collections::HashSet;
+
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    let cat_a = fixture.category("作用域 A");
+    let cat_b = fixture.category("作用域 B");
+    let cat_c = fixture.category("作用域 C");
+    let cat_d = fixture.category("作用域 D");
+    let alpha = fixture.tag("scope-alpha");
+    let beta = fixture.tag("scope-beta");
+
+    let notes = [
+        fixture.note_in_scope(
+            "范围 0",
+            "# 范围 0\n\nscopeproof0 属于分类 A。",
+            Some(cat_a.clone()),
+            Some(vec!["scope-alpha".into()]),
+        ),
+        fixture.note_in_scope(
+            "范围 1",
+            "# 范围 1\n\nscopeproof1 属于分类 A。",
+            Some(cat_a.clone()),
+            Some(vec!["scope-alpha".into()]),
+        ),
+        fixture.note_in_scope(
+            "范围 2",
+            "# 范围 2\n\nscopeproof2 属于分类 A。",
+            Some(cat_a.clone()),
+            Some(vec!["scope-beta".into()]),
+        ),
+        fixture.note_in_scope(
+            "范围 3",
+            "# 范围 3\n\nscopeproof3 属于分类 B。",
+            Some(cat_b.clone()),
+            Some(vec!["scope-beta".into()]),
+        ),
+        fixture.note_in_scope(
+            "范围 4",
+            "# 范围 4\n\nscopeproof4 属于分类 B。",
+            Some(cat_b.clone()),
+            None,
+        ),
+        fixture.note_in_scope(
+            "范围 5",
+            "# 范围 5\n\nscopeproof5 属于分类 C。",
+            Some(cat_c.clone()),
+            Some(vec!["scope-alpha".into()]),
+        ),
+        fixture.note_in_scope(
+            "范围 6",
+            "# 范围 6\n\nscopeproof6 属于分类 C。",
+            Some(cat_c.clone()),
+            None,
+        ),
+        fixture.note_in_scope(
+            "范围 7",
+            "# 范围 7\n\nscopeproof7 属于分类 D。",
+            Some(cat_d),
+            Some(vec!["scope-beta".into()]),
+        ),
+        fixture.note_in_scope(
+            "范围 8",
+            "# 范围 8\n\nscopeproof8 只在标签 alpha。",
+            None,
+            Some(vec!["scope-alpha".into()]),
+        ),
+        fixture.note_in_scope("范围 9", "# 范围 9\n\nscopeproof9 只在全库。", None, None),
+    ];
+    let service = fixture.ask();
+    let cases = [
+        ("scopeproof0", AskScope::Note, notes[0].clone(), vec![notes[0].as_str()]),
+        ("scopeproof5", AskScope::Note, notes[5].clone(), vec![notes[5].as_str()]),
+        (
+            "scopeproof2",
+            AskScope::Category,
+            cat_a,
+            vec![notes[0].as_str(), notes[1].as_str(), notes[2].as_str()],
+        ),
+        (
+            "scopeproof4",
+            AskScope::Category,
+            cat_b,
+            vec![notes[3].as_str(), notes[4].as_str()],
+        ),
+        (
+            "scopeproof6",
+            AskScope::Category,
+            cat_c,
+            vec![notes[5].as_str(), notes[6].as_str()],
+        ),
+        (
+            "scopeproof8",
+            AskScope::Tag,
+            alpha,
+            vec![notes[0].as_str(), notes[1].as_str(), notes[5].as_str(), notes[8].as_str()],
+        ),
+        (
+            "scopeproof3",
+            AskScope::Tag,
+            beta,
+            vec![notes[2].as_str(), notes[3].as_str(), notes[7].as_str()],
+        ),
+        (
+            "scopeproof9",
+            AskScope::All,
+            String::new(),
+            notes.iter().map(String::as_str).collect(),
+        ),
+        (
+            "scopeproof1",
+            AskScope::Note,
+            notes[1].clone(),
+            vec![notes[1].as_str()],
+        ),
+        (
+            "scopeproof7",
+            AskScope::All,
+            String::new(),
+            notes.iter().map(String::as_str).collect(),
+        ),
+    ];
+
+    for (keyword, scope, scope_id, allowed) in cases {
+        let answer = service
+            .answer(request(
+                &format!("{keyword} 有什么结论？"),
+                scope,
+                if matches!(scope, AskScope::All) {
+                    None
+                } else {
+                    Some(scope_id)
+                },
+            ))
+            .expect("作用域问答");
+        assert!(answer.evidence_sufficient, "{keyword}: {}", answer.evidence_note);
+        assert!(!answer.citations.is_empty(), "{keyword} 应有引用");
+        let allowed: HashSet<&str> = allowed.into_iter().collect();
+        assert!(
+            answer
+                .citations
+                .iter()
+                .all(|citation| allowed.contains(citation.note_id.as_str())),
+            "{keyword} 返回了作用域外引用：{:?}",
+            answer.citations.iter().map(|item| &item.note_id).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn five_follow_ups_never_treat_prior_answers_as_facts() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    let service = fixture.ask();
+
+    for index in 0..5 {
+        let marker = format!("GHOST_FACT_{index}");
+        let mut input = request(&format!("{marker} 是什么？"), AskScope::All, None);
+        input.history = vec![AskHistoryTurn {
+            question: "上一轮说了什么？".to_string(),
+            answer: format!("{marker} 已经被确认是事实。"),
+        }];
+        let answer = service.answer(input).expect("追问应正常返回");
+        assert!(!answer.evidence_sufficient, "{marker} 没有本轮证据");
+        assert!(answer.citations.is_empty(), "{marker} 不得把历史回答当引用");
+        assert!(answer.text.contains("证据不足"), "{}", answer.text);
+        assert!(
+            !answer.text.contains(&marker),
+            "上一轮答案里的虚构事实不得进入本轮结论：{}",
+            answer.text
+        );
+    }
 }
 
 #[test]
