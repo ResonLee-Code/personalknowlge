@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SyncSettingsPanel } from '@/features/settings/SyncSettingsPanel';
+import { formatDateTime } from '@/lib/format';
 import { syncService } from '@/services/syncService';
 import type { SyncPreview, SyncSettings } from '@/types';
 
@@ -105,5 +106,37 @@ describe('SyncSettingsPanel', () => {
     expect(await screen.findByText('待重试 3 项')).toBeInTheDocument();
     expect(screen.getByLabelText('密码（只写不读）')).toHaveValue('');
     expect(screen.queryByDisplayValue(/secret/i)).not.toBeInTheDocument();
+  });
+
+  it('历史留档展示原路径、时间和类别，并在确认后调用还原', async () => {
+    const savedAt = '2026-10-20T08:30:00+08:00';
+    vi.mocked(syncService.history).mockResolvedValue([
+      {
+        relativePath: 'history/before-delete.note.md',
+        originalPath: '00_Inbox/删除后可恢复.md',
+        category: 'before-delete',
+        savedAt,
+        sizeBytes: 128,
+      },
+    ]);
+    vi.mocked(syncService.restoreHistory).mockResolvedValue('00_Inbox/删除后可恢复.md');
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<SyncSettingsPanel />);
+    expect(await screen.findByText('00_Inbox/删除后可恢复.md')).toBeInTheDocument();
+    expect(
+      screen.getByText(`before-delete · ${formatDateTime(savedAt)}`),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '还原' }));
+    await waitFor(() =>
+      expect(syncService.restoreHistory).toHaveBeenCalledWith({
+        relativePath: 'history/before-delete.note.md',
+        confirm: true,
+      }),
+    );
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining(`00_Inbox/删除后可恢复.md 还原为`),
+    );
   });
 });
