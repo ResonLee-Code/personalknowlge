@@ -8,12 +8,14 @@ Debian 12+、Fedora 38+、Arch 等，需 WebKitGTK 4.1）。
 | 项目 | 现状 |
 | --- | --- |
 | 应用代码 | V2.0 开发线（数据库 schema 16；发布版本号以构建产物为准） |
-| Linux 安装包 | ✅ **V1.3.7 已随 Release 发布**：`.deb` / `.rpm` / `.AppImage`（由 CI 的 ubuntu-22.04 job 产出；本机无法交叉编译 Linux） |
+| Linux 安装包 | ✅ **当前 V2 开发提交的 V1.3.7 产物已生成**：`.deb` / `.rpm` / `.AppImage`（在 Ubuntu 22.04 x86_64 隔离环境构建并实跑；物理 Ubuntu 22.04 / 24.04 真机仍待验收） |
 | macOS 安装包 | ✅ V1.3.7 `.dmg`（ad-hoc 签名，首次打开需「仍要打开」放行一次） |
 | Windows 安装包 | ✅ V1.3.7（交叉编译、未签名，待真机验收） |
 
 > 产物与代码已对齐（V1.3.7）。安装前建议先校验：`sha256sum -c SHA256SUMS-linux.txt`
 > （Release 里的校验值按**你下载到的文件名**写，在下载目录里直接跑即可）。
+> 本地开发产物与验证边界见
+> [V2 跨平台产物记录](./acceptance/V2_PLATFORM_ARTIFACTS_20261022.md)。
 > 三平台发布流程与发布后抽验清单见 [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)。
 
 ## 一、产出安装包（二选一）
@@ -49,22 +51,22 @@ Actions → **Release (macOS + Windows + Linux)** → Run workflow（只出工�
 ### deb（Debian / Ubuntu）
 
 ```bash
-sudo apt install ./Personal-Knowledge-OS_1.2.0_amd64.deb
+sudo apt install "./Personal Knowledge OS_1.3.7_amd64.deb"
 personal-knowledge-os            # 或从应用菜单启动
 ```
 
 ### rpm（Fedora / openSUSE）
 
 ```bash
-sudo rpm -i ./Personal-Knowledge-OS-1.2.0-1.x86_64.rpm
-# 或：sudo dnf install ./Personal-Knowledge-OS-1.2.0-1.x86_64.rpm
+sudo rpm -i "./Personal Knowledge OS-1.3.7-1.x86_64.rpm"
+# 或：sudo dnf install "./Personal Knowledge OS-1.3.7-1.x86_64.rpm"
 ```
 
 ### AppImage（免安装，任意发行版）
 
 ```bash
-chmod +x Personal-Knowledge-OS_1.2.0_amd64.AppImage
-./Personal-Knowledge-OS_1.2.0_amd64.AppImage
+chmod +x "Personal Knowledge OS_1.3.7_amd64.AppImage"
+"./Personal Knowledge OS_1.3.7_amd64.AppImage"
 ```
 
 首次运行若提示缺少依赖（多见于精简发行版），安装：

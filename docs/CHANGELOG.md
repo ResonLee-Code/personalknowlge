@@ -46,6 +46,11 @@
   依赖缓存而在 `--offline` 下提前失败的问题，同时继续锁定依赖版本；
 - CI preflight 补齐与本地发布口径一致的 ESLint、production build、验收器自测和
   Playwright E2E 门禁，并静态测试防止后续遗漏；
+- Linux release 环境补齐 `xdg-utils`，避免 Tauri/linuxdeploy 在 AppImage 打包末尾因
+  缺少 `xdg-open` 失败；远端构建命令改用数组传参，消除发布 workflow 的 shell 分词风险；
+- 从当前 V2 开发提交重新生成 Windows NSIS / 便携版与 Linux deb / rpm / AppImage；
+  Windows PE、NSIS 内嵌本体、Linux 包元数据、deb 安装卸载数据保留和 AppImage 实启均已验证，
+  真实 Windows / Ubuntu 物理机仍保留在统一人工清单；
 - Rust 依赖审计清除 9 个已知漏洞：`zip` 升至 9.0.5，updater 固定到上游修复 commit，
   并升级 `rustls`、`rustls-webpki` 与 `webpki-roots`；CI 固定运行 `cargo-audit 0.22.2`；
 - 修复 Release job 读取非直接依赖 `preflight` outputs 的表达式错误；`latest.json`

@@ -6,6 +6,7 @@ node_modules/
 dist/
 dist-ssr/
 dist-windows/
+dist-linux/
 *.local
 
 # rust

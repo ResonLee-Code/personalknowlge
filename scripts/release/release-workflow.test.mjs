@@ -91,3 +91,13 @@ test('preflight blocks Rust dependency vulnerabilities with a pinned cargo-audit
     'preflight 必须审计 Rust 依赖漏洞',
   );
 });
+
+test('Linux release job installs the xdg-open runtime required by AppImage bundling', () => {
+  const linuxJob = workflow.split(/\n  linux:\s*\n/, 2)[1];
+  assert.ok(linuxJob, '必须存在 linux job');
+  assert.match(
+    linuxJob,
+    /apt-get install[\s\S]*xdg-utils/,
+    '缺少 xdg-utils 时 linuxdeploy 会在 AppImage 打包阶段失败',
+  );
+});

@@ -144,6 +144,7 @@ jobs:
             librsvg2-dev \
             patchelf \
             libfuse2 \
+            xdg-utils \
             build-essential \
             pkg-config \
             libssl-dev
@@ -207,16 +208,16 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           pnpm install --frozen-lockfile
-          CONFIGS=""
+          CONFIGS=()
           if [ -n "${TAURI_SIGNING_PRIVATE_KEY}" ] && [ -n "${PKOS_UPDATER_PUBKEY}" ]; then
-            CONFIGS="--config src-tauri/tauri.updater.conf.json"
+            CONFIGS+=(--config src-tauri/tauri.updater.conf.json)
           fi
           if [ -n "${APPLE_SIGNING_IDENTITY}" ]; then
             MACOS_SIGN_CONFIG="${RUNNER_TEMP}/tauri.macos-sign.json"
             node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({bundle:{macOS:{signingIdentity:process.env.APPLE_SIGNING_IDENTITY}}}))" "${MACOS_SIGN_CONFIG}"
-            CONFIGS="${CONFIGS} --config ${MACOS_SIGN_CONFIG}"
+            CONFIGS+=(--config "${MACOS_SIGN_CONFIG}")
           fi
-          pnpm tauri build ${CONFIGS} --bundles app dmg
+          pnpm tauri build "${CONFIGS[@]}" --bundles app dmg
 
       - name: 生成校验值
         run: |
@@ -307,16 +308,16 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           pnpm install --frozen-lockfile
-          CONFIGS=""
+          CONFIGS=()
           if [ -n "${TAURI_SIGNING_PRIVATE_KEY}" ] && [ -n "${PKOS_UPDATER_PUBKEY}" ]; then
-            CONFIGS="--config src-tauri/tauri.updater.conf.json"
+            CONFIGS+=(--config src-tauri/tauri.updater.conf.json)
           fi
           if [ -n "${WINDOWS_CERTIFICATE_THUMBPRINT}" ]; then
             WINDOWS_SIGN_CONFIG="${RUNNER_TEMP}/tauri.windows-sign.json"
             node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({bundle:{windows:{certificateThumbprint:process.env.WINDOWS_CERTIFICATE_THUMBPRINT,digestAlgorithm:'sha256',timestampUrl:'http://timestamp.digicert.com'}}}))" "${WINDOWS_SIGN_CONFIG}"
-            CONFIGS="${CONFIGS} --config ${WINDOWS_SIGN_CONFIG}"
+            CONFIGS+=(--config "${WINDOWS_SIGN_CONFIG}")
           fi
-          pnpm tauri build ${CONFIGS} --bundles nsis
+          pnpm tauri build "${CONFIGS[@]}" --bundles nsis
 
       - name: 生成便携版 zip 与校验值
         shell: pwsh
@@ -376,6 +377,7 @@ jobs:
             librsvg2-dev \
             patchelf \
             libfuse2 \
+            xdg-utils \
             build-essential \
             pkg-config \
             libssl-dev

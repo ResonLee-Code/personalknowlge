@@ -11,6 +11,9 @@
 | macOS 安装包 | ✅ V1.3.7 `.dmg`（**ad-hoc 签名**：首次打开需在 系统设置 → 隐私与安全性 → 仍要打开 放行一次） |
 | Linux 安装包 | ✅ V1.3.7 `.deb` / `.rpm` / `.AppImage`（同样随 Release 发布） |
 
+当前 V2 开发提交的 Windows 对象、哈希与结构证据见
+[V2 跨平台产物记录](./acceptance/V2_PLATFORM_ARTIFACTS_20261022.md)。
+
 下载与校验（**建议先校验再安装**）：
 
 ```powershell
@@ -25,13 +28,14 @@ Get-FileHash "Personal.Knowledge.OS_1.3.7_x64-setup.exe" -Algorithm SHA256
 本地（macOS）重新打包的命令：
 
 ```bash
-brew install mingw-w64 nsis                 # 一次性安装交叉编译工具链
+brew install zig makensis sevenzip           # 一次性安装交叉编译与打包工具
+rustup target add x86_64-pc-windows-gnu
 cd /path/to/PersonalKnowlge
-pnpm build                                  # 前端产物
-CI=true ./node_modules/.bin/tauri build \
-  --target x86_64-pc-windows-gnu --bundles nsis
-# 产物：src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/
-#       Personal Knowledge OS_<版本>_x64-setup.exe
+ZIG="$(brew --prefix zig)/bin/zig" ./scripts/cross/build-windows.sh
+./scripts/windows/build-installer.sh
+# 产物：dist-windows/Personal Knowledge OS_<版本>_x64-setup.exe
+#       dist-windows/Personal Knowledge OS_<版本>_x64-portable.zip
+7zz t "dist-windows/Personal Knowledge OS_$(node -p "require('./package.json').version")_x64-setup.exe"
 ```
 
 > 官方标注跨平台编译为 **experimental**（不支持全部特性）。要发布给真实用户，

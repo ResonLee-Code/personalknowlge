@@ -23,8 +23,9 @@ fi
 
 echo "==> 检查系统依赖"
 MISSING=()
-# libfuse2：AppImage 打包走 linuxdeploy，它需要 FUSE 2（Ubuntu 22.04 默认只带 FUSE 3）
-for pkg in libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 build-essential pkg-config libssl-dev; do
+# libfuse2：AppImage 打包走 linuxdeploy，它需要 FUSE 2（Ubuntu 22.04 默认只带 FUSE 3）；
+# xdg-utils：Tauri/vendor 启动检查需要 `/usr/bin/xdg-open`。
+for pkg in libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 xdg-utils build-essential pkg-config libssl-dev; do
   if ! dpkg -s "${pkg}" >/dev/null 2>&1; then
     MISSING+=("${pkg}")
   fi

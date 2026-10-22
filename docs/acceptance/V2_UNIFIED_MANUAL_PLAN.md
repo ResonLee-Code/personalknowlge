@@ -4,6 +4,9 @@
 > 权威勾选项仍是 [P0 清单](../V2_P0_MANUAL_ACCEPTANCE.md) 和
 > [P1 / P2 清单](../V2_P1_P2_MANUAL_ACCEPTANCE.md)；本文件负责顺序、前置条件与证据口径。
 > 当前未完成：P0 49 项、P1 / P2 27 项。自动测试通过不能替这些项目勾选。
+> 当前 V2 开发版三平台对象已生成；Windows / Linux 的本地结构与虚拟机证据见
+> [跨平台产物记录](./V2_PLATFORM_ARTIFACTS_20261022.md)。人工真机仍必须使用该记录中的
+> commit 与哈希，不能换成未记录的新包。
 
 ## 1. 候选版本冻结
 
@@ -20,6 +23,10 @@
 | Windows 产物与 SHA-256 | |
 | Linux 产物与 SHA-256 | |
 | `latest.json` SHA-256 | |
+
+当前候选开发版本 `9504027` 的三平台对象与哈希已记录在
+[跨平台产物记录](./V2_PLATFORM_ARTIFACTS_20261022.md)。这些对象尚未经过 Developer ID、
+公证、Windows 代码签名或真实设备安装，不能当成 Release 签名产物。
 
 在候选提交上先完成：
 
