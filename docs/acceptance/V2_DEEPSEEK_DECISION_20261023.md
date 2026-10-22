@@ -97,6 +97,9 @@ DeepSeek Key 不能用于 Perplexity 的 `/v1/decisions` 契约。若没有 Perp
 Ask 50 题完整在线评测与人工复核边界另见
 [V2 Ask 真实 DeepSeek 50 题评测](./V2_ASK_LIVE_DEEPSEEK_20261023.md)。
 
+DeepSeek 作为普通 Research 打分与汇总模型时，规则决策档 + 在线打分的实际链路已单独验证，
+见 [V2 DeepSeek Research 打分与汇总实测](./V2_DEEPSEEK_RESEARCH_SCORE_20261023.md)。
+
 ### 最终应用复验
 
 - 重新构建 macOS release `.app`，`codesign --verify --deep --strict` 通过；

@@ -41,7 +41,11 @@ impl Fixture {
         WorkspaceService::new(Arc::clone(&app))
             .create("在线模型测试", &workspace.path().to_string_lossy())
             .expect("创建工作区");
-        Self { data, workspace, app }
+        Self {
+            data,
+            workspace,
+            app,
+        }
     }
 
     fn context(&self) -> Arc<personal_knowledge_os_lib::application::context::WorkspaceContext> {
@@ -216,7 +220,10 @@ fn handle(
 }
 
 fn request(topic: &str) -> ResearchRequest {
-    ResearchRequest { topic: topic.to_string(), ..Default::default() }
+    ResearchRequest {
+        topic: topic.to_string(),
+        ..Default::default()
+    }
 }
 
 fn seed_notes(fixture: &Fixture) {
@@ -269,6 +276,100 @@ fn authorized_remote_model_scores_and_writes_the_report() {
     );
 }
 
+/// 真实 DeepSeek 进入普通 Research 打分与写作链。
+///
+/// 该路径不需要 System One / Perplexity Decisions Key：决策档保持规则档，只打开
+/// `remoteModelScore` 与 `remoteModelCompose`。
+#[test]
+#[ignore = "真机评测：需要 PKOS_LIVE_REMOTE_KEY（可选代理）"]
+fn live_deepseek_scores_and_writes_research() {
+    let Some(key) = std::env::var("PKOS_LIVE_REMOTE_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        eprintln!("跳过：未设置 PKOS_LIVE_REMOTE_KEY");
+        return;
+    };
+    let base = std::env::var("PKOS_LIVE_REMOTE_BASE")
+        .unwrap_or_else(|_| "https://api.deepseek.com".into());
+    let model = std::env::var("PKOS_LIVE_REMOTE_MODEL").unwrap_or_else(|_| "deepseek-flash".into());
+    let fixture = Fixture::new();
+    seed_notes(&fixture);
+    credential_store::set_remote_model_key(fixture.data.path(), Some(&key))
+        .expect("写入临时在线模型 Key");
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            remote_model_base_url: Some(base),
+            remote_model_name: Some(model),
+            remote_model_compose: Some(true),
+            remote_model_score: Some(true),
+            confirm_remote_model: Some(true),
+            decision_provider: Some("rule".to_string()),
+            ..Default::default()
+        })
+        .expect("授权在线模型");
+
+    let started = std::time::Instant::now();
+    let research = ResearchService::new(fixture.context());
+    let session = research.start(request("Rust 异步调度")).expect("立项");
+    let collected = research.collect(&session.id, false).expect("真实模型收集");
+    let trace = collected
+        .decision_trace
+        .as_ref()
+        .expect("收集必须留下 decision trace");
+    assert_eq!(
+        collected.decision_provider.as_deref(),
+        Some("remote.openai-compatible"),
+        "在线模型打分必须生效"
+    );
+    assert!(
+        collected
+            .sources
+            .iter()
+            .all(|source| source.credibility > 0.0),
+        "每个来源都应有正可信度"
+    );
+    println!(
+        "PKOS_LIVE_RESEARCH_SCORE provider={} sources={} trace_attempts={} elapsed_ms={}",
+        collected.decision_provider.as_deref().unwrap_or_default(),
+        collected.sources.len(),
+        trace.attempts.len(),
+        started.elapsed().as_millis()
+    );
+    for source in &collected.sources {
+        println!(
+            "PKOS_LIVE_RESEARCH_SOURCE title={} credibility={:.3}",
+            source.title, source.credibility
+        );
+    }
+
+    research.verify(&session.id, false).expect("真实模型验证");
+    let composed = research.compose(&session.id, false).expect("真实模型汇总");
+    let report = composed.report.as_ref().expect("研究应生成报告");
+    assert_eq!(report.decision_provider, "remote.openai-compatible");
+    assert!(
+        report.composer.starts_with("remote.openai-compatible:"),
+        "汇总必须由在线模型完成：{}",
+        report.composer
+    );
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.kind == WarningKind::ModelGenerated),
+        "真实模型汇总必须标注未经核对"
+    );
+    println!(
+        "PKOS_LIVE_RESEARCH_REPORT composer={} sources={} warnings={} elapsed_ms={}",
+        report.composer,
+        report.references.len(),
+        report.warnings.len(),
+        started.elapsed().as_millis()
+    );
+}
+
 #[test]
 fn without_authorization_nothing_is_sent() {
     let fixture = Fixture::new();
@@ -277,7 +378,10 @@ fn without_authorization_nothing_is_sent() {
     // 配置齐全 + 两个开关都打开，但**没有走首次确认**
     fixture.configure_remote(&stub.endpoint, false, true, true);
     let policy = fixture.policy().policy();
-    assert!(policy.remote_model_base_url.is_some(), "地址本身是合法的，应当被保存");
+    assert!(
+        policy.remote_model_base_url.is_some(),
+        "地址本身是合法的，应当被保存"
+    );
     assert!(policy.remote_model_key_set, "Key 已配置（只回显布尔值）");
     assert!(
         policy.remote_model_authorized_at.is_none(),
@@ -287,7 +391,11 @@ fn without_authorization_nothing_is_sent() {
     let research = ResearchService::new(fixture.context());
     let session = research.start(request("Rust 异步调度")).expect("立项");
     let collected = research.collect(&session.id, false).expect("收集");
-    assert_eq!(collected.decision_provider.as_deref(), Some("rule"), "未授权要退回规则档");
+    assert_eq!(
+        collected.decision_provider.as_deref(),
+        Some("rule"),
+        "未授权要退回规则档"
+    );
     research.verify(&session.id, false).expect("验证");
     let composed = research.compose(&session.id, false).expect("汇总");
     assert_eq!(
@@ -300,10 +408,9 @@ fn without_authorization_nothing_is_sent() {
     // 拒绝必须留下审计（而且是 outbound=false，如实标注「没有外发」）
     let audit = fixture.policy().audit_tail(20).expect("审计");
     assert!(
-        audit
-            .iter()
-            .any(|entry| entry.note.as_deref() == Some("REMOTE_MODEL_UNCONFIRMED")
-                && !entry.outbound),
+        audit.iter().any(
+            |entry| entry.note.as_deref() == Some("REMOTE_MODEL_UNCONFIRMED") && !entry.outbound
+        ),
         "未授权要记一条 outbound=false 的拒绝审计：{audit:?}"
     );
 }
@@ -326,7 +433,10 @@ fn remote_failure_falls_back_to_local_model_then_template() {
         "在线不可用要降到本地模型，而不是直接掉到规则档"
     );
     assert!(local.calls() >= 1, "降级后应当真的调用本地模型");
-    assert!(collected.sources.iter().all(|source| source.credibility > 0.0));
+    assert!(collected
+        .sources
+        .iter()
+        .all(|source| source.credibility > 0.0));
 
     research.verify(&session.id, false).expect("验证");
     let composed = research.compose(&session.id, false).expect("汇总不应失败");
@@ -357,7 +467,10 @@ fn online_failure_without_any_other_tier_falls_back_to_template() {
     let report = composed.report.as_ref().expect("报告");
     assert_eq!(report.composer, "template.draft");
     assert!(
-        report.warnings.iter().any(|warning| warning.message.contains("退回")),
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.message.contains("退回")),
         "降级原因要在警告块里说明：{:?}",
         report
             .warnings
@@ -390,7 +503,11 @@ fn changing_the_endpoint_revokes_the_authorization_and_stops_every_request() {
         })
         .expect("改地址");
     assert!(
-        fixture.policy().policy().remote_model_authorized_at.is_none(),
+        fixture
+            .policy()
+            .policy()
+            .remote_model_authorized_at
+            .is_none(),
         "换地址要重新确认"
     );
 
@@ -418,8 +535,13 @@ fn a_tampered_endpoint_in_the_database_is_never_used() {
         .expect("直接写设置");
 
     let service = fixture.policy();
-    assert!(service.remote_model().is_none(), "裸 IP 在读取侧就必须被拒绝");
-    assert!(service.ensure_remote_model_allowed("research_score").is_err());
+    assert!(
+        service.remote_model().is_none(),
+        "裸 IP 在读取侧就必须被拒绝"
+    );
+    assert!(service
+        .ensure_remote_model_allowed("research_score")
+        .is_err());
 
     let research = ResearchService::new(fixture.context());
     let session = research.start(request("Rust 异步调度")).expect("立项");
@@ -441,13 +563,23 @@ fn the_api_key_never_leaks_into_settings_or_responses() {
         "Key 应写在应用数据目录"
     );
     assert!(
-        !fixture.workspace.path().join("ai-credentials.json").exists(),
+        !fixture
+            .workspace
+            .path()
+            .join("ai-credentials.json")
+            .exists(),
         "工作区里绝不能出现凭据文件（会被备份/导出带走）"
     );
 
     let settings_json = serde_json::to_string(&fixture.policy().policy()).expect("序列化策略");
-    assert!(!settings_json.contains(API_KEY), "策略响应里不得包含 Key：{settings_json}");
-    assert!(settings_json.contains("\"remoteModelKeySet\":true"), "只回显「已配置」");
+    assert!(
+        !settings_json.contains(API_KEY),
+        "策略响应里不得包含 Key：{settings_json}"
+    );
+    assert!(
+        settings_json.contains("\"remoteModelKeySet\":true"),
+        "只回显「已配置」"
+    );
 
     // 审计里也不得有 Key
     let audit_json =
@@ -483,15 +615,24 @@ fn per_send_confirmation_blocks_every_request_when_not_confirmed() {
     let session = research.start(request("Rust 异步调度")).expect("立项");
     research.collect(&session.id, false).expect("收集");
     research.verify(&session.id, false).expect("验证");
-    let composed = research.compose(&session.id, false).expect("汇总要降级而不是失败");
+    let composed = research
+        .compose(&session.id, false)
+        .expect("汇总要降级而不是失败");
 
     assert_eq!(stub.calls(), 0, "未逐次确认时一个请求都不能发出去");
     let report = composed.report.as_ref().expect("报告");
     assert_eq!(report.composer, "template.draft", "应降级到模板实现");
     assert!(
-        report.warnings.iter().any(|warning| warning.message.contains("逐次外发确认")),
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.message.contains("逐次外发确认")),
         "报告要说清为什么没用在线模型：{:?}",
-        report.warnings.iter().map(|warning| &warning.message).collect::<Vec<_>>()
+        report
+            .warnings
+            .iter()
+            .map(|warning| &warning.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -540,12 +681,24 @@ fn outbound_preview_lists_host_and_snippets_without_sending() {
     let other_stub = spawn_remote_server("（桩模型）不会被调用。");
     other.configure_remote(&other_stub.endpoint, false, true, false);
     let other_research = ResearchService::new(other.context());
-    let other_session = other_research.start(request("Rust 异步调度")).expect("立项");
-    other_research.collect(&other_session.id, false).expect("收集");
-    other_research.verify(&other_session.id, false).expect("验证");
-    let other_preview = other_research.outbound_preview(&other_session.id).expect("预览");
+    let other_session = other_research
+        .start(request("Rust 异步调度"))
+        .expect("立项");
+    other_research
+        .collect(&other_session.id, false)
+        .expect("收集");
+    other_research
+        .verify(&other_session.id, false)
+        .expect("验证");
+    let other_preview = other_research
+        .outbound_preview(&other_session.id)
+        .expect("预览");
     assert!(!other_preview.will_send, "未授权 → 不会外发");
-    assert!(other_preview.reason.contains("授权"), "{}", other_preview.reason);
+    assert!(
+        other_preview.reason.contains("授权"),
+        "{}",
+        other_preview.reason
+    );
     assert_eq!(other_stub.calls(), 0);
 }
 
@@ -590,7 +743,10 @@ fn semantic_conflict_judgement_uses_the_model_when_available() {
         Some("remote.openai-compatible"),
         "冲突应当由模型判定"
     );
-    assert!(!report.conflicts.is_empty(), "桩模型判冲突 → 第 3 段应有冲突");
+    assert!(
+        !report.conflicts.is_empty(),
+        "桩模型判冲突 → 第 3 段应有冲突"
+    );
 }
 
 /// Track C5：模型不可用时**回退规则档**，并在报告里注明是规则档判的。
@@ -601,7 +757,10 @@ fn conflict_falls_back_to_the_rule_tier_and_says_so() {
     // 本地模型开关打开，但地址没人听 → 语义档不可用 → 规则档
     fixture
         .policy()
-        .update(UpdateAiPolicyInput { enabled: Some(true), ..Default::default() })
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            ..Default::default()
+        })
         .expect("开启 AI");
     fixture.configure_local(&dead_endpoint(), true, true);
 
@@ -633,7 +792,10 @@ fn scoring_records_a_trace_and_hits_the_cache_on_a_repeat_run() {
     let first = research.start(request("Rust 异步调度")).expect("立项");
     let collected = research.collect(&first.id, false).expect("收集");
 
-    let trace = collected.decision_trace.as_ref().expect("打分必须留下 Trace");
+    let trace = collected
+        .decision_trace
+        .as_ref()
+        .expect("打分必须留下 Trace");
     assert_eq!(trace.kind, "RELEVANCE");
     assert_eq!(trace.cache, "miss", "第一次必然未命中");
     assert_eq!(trace.provider, "remote.openai-compatible");
@@ -651,13 +813,19 @@ fn scoring_records_a_trace_and_hits_the_cache_on_a_repeat_run() {
     let second = research.start(request("Rust 异步调度")).expect("再次立项");
     let again = research.collect(&second.id, false).expect("再次收集");
     let trace_again = again.decision_trace.as_ref().expect("Trace");
-    assert_eq!(trace_again.cache, "hit", "同输入第二次应当命中缓存：{trace_again:?}");
+    assert_eq!(
+        trace_again.cache, "hit",
+        "同输入第二次应当命中缓存：{trace_again:?}"
+    );
     assert_eq!(stub.calls(), calls_after_first, "命中缓存就不该再调模型");
 
     // 报告里也要能看到这条 Trace（"每次打分都有可解释 Trace"）
     research.verify(&second.id, false).expect("验证");
     let composed = research.compose(&second.id, false).expect("汇总");
     let report = composed.report.as_ref().expect("报告");
-    let report_trace = report.decision_trace.as_ref().expect("报告要带上打分的 Trace");
+    let report_trace = report
+        .decision_trace
+        .as_ref()
+        .expect("报告要带上打分的 Trace");
     assert_eq!(report_trace.cache, "hit");
 }

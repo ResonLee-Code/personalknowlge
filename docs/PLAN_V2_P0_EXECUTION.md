@@ -27,6 +27,7 @@
 | 本机真实同步服务 | rclone WebDAV / S3 均完成 PUT / GET / DELETE；应用两逻辑设备上传、dry-run、下载解密通过，远端无明文 |
 | DeepSeek 在线模型 | `deepseek-flash` 首个正文 token 中位 1201.6ms、总耗时中位 1780.5ms；10 题最终引用正确 10/10，首轮在线引用合规 9/10，失败均安全降级 |
 | DeepSeek Ask 50 题 | 连续两轮在线接受 50/50、正确来源 50/50、引用支持 50/50；引用精确率均为 100% |
+| DeepSeek Research 打分 | 规则决策档 + 在线打分实际生效；2 个来源 1.8s 完成打分，DeepSeek 7.8s 完成报告汇总 |
 | Organize 标签 200 题预检 | 真实 DeepSeek 200/200 成功，生成 936 个标签；精确率 97.86%、至少含一个相关标签的召回 100% |
 | 决策 Key 持久化 | 修复后端忽略 `decisionApiKey` 与前端保存失败仍清空输入的问题；Rust 凭据测试和前端保留输入测试通过 |
 | macOS release `.app` 最终复建 | ad-hoc 签名校验通过；真实 `knowledge` 工作区打开成功；假决策 Key 可保存并清除，凭据文件仍为 `0600` |
