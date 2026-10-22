@@ -228,6 +228,66 @@ impl ResearchService {
         Ok(persisted)
     }
 
+    /// 全部联网查询失败：把已完成的本地 / 外部来源保存为可恢复草稿。
+    ///
+    /// 网络断开、代理故障或检索源临时不可用时，不能把“部分成功”覆盖成
+    /// `Collected`，否则用户恢复网络后已无法再次进入收集步骤。这里复用中止状态机：
+    /// 原因如实写明联网失败，恢复后 `collect` 会从已有来源去重继续补缺口。
+    fn finish_interrupted_web_collect(
+        &self,
+        session_id: &str,
+        sources: Vec<ResearchSource>,
+        failures: &[String],
+        web_fetched: usize,
+    ) -> Result<ResearchSession> {
+        let mut persisted = self.load(session_id)?;
+        persisted.sources = sources;
+        persisted.status = ResearchStatus::Aborted;
+        persisted.abort_reason = Some(format!(
+            "联网检索中断：{}；已保留 {} 条已完成来源，恢复网络后可继续补缺。",
+            failures.join("；"),
+            persisted.sources.len()
+        ));
+        if let Some(plan) = persisted.plan.as_mut() {
+            let counts: std::collections::HashMap<String, usize> = persisted.sources.iter().fold(
+                std::collections::HashMap::new(),
+                |mut acc, source| {
+                    *acc.entry(source.sub_question_id.clone()).or_insert(0) += 1;
+                    acc
+                },
+            );
+            for question in plan.sub_questions.iter_mut() {
+                question.local_hits = counts.get(&question.id).copied().unwrap_or(0);
+            }
+        }
+        persisted.updated_at = now_iso();
+        persisted.steps.push(ResearchStepLog {
+            step: "collect".to_string(),
+            at: now_iso(),
+            detail: format!(
+                "联网检索中断：{} 条计划查询失败；已保留 {} 条来源作为可恢复草稿",
+                failures.len(),
+                persisted.sources.len()
+            ),
+        });
+        self.save(&persisted)?;
+        self.emit_progress(
+            session_id,
+            "collect",
+            "联网检索中断：已完成来源已保留，恢复后可继续补缺",
+            web_fetched,
+            persisted.sources.len(),
+        );
+        self.policy().audit(
+            "research_collect",
+            false,
+            "error",
+            0,
+            Some("WEB_INTERRUPTED"),
+        );
+        Ok(persisted)
+    }
+
     /// 长步骤收尾时，若用户在这期间点了中止：把**这一步的成果**并回那份「已中止」的会话。
     ///
     /// 状态与中止原因保持磁盘上的值（中止优先），成果按 `apply` 合并——这样既不会
@@ -1161,11 +1221,15 @@ impl ResearchService {
                 return self.finish_aborted_collect(session_id, sources, None, web_fetched);
             }
             if hits.is_empty() {
-                web_note = if failures.is_empty() {
-                    "联网检索没有返回候选来源".to_string()
-                } else {
-                    format!("联网检索未成功：{}", failures.join("；"))
-                };
+                if !failures.is_empty() {
+                    return self.finish_interrupted_web_collect(
+                        session_id,
+                        sources,
+                        &failures,
+                        web_fetched,
+                    );
+                }
+                web_note = "联网检索没有返回候选来源".to_string();
             } else {
                 let mut web_seen: Vec<String> = sources
                     .iter()
@@ -1269,7 +1333,17 @@ impl ResearchService {
                     });
                 }
                 if web_collected == 0 {
-                    web_note = "联网检索没有返回可用来源".to_string();
+                    let retained_web = sources
+                        .iter()
+                        .filter(|source| source.origin == SourceOrigin::Web)
+                        .count();
+                    web_note = if retained_web > 0 {
+                        format!(
+                            "联网查询未新增外部来源；保留恢复前已有的外部来源 {retained_web} 条"
+                        )
+                    } else {
+                        "联网检索没有返回可用来源".to_string()
+                    };
                 } else {
                     web_note = format!(
                             "外部来源 {web_collected} 条（实际抓取正文 {web_fetched} 页；预算：≤{} 页 / ≤{} 秒）",
@@ -1307,6 +1381,14 @@ impl ResearchService {
                 question.local_hits = per_question.get(index).copied().unwrap_or(0);
             }
         }
+        let local_total = sources
+            .iter()
+            .filter(|source| source.origin == SourceOrigin::Local)
+            .count();
+        let web_total = sources
+            .iter()
+            .filter(|source| source.origin == SourceOrigin::Web)
+            .count();
         // 决策层打分（§9.6）：规则档默认；开了本地模型就由它打分、失败自动降级
         let (decision_provider, score_fallback, decision_trace) =
             self.score_sources(&plan.topic, &mut sources, confirmed);
@@ -1338,8 +1420,7 @@ impl ResearchService {
             at: now_iso(),
             detail: format!(
                 "本地材料 {} 条（读取笔记 {} 篇）；{web_note}",
-                session.sources.len() - web_collected,
-                notes_read,
+                local_total, notes_read,
             ),
         });
         self.save(&session)?;
@@ -1349,8 +1430,8 @@ impl ResearchService {
             &format!(
                 "收集完成：来源 {} 条（本地 {} 条 / 外部 {} 条）",
                 session.sources.len(),
-                session.sources.len() - web_collected,
-                web_collected
+                local_total,
+                web_total
             ),
             web_fetched,
             session.sources.len(),

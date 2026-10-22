@@ -20,6 +20,7 @@
 | `pnpm tauri build --debug --no-bundle` | 桌面二进制构建通过 |
 | `pnpm test:ask-eval` | 50 正样本、20 负样本全部过门禁 |
 | Ask 作用域与追问隔离 | 10 条查询覆盖 Note / Category / Tag / All；5 轮虚构历史答案均未进入本轮结论或引用 |
+| Research 网络中断恢复 | 真实本机 TCP 中途断连后保留已完成来源、进入可恢复状态；恢复网络后补缺且不复制来源 |
 | `pnpm test:release-manifest` | 三平台映射、Linux `AppImage.tar.gz`、GitHub 资产名归一化与缺签名拒绝测试通过 |
 | `pnpm test:update-signature` | 一次性测试密钥：有效载荷通过、篡改载荷拒绝、版本签名绑定校验通过 |
 | `runtime_contract` / release App 实启 | updater 配置可反序列化；窗口位置恢复权限完整；macOS release 包真实打开 10 万篇工作区 |

@@ -2,6 +2,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -10,7 +11,7 @@ use personal_knowledge_os_lib::application::ai::research::ResearchService;
 use personal_knowledge_os_lib::application::note_service::NoteService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
-use personal_knowledge_os_lib::domain::ai::UpdateAiPolicyInput;
+use personal_knowledge_os_lib::domain::ai::{ResearchBudget, UpdateAiPolicyInput};
 use personal_knowledge_os_lib::domain::note::CreateNoteInput;
 use personal_knowledge_os_lib::domain::research::{
     ResearchPlanEdit, ResearchRequest, ResearchStatus,
@@ -113,6 +114,61 @@ fn handle_search_request(
     );
     stream.write_all(response.as_bytes())?;
     stream.flush()
+}
+
+fn spawn_interrupting_search_server() -> (String, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("绑定中断检索源");
+    let port = listener.local_addr().expect("中断检索源地址").port();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&requests);
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let index = counter.fetch_add(1, Ordering::SeqCst);
+            let mut reader = BufReader::new(stream.try_clone().expect("读取请求"));
+            let mut request_line = String::new();
+            let _ = reader.read_line(&mut request_line);
+            loop {
+                let mut header = String::new();
+                if reader.read_line(&mut header).unwrap_or(0) == 0 || header == "\r\n" {
+                    break;
+                }
+            }
+            if index == 0 {
+                let body = r#"{"results":[]}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            } else {
+                // 模拟第二、第三条查询时网络突然断开：不返回状态行或正文。
+                drop(stream);
+            }
+        }
+    });
+    (format!("127.0.0.1:{port}"), requests)
+}
+
+fn spawn_recovered_search_server() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("绑定恢复检索源");
+    let port = listener.local_addr().expect("恢复检索源地址").port();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let body = r#"{"results":[{"title":"官方调度文档","url":"https://docs.example/guide","content":"Rust async scheduler documentation","publishedDate":"2026-01-01"}]}"#;
+            let _ = stream.write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            );
+            let _ = stream.flush();
+        }
+    });
+    format!("127.0.0.1:{port}")
 }
 
 #[test]
@@ -254,6 +310,122 @@ fn aborted_collection_can_resume_without_duplicating_finished_sources() {
         "恢复后不能重复来源"
     );
     assert_eq!(collected_again.sources.len(), count);
+}
+
+#[test]
+fn interrupted_web_collection_keeps_partial_sources_and_resumes() {
+    let fixture = Fixture::new();
+    fixture.note(
+        "Rust 异步调度本地基线",
+        "Rust 异步调度采用任务唤醒、本地队列和工作窃取。",
+    );
+    let (search_host, interrupted_requests) = spawn_interrupting_search_server();
+    AiPolicyService::new(fixture.context())
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            allow_fetch_body: Some(false),
+            domain_allowlist: Some(vec!["127.0.0.1".to_string(), "docs.example".to_string()]),
+            search_endpoint: Some(format!(
+                "http://{search_host}/search?q={{query}}&limit={{limit}}"
+            )),
+            budget: Some(ResearchBudget {
+                max_subquestions: 3,
+                max_pages: 4,
+                max_duration_secs: 60,
+            }),
+            ..Default::default()
+        })
+        .expect("配置联网研究");
+
+    let research = fixture.research();
+    let session = research
+        .start(ResearchRequest {
+            topic: "Rust 异步调度".to_string(),
+            source_types: Vec::new(),
+            ..Default::default()
+        })
+        .expect("立项");
+    let planned = research
+        .update_plan(
+            &session.id,
+            ResearchPlanEdit {
+                sub_questions: Some(vec![
+                    "工作窃取如何实现？".to_string(),
+                    "断网恢复有哪些风险？".to_string(),
+                ]),
+                ..Default::default()
+            },
+        )
+        .expect("生成多条联网查询");
+    assert!(
+        planned
+            .plan
+            .as_ref()
+            .is_some_and(|plan| plan.queries.len() >= 2),
+        "该场景需要至少两条联网查询：{:?}",
+        planned.plan.as_ref().map(|plan| plan.queries.clone())
+    );
+    let interrupted = research
+        .collect(&session.id, true)
+        .expect("断网应返回可恢复的草稿，而不是丢掉已完成来源");
+    assert!(interrupted_requests.load(Ordering::SeqCst) >= 1);
+    assert_eq!(
+        interrupted.status,
+        ResearchStatus::Aborted,
+        "联网查询中途失败时应保留已完成来源并进入可恢复状态"
+    );
+    assert!(
+        interrupted
+            .abort_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("联网")),
+        "{:?}",
+        interrupted.abort_reason
+    );
+    let partial_count = interrupted.sources.len();
+    assert!(partial_count > 0, "至少应保留本地或已成功查询的来源");
+
+    let recovered_host = spawn_recovered_search_server();
+    AiPolicyService::new(fixture.context())
+        .update(UpdateAiPolicyInput {
+            search_endpoint: Some(format!(
+                "http://{recovered_host}/search?q={{query}}&limit={{limit}}"
+            )),
+            ..Default::default()
+        })
+        .expect("切换到恢复后的检索源");
+    research.resume_aborted(&session.id).expect("恢复会话");
+    let recovered = research.collect(&session.id, true).expect("继续收集");
+    assert_eq!(recovered.status, ResearchStatus::Collected);
+    assert!(
+        recovered
+            .sources
+            .iter()
+            .filter_map(|source| source.url.clone().or(source.note_id.clone()))
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            == recovered.sources.len(),
+        "恢复后不能复制已完成来源：{:?}",
+        recovered.sources
+    );
+    assert!(
+        recovered
+            .sources
+            .iter()
+            .any(|source| source.url.as_deref() == Some("https://docs.example/guide")),
+        "恢复后应补齐断网时未完成的联网来源"
+    );
+    let collect_detail = recovered
+        .steps
+        .iter()
+        .rev()
+        .find(|step| step.step == "collect")
+        .map(|step| step.detail.as_str())
+        .expect("恢复后收集步骤");
+    assert!(collect_detail.contains("本地材料 1 条"), "{collect_detail}");
+    assert!(collect_detail.contains("外部来源 1 条"), "{collect_detail}");
 }
 
 #[test]

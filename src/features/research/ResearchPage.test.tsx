@@ -369,6 +369,27 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     expect(await screen.findByTestId('research-history')).toBeInTheDocument();
   });
 
+  it('联网中断会说明原因，并可从已完成来源恢复继续', async () => {
+    vi.spyOn(researchService, 'start').mockResolvedValue(planned());
+    vi.spyOn(researchService, 'collect').mockResolvedValue({
+      ...planned(),
+      status: 'aborted',
+      abortReason: '联网检索中断：连接被重置；已保留 2 条已完成来源，恢复网络后可继续补缺。',
+    });
+    const resume = vi.spyOn(researchService, 'resume').mockResolvedValue(planned());
+
+    renderPage();
+    await userEvent.type(await screen.findByTestId('research-topic'), 'Rust 异步运行时调度');
+    await userEvent.click(screen.getByTestId('research-start'));
+    await userEvent.click(await screen.findByTestId('research-collect'));
+
+    const reason = await screen.findByTestId('research-abort-reason');
+    expect(reason).toHaveTextContent('联网检索中断');
+    expect(reason).toHaveTextContent('保留 2 条已完成来源');
+    await userEvent.click(screen.getByRole('button', { name: '恢复并继续' }));
+    await waitFor(() => expect(resume).toHaveBeenCalledWith('research_1'));
+  });
+
   it('联网档位打开时，收集前先弹一次说明并在确认后带 confirmed 调用（§9.7）', async () => {
     vi.spyOn(aiService, 'policy').mockResolvedValue({
       ...enabledPolicy,

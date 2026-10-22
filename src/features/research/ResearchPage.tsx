@@ -630,6 +630,15 @@ export function ResearchPage() {
             </p>
           ) : (
             <>
+              {session.status === 'aborted' && session.abortReason ? (
+                <div
+                  data-testid="research-abort-reason"
+                  className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200"
+                >
+                  <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{session.abortReason}</span>
+                </div>
+              ) : null}
               <section className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-subtle)] p-3">
                 {STEPS.map((step, index) => {
                   const done = currentIndex >= index && currentIndex >= 0;
