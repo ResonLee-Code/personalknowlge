@@ -32,7 +32,7 @@
 | Organize 标签 200 题预检 | 真实 DeepSeek 200/200 成功，生成 936 个标签；精确率 97.86%、至少含一个相关标签的召回 100% |
 | Organize 摘要 20 题预检 | DeepSeek 20/20 成功，关键事实 60/60，未发现跨主题虚构标记 |
 | 决策 Key 持久化 | 修复后端忽略 `decisionApiKey` 与前端保存失败仍清空输入的问题；Rust 凭据测试和前端保留输入测试通过 |
-| macOS release `.app` 最终复建 | `adb8227` 干净构建；ad-hoc 签名通过，CDHash `7747893d3ec98d48498fd9d8f31e8e2b7559000e`；真实 `knowledge` 工作区成功打开 |
+| macOS release `.app` 最终复建 | `5c11ad9` 干净构建；ad-hoc 签名通过，CDHash `d3a4b68a7f89d46c29a0ecf8fe358d5ae746bf17`；真实 `knowledge` 工作区已自动打开 |
 | `pnpm test:release-manifest` | 三平台映射、Linux `AppImage.tar.gz`、GitHub 资产名归一化与缺签名拒绝测试通过 |
 | `pnpm test:update-signature` | 一次性测试密钥：有效载荷通过、篡改载荷拒绝、版本签名绑定校验通过 |
 | `runtime_contract` / release App 实启 | updater 配置可反序列化；窗口位置恢复权限完整；macOS release 包真实打开 10 万篇工作区 |
