@@ -85,6 +85,8 @@ P0 的状态与人工项仍以 [V2_P0_MANUAL_ACCEPTANCE.md](./V2_P0_MANUAL_ACCEP
 - [x] 后台扫描已有测试；手动重建在命令线程外执行，失败保留旧索引状态并提示。
 - [x] 搜索结果改为虚拟列表，100 条每页只挂载视口附近节点。
 - [x] 10 万 Graph 与完整 App 冷启动分开记录，不混写。
+- [x] macOS release 完成 10 万高频结果的分页、连续滚动与虚拟列表预检；无白块或跳位
+      （[证据](./acceptance/V2_SCALE_UI_100K_20261023.md)）。
 
 人工：Developer ID / 公证后的干净机器冷启动、Windows 与 Linux 真机安装升级。
 
