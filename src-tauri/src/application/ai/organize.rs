@@ -33,6 +33,7 @@ use crate::repositories::ai_organize_repository::{
 use super::embeddings::{embedding_provider, MAX_INPUT_CHARS};
 use super::model_gateway::generation_candidates;
 use super::policy::AiPolicyService;
+use super::research::polarity;
 use super::traits::{GenerationRequest, RetrievedChunk};
 use super::vector_index::VectorIndexService;
 
@@ -727,21 +728,19 @@ impl OrganizeService {
                     .into_iter()
                     .take(MAX_RELATION_SUGGESTIONS)
                     .enumerate()
-                    .map(|(index, (_, summary, title_score, body_score))| SuggestedRelation {
-                        target_note_id: summary.id,
-                        target_title: summary.title,
-                        relation_type: if index < 2 {
-                            "RELATED_TO"
-                        } else {
-                            "WIKILINK"
-                        }
-                        .to_string(),
-                        reason: format!(
-                            "标题相似度 {:.0}%，正文相似度 {:.0}%",
-                            title_score * 100.0,
-                            body_score * 100.0
-                        ),
-                    })
+                    .map(
+                        |(index, (_, summary, title_score, body_score))| SuggestedRelation {
+                            target_note_id: summary.id,
+                            target_title: summary.title,
+                            relation_type: if index < 2 { "RELATED_TO" } else { "WIKILINK" }
+                                .to_string(),
+                            reason: format!(
+                                "标题相似度 {:.0}%，正文相似度 {:.0}%",
+                                title_score * 100.0,
+                                body_score * 100.0
+                            ),
+                        },
+                    )
                     .collect();
                 Ok((
                     AiSuggestionPayload::Relations { relations },
@@ -751,6 +750,7 @@ impl OrganizeService {
             }
             SuggestionKind::Duplicate => {
                 let current_chars = char_bigrams(body);
+                let current_polarity = polarity(&format!("{title}\n{body}"));
                 let (semantic_scores, vector_outbound_attempted) = if allow_vector_outbound {
                     if let Some(provider) = embedding_provider(&self.ctx) {
                         let hits = VectorIndexService::new(Arc::clone(&self.ctx))
@@ -788,11 +788,18 @@ impl OrganizeService {
                     if title_score < 0.45 {
                         continue;
                     }
-                    let body_score = NoteService::new(Arc::clone(&self.ctx))
-                        .get(&summary.id)
-                        .ok()
-                        .map(|detail| jaccard(&current_chars, &char_bigrams(&detail.content)))
-                        .unwrap_or(0.0);
+                    let Ok(candidate) = NoteService::new(Arc::clone(&self.ctx)).get(&summary.id)
+                    else {
+                        continue;
+                    };
+                    let candidate_polarity =
+                        polarity(&format!("{}\n{}", candidate.note.title, candidate.content));
+                    if (current_polarity > 0 && candidate_polarity < 0)
+                        || (current_polarity < 0 && candidate_polarity > 0)
+                    {
+                        continue;
+                    }
+                    let body_score = jaccard(&current_chars, &char_bigrams(&candidate.content));
                     let vector_score = semantic_scores
                         .as_ref()
                         .and_then(|scores| scores.get(&summary.id).copied());

@@ -664,6 +664,33 @@ fn generation_is_gated_and_never_changes_markdown_until_accept() {
 }
 
 #[test]
+fn duplicate_suggestion_rejects_opposite_conclusions() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    let enable = fixture.note("缓存策略", "# 缓存策略\n\n建议启用写入缓存。");
+    fixture.note("缓存策略", "# 缓存策略\n\n建议启用写入缓存。");
+    fixture.note("缓存策略", "# 缓存策略\n\n不建议启用写入缓存。");
+
+    let suggestion = fixture
+        .organize()
+        .generate(&enable, SuggestionKind::Duplicate)
+        .expect("生成重复建议");
+    let candidates = match suggestion.payload {
+        AiSuggestionPayload::Duplicate { candidates } => candidates,
+        other => panic!("重复建议返回了错误载荷：{other:?}"),
+    };
+    assert_eq!(candidates.len(), 1, "只应留下真正重复的副本");
+    assert!(
+        candidates[0]
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("正文相似度")),
+        "保留的候选应带相似度证据：{:?}",
+        candidates[0].reasons
+    );
+}
+
+#[test]
 fn configured_local_model_refines_summary_and_records_its_provider() {
     let fixture = Fixture::new();
     let note_id = fixture.note("索引设计", "SQLite FTS5 使用倒排索引。");
