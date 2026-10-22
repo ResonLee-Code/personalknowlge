@@ -35,6 +35,8 @@ P0 的状态与人工项仍以 [V2_P0_MANUAL_ACCEPTANCE.md](./V2_P0_MANUAL_ACCEP
 - [x] 命令契约、mock 行为与 Rust DTO 同规则。
 - [x] 3 万 Graph 回归保持 `< 1.5s`；10 万首屏实测 `2866.6ms < 3s`。
 - [x] 每条近邻和聚类至少有一条证据；无证据结果不展示为“相似”。
+- [x] 20 对近重复预检：10 对相同正文全部聚类，10 对相反结论全部分离；显式否定优先于
+      正向子串（[证据](./acceptance/V2_GRAPH_NEAR_DUPLICATE_20261023.md)）。
 
 ### 2.3 人工验收
 

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::application::ai::embeddings::RemoteEmbeddingProvider;
+use crate::application::ai::research::polarity;
 use crate::application::ai::vector_index::{cosine_similarity, VectorStore};
 use crate::application::context::WorkspaceContext;
 use crate::application::graph_service::GraphService;
@@ -653,8 +654,14 @@ fn near_duplicates(corpus: &[NoteCorpus], threshold: f64) -> Vec<DuplicateCluste
 
     let mut union = UnionFind::new(corpus.len());
     let mut pair_score: HashMap<(usize, usize), f64> = HashMap::new();
+    let polarities: Vec<i32> = corpus.iter().map(|item| polarity(&item.plain)).collect();
     for (pair, votes) in pair_votes {
         if votes < 2 {
+            continue;
+        }
+        let left_polarity = polarities[pair.0];
+        let right_polarity = polarities[pair.1];
+        if (left_polarity > 0 && right_polarity < 0) || (left_polarity < 0 && right_polarity > 0) {
             continue;
         }
         let score = if exact_pairs.contains(&pair) {

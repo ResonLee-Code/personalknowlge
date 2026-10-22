@@ -1148,9 +1148,7 @@ impl ResearchService {
                         .find_map(|(key, value)| {
                             if !matches!(
                                 key.as_str(),
-                                "applicable_version"
-                                    | "applicableVersion"
-                                    | "applicable-version"
+                                "applicable_version" | "applicableVersion" | "applicable-version"
                             ) {
                                 return None;
                             }
@@ -2594,7 +2592,7 @@ fn claim_map(session: &ResearchSession) -> HashMap<String, Vec<String>> {
 }
 
 /// 「冲突」判定的正/负面词表（D4 规则档；模型/Jev 接入后换成语义比对）。
-const POSITIVE_MARKERS: [&str; 9] = [
+const POSITIVE_MARKERS: [&str; 10] = [
     "支持",
     "可以",
     "推荐",
@@ -2604,9 +2602,14 @@ const POSITIVE_MARKERS: [&str; 9] = [
     "有效",
     "最佳",
     "建议使用",
+    "建议",
 ];
-const NEGATIVE_MARKERS: [&str; 11] = [
+const NEGATIVE_MARKERS: [&str; 15] = [
     "不支持",
+    "不建议",
+    "不应",
+    "不可",
+    "不得",
     "不能",
     "无法",
     "禁止",
@@ -2620,17 +2623,21 @@ const NEGATIVE_MARKERS: [&str; 11] = [
 ];
 
 /// 表述极性：>0 偏正面，<0 偏负面，0 中立。
-fn polarity(text: &str) -> i32 {
+pub(crate) fn polarity(text: &str) -> i32 {
     let lowered = text.to_lowercase();
-    let positive = POSITIVE_MARKERS
-        .iter()
-        .filter(|marker| lowered.contains(*marker))
-        .count() as i32;
     let negative = NEGATIVE_MARKERS
         .iter()
         .filter(|marker| lowered.contains(*marker))
         .count() as i32;
-    positive - negative
+    if negative > 0 {
+        // "不支持" 同时包含正向子串 "支持"；冲突判断必须让显式否定优先，
+        // 否则正负相抵会把明确反对误判成中立。
+        return -negative;
+    }
+    POSITIVE_MARKERS
+        .iter()
+        .filter(|marker| lowered.contains(*marker))
+        .count() as i32
 }
 
 /// 同一子问题下的来源是否**互相矛盾**（既有正面表述、也有负面表述）。
@@ -3328,6 +3335,7 @@ mod tests {
     fn polarity_and_conflict_detection_are_conservative() {
         assert!(polarity("推荐使用 tokio 的实现") > 0);
         assert!(polarity("不建议使用，存在风险与限制") < 0);
+        assert!(polarity("不支持写入缓存") < 0, "显式否定必须优先于正向子串");
         assert_eq!(polarity("本章介绍调度器的实现细节"), 0);
 
         let positive = source("https://docs.rs/a", "调度方案推荐", "推荐使用工作窃取队列");

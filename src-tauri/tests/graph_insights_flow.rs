@@ -139,3 +139,61 @@ fn returns_explainable_neighbors_and_read_only_duplicate_previews() {
         .content;
     assert_eq!(before, after, "洞察必须是只读计算");
 }
+
+#[test]
+fn twenty_near_duplicate_pairs_separate_opposite_conclusions() {
+    let fixture = Fixture::new();
+    let mut exact_pairs = Vec::new();
+    let mut opposite_pairs = Vec::new();
+    for index in 0..10 {
+        let marker = format!("证据标记{index:02}");
+        let enable_body =
+            format!("# 缓存策略 {index:02}\n\n建议启用写入缓存，{marker}，以提升吞吐并降低延迟。");
+        let enable = fixture.note(&format!("缓存策略 {index:02}"), &enable_body);
+        let copy = fixture.note(&format!("缓存策略 {index:02} 副本"), &enable_body);
+        let reject = fixture.note(
+            &format!("缓存策略 {index:02} 反例"),
+            &format!("# 缓存策略 {index:02}\n\n不建议启用写入缓存，{marker}，因为可能丢失数据。"),
+        );
+        exact_pairs.push((enable.clone(), copy));
+        opposite_pairs.push((enable, reject));
+    }
+
+    let report = fixture
+        .insights()
+        .insights(GraphInsightsQuery {
+            focus_note_id: exact_pairs.first().map(|pair| pair.0.clone()),
+            duplicate_threshold: Some(0.6),
+            ..Default::default()
+        })
+        .expect("生成洞察");
+
+    let member_ids: Vec<std::collections::HashSet<&str>> = report
+        .duplicate_clusters
+        .iter()
+        .map(|cluster| {
+            cluster
+                .members
+                .iter()
+                .map(|item| item.note_id.as_str())
+                .collect()
+        })
+        .collect();
+    for (left, right) in exact_pairs {
+        assert!(
+            member_ids
+                .iter()
+                .any(|members| members.contains(left.as_str()) && members.contains(right.as_str())),
+            "相同正文必须进入同一近重复簇：{left} / {right}"
+        );
+    }
+    for (enable, reject) in opposite_pairs {
+        assert!(
+            !member_ids
+                .iter()
+                .any(|members| members.contains(enable.as_str())
+                    && members.contains(reject.as_str())),
+            "相反结论不能被合并为近重复：{enable} / {reject}"
+        );
+    }
+}
