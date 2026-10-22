@@ -9,7 +9,7 @@
 - 候选产物：[V2_PLATFORM_ARTIFACTS_20261022.md](./V2_PLATFORM_ARTIFACTS_20261022.md)
 - 权威剩余项：[V2 P0 人工清单](../V2_P0_MANUAL_ACCEPTANCE.md)
   + [V2 P1 / P2 人工清单](../V2_P1_P2_MANUAL_ACCEPTANCE.md)
-- 当前剩余：P0 **37 项**、P1 / P2 **26 项**，合计 **63 项**
+- 当前剩余：P0 **37 项**、P1 / P2 **25 项**，合计 **62 项**
 
 ## 2026-10-22 环境盘点
 
@@ -52,7 +52,7 @@ AI 总开关已额外通过真实 UI 打开并完成本地 / 模板链路冒烟�
 | 隐私外发抓包 | 1 | 在线模型未授权场景的真实抓包 |
 | 发布前抽验 | 5 | 正式签名 Release、旧版数据、公证冷启动 |
 
-### P1 / P2：26 项
+### P1 / P2：25 项
 
 | 分组 | 数量 | 主要前置条件 |
 | --- | ---: | --- |
@@ -61,7 +61,7 @@ AI 总开关已额外通过真实 UI 打开并完成本地 / 模板链路冒烟�
 | 真实 S3 兼容存储 | 3 | 用户 bucket / region / endpoint / AK / SK |
 | 同步安全与 Windows ACL | 2 | 抓包工具、Windows 真机 |
 | Scale 2.0 | 4 | 公证后的 macOS 干净机、Windows / Linux 物理机 |
-| Writing 2.0 | 5 | 真实在线 / 本地模型、macOS / Windows 真机 |
+| Writing 2.0 | 4 | 人工质量、逐段语义支持、macOS / Windows 真机、外发抓包 |
 
 ## 解锁后的执行顺序
 

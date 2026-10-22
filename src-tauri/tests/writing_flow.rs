@@ -11,6 +11,7 @@ use personal_knowledge_os_lib::domain::note::{CreateNoteInput, SaveNoteInput};
 use personal_knowledge_os_lib::domain::writing::{
     WritingApplyInput, WritingMode, WritingRequest, WritingSegment, WritingSummarySaveInput,
 };
+use personal_knowledge_os_lib::infrastructure::credential_store;
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -44,6 +45,10 @@ impl Fixture {
 
     fn notes(&self) -> NoteService {
         NoteService::new(self.app.context().expect("上下文"))
+    }
+
+    fn context(&self) -> Arc<personal_knowledge_os_lib::application::context::WorkspaceContext> {
+        self.app.context().expect("上下文")
     }
 
     fn writing(&self) -> WritingService {
@@ -246,4 +251,142 @@ fn source_changed_after_generation_blocks_apply() {
         })
         .expect_err("聚类摘要也必须复核来源");
     assert_eq!(summary_error.code, ErrorCode::NoteConflict);
+}
+
+/// 真实模型五模式冒烟：默认不运行、不联网。
+///
+/// ```text
+/// PKOS_LIVE_REMOTE_KEY=sk-xxx \
+/// cargo test --offline --test writing_flow live_models_cover_five_writing_modes \
+///   -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "真机评测：需要 PKOS_LIVE_REMOTE_KEY；本地模型需 Ollama qwen2.5:7b"]
+fn live_models_cover_five_writing_modes() {
+    let fixture = Fixture::new();
+    let target = fixture.note(
+        "写作原则",
+        "# 写作原则\n\n本地优先是核心边界，正文不能未经确认上传。\
+         引用必须能回到原文区间和来源笔记。所有生成内容先预览，再逐段确认。\
+         冲突时保留用户现有内容，不允许静默覆盖。",
+    );
+    fixture.note(
+        "引用规范",
+        "# 引用规范\n\n每个生成段落都要附来源。引用必须能回到原文区间。\
+         来源变化后旧草稿失效，必须重新生成。",
+    );
+
+    let modes = [
+        (
+            WritingMode::Outline,
+            "把写作原则整理成三层大纲，保留事实边界。",
+        ),
+        (
+            WritingMode::Continue,
+            "承接现有段落，继续说明预览和确认的关系。",
+        ),
+        (
+            WritingMode::Rewrite,
+            "在不改变事实含义的前提下改写，语气更简洁。",
+        ),
+        (
+            WritingMode::Shorten,
+            "压缩为两句话，只保留可由材料支持的信息。",
+        ),
+        (
+            WritingMode::Expand,
+            "扩写本地优先、引用和确认边界，不得增加新事实。",
+        ),
+    ];
+    let mut evaluated = 0usize;
+
+    if let Some(key) = std::env::var("PKOS_LIVE_REMOTE_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        let base = std::env::var("PKOS_LIVE_REMOTE_BASE")
+            .unwrap_or_else(|_| "https://api.deepseek.com".into());
+        let model =
+            std::env::var("PKOS_LIVE_REMOTE_MODEL").unwrap_or_else(|_| "deepseek-flash".into());
+        credential_store::set_remote_model_key(fixture._data.path(), Some(&key))
+            .expect("写入临时在线模型 Key");
+        AiPolicyService::new(fixture.context())
+            .update(UpdateAiPolicyInput {
+                remote_model_base_url: Some(base),
+                remote_model_name: Some(model),
+                remote_model_compose: Some(true),
+                local_model_compose: Some(false),
+                confirm_remote_model: Some(true),
+                ..Default::default()
+            })
+            .expect("授权在线写作模型");
+        run_live_writing_modes(&fixture, &target, &modes, "online", "online");
+        evaluated += modes.len();
+    } else {
+        eprintln!("跳过在线模型：未设置 PKOS_LIVE_REMOTE_KEY");
+    }
+
+    if std::env::var("PKOS_LIVE_SKIP_LOCAL").as_deref() != Ok("1") {
+        let endpoint = std::env::var("PKOS_LIVE_LOCAL_ENDPOINT")
+            .unwrap_or_else(|_| "http://127.0.0.1:11434".into());
+        let model = std::env::var("PKOS_LIVE_LOCAL_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into());
+        AiPolicyService::new(fixture.context())
+            .update(UpdateAiPolicyInput {
+                remote_model_compose: Some(false),
+                local_model_endpoint: Some(endpoint),
+                local_model_name: Some(model),
+                local_model_compose: Some(true),
+                ..Default::default()
+            })
+            .expect("配置本地写作模型");
+        run_live_writing_modes(&fixture, &target, &modes, "local", "local");
+        evaluated += modes.len();
+    }
+
+    assert!(evaluated > 0, "没有配置任何真实写作模型");
+}
+
+fn run_live_writing_modes(
+    fixture: &Fixture,
+    target: &str,
+    modes: &[(WritingMode, &str)],
+    provider_label: &str,
+    expected_tier: &str,
+) {
+    for (mode, instruction) in modes {
+        let started = std::time::Instant::now();
+        let draft = fixture
+            .writing()
+            .draft(WritingRequest {
+                note_id: target.to_string(),
+                mode: Some(*mode),
+                instruction: (*instruction).to_string(),
+                confirm_outbound: true,
+                ..Default::default()
+            })
+            .unwrap_or_else(|error| panic!("{provider_label} {mode:?} 生成失败：{error}"));
+        assert_eq!(
+            draft.tier, expected_tier,
+            "{provider_label} {mode:?} 未使用目标模型，provider={} warnings={:?}",
+            draft.provider, draft.warnings
+        );
+        assert!(
+            draft
+                .segments
+                .iter()
+                .all(|segment| !segment.citations.is_empty()),
+            "{provider_label} {mode:?} 存在无引用段落"
+        );
+        println!(
+            "PKOS_LIVE_WRITING provider={} mode={mode:?} tier={} segments={} citations={} chars={} took_ms={} wall_ms={}\n{}",
+            draft.provider,
+            draft.tier,
+            draft.segments.len(),
+            draft.citations.len(),
+            draft.text.chars().count(),
+            draft.took_ms,
+            started.elapsed().as_millis(),
+            draft.text
+        );
+    }
 }
