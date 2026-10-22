@@ -25,8 +25,8 @@
 | macOS 10 万完整 App 首屏 | 首次签名后 **2411 ms**；稳定 **989 ms**、RSS **223.03 MB** |
 | 检索 1 万 | p95 **18.09 ms**、recall@5 **100%** |
 | 检索 10 万（4 分片） | p95 **190.69 ms**、recall@5 **100%**、重开 **1246.09 ms**、RSS **344.64 MB** |
-| release 二进制 | **13,553,840 B**；SHA-256 `99fa5b26763b845f2fcae285abe1f72a92e3be7efddd620fd31bf4f47b6c71f6` |
-| `.app` 包内二进制 / 包文件合计 | **13,553,840 B / 13,713,206 B**；包内二进制 SHA-256 `bb5df9ba5b18826bed072bc859e87acaf1a2eb05fd80e88695c714152665bbd5` |
+| release 二进制 | **13,632,992 B**；SHA-256 `033bfc3dec29f8ff44bf7e290a1759b7de917fb199ef3e893dd36fa0d3569f27` |
+| `.app` 包内二进制 / 包文件合计 | **13,553,856 B / 13,713,222 B**；包内二进制 SHA-256 `6d47bb88f1b40563cacb57f0857d106d93f532b5f86ea3614d3b5b922496a260` |
 | macOS `.app` 构建 | ad-hoc 签名成功；公证因无凭据跳过 |
 | macOS `.app` 后端启动冒烟 | 进程存活，迁移 1–16 全部完成，文件监听启动，主窗口存在 |
 
@@ -36,9 +36,11 @@ updater 验签、`actionlint`、前端生产依赖审计与 `cargo-audit` 均通
 [跨平台产物记录](./V2_PLATFORM_ARTIFACTS_20261022.md)。`cargo-audit` 为
 0 vulnerabilities / 6 个上游 unmaintained 或 unsound warnings。
 
-macOS 原生完整套件在本候选上的重跑仍待宿主机解锁后执行；表中的
-**321 步通过 / 0 失败**是此前 `7539e4f` 基线的有效历史证据，不能直接冒充
-`49de15f` 已完成原生门禁。
+当前 `49de15f` 已在全新隔离工作区完成 macOS 原生完整套件：
+**321 步通过 / 0 失败 / 11 条待人工**。原始报告 SHA-256：
+`a4c7dac5c12707b93a9704bef2302f7cd04ab40ac65f897042ddd6494ee0acda`。
+AI 总开关开启后的本地 / 模板链路证据见
+[V2_AI_ON_SMOKE_20261022.md](./V2_AI_ON_SMOKE_20261022.md)。
 
 `cargo clippy --all-targets -D warnings` 仍被仓库已有的历史 lint 债务拦住（策略/服务/文本处理
 等旧文件）；本轮新增文件与改动点已按 Clippy 反馈清零，未把全仓历史债混入本功能提交。
@@ -103,8 +105,8 @@ CI preflight 固定安装 `cargo-audit 0.22.2` 并以 `cargo audit --no-yanked` 
 用例 2 的格式与正文已自动验证，仅保留 Word / 浏览器最终排版观感。详见
 [V2_NATIVE_EXPORT_RESTORE_20261022.md](./V2_NATIVE_EXPORT_RESTORE_20261022.md)。
 
-随后解锁 macOS 会话，在隔离工作区用最新 `.app` 完成窗口内容、交互、迁移和全量原生套件
-复测；锁屏期间的进程级结果已由这次可交互实跑补齐，不再作为未完成门禁。
+2026-10-22 解锁后在全新隔离数据目录和知识库中，用当前 `49de15f` `.app` 再次无干扰运行
+完整原生套件，结果为 321 步通过 / 0 失败 / 11 条待人工。
 
 ## 保留人工
 

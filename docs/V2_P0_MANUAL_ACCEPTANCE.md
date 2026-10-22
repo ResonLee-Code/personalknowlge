@@ -7,6 +7,9 @@
 > [V2 统一人工真机验收执行包](./acceptance/V2_UNIFIED_MANUAL_PLAN.md)。
 > 2026-10-21 macOS 已执行关键 UI 与 P0 原生入口自动步骤 126/126；完整记录见
 > [macOS P0 真机报告](./acceptance/20261021-V2-P0-macOS/report.md)。
+> 2026-10-22 当前候选 `49de15f` 已在全新隔离工作区完成完整原生套件
+> **321 步通过 / 0 失败 / 11 条待人工**，原始报告见
+> [V2 原生验收记录](./acceptance/V2_NATIVE_EXPORT_RESTORE_20261022.md)。
 
 ## A. Ask 质量评测
 

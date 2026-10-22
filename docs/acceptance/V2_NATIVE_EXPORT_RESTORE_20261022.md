@@ -3,12 +3,12 @@
 ## 现场
 
 - 日期：2026-10-22
-- 基线提交：`7539e4f` + 本轮验收器改动
+- 基线提交：`49de15fbb17cbc468157ef2c477e901c4cffef9a`
 - 版本：`1.3.7`（V2 开发线）
 - 平台：macOS 27 / arm64
 - 应用：`Personal Knowledge OS.app`，ad-hoc 签名
-- 数据目录：`/private/tmp/pkos-v2-full.LjUEwz/data`
-- 隔离工作区：`/private/tmp/pkos-v2-full.LjUEwz/workspace`
+- 数据目录：`/private/tmp/pkos-v2-49de15f-native-clean.WsegHg/data`
+- 隔离工作区：`/private/tmp/pkos-v2-49de15f-native-clean.WsegHg/workspace`
 
 ## 结果
 
@@ -43,12 +43,12 @@
 原始报告：
 
 - `/private/tmp/pkos-v2-full.LjUEwz/out/report.md`
-- SHA-256 `9c02df636998e9e26a6cf9caae9b8012468aa22305955244bf7d690bcd54d16d`
+- SHA-256 `a4c7dac5c12707b93a9704bef2302f7cd04ab40ac65f897042ddd6494ee0acda`
 
 机器可读结果：
 
 - `/private/tmp/pkos-v2-full.LjUEwz/out/report.json`
-- SHA-256 `598ef0dc8d8f078c1130c5ebd0883f1bfaad55a10866171184f21a841d0cb498`
+- SHA-256 `fe8fe95a47d7bda4cb78f63bcb07842b212d8e2d5e224fcf7a3f76d0375d69a9`
 
 截图位于同目录，默认不进 Git。
 
