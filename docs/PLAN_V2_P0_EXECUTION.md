@@ -31,7 +31,7 @@
 | 在线模型未授权零外发 | 真实 DeepSeek Key 和开关齐全但未授权；macOS `nettop` 覆盖 Research 动作窗口 15 秒，零 TCP |
 | Organize 标签 200 题预检 | 真实 DeepSeek 200/200 成功，生成 936 个标签；精确率 97.86%、至少含一个相关标签的召回 100% |
 | 决策 Key 持久化 | 修复后端忽略 `decisionApiKey` 与前端保存失败仍清空输入的问题；Rust 凭据测试和前端保留输入测试通过 |
-| macOS release `.app` 最终复建 | ad-hoc 签名校验通过；真实 `knowledge` 工作区打开成功；假决策 Key 可保存并清除，凭据文件仍为 `0600` |
+| macOS release `.app` 最终复建 | `0cbdf53` 干净构建；ad-hoc 签名通过，CDHash `aba9d05bf0ffd903c2a994487b60cdfc5ca20baf`；真实 `knowledge` 工作区曾成功打开，假决策 Key 可保存并清除 |
 | `pnpm test:release-manifest` | 三平台映射、Linux `AppImage.tar.gz`、GitHub 资产名归一化与缺签名拒绝测试通过 |
 | `pnpm test:update-signature` | 一次性测试密钥：有效载荷通过、篡改载荷拒绝、版本签名绑定校验通过 |
 | `runtime_contract` / release App 实启 | updater 配置可反序列化；窗口位置恢复权限完整；macOS release 包真实打开 10 万篇工作区 |
