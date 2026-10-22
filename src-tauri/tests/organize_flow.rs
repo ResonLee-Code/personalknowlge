@@ -368,6 +368,145 @@ fn live_deepseek_200_tag_suggestions() {
     assert!(recall >= 0.80, "至少包含一个相关标签的笔记比例低于 80%");
 }
 
+/// 真实在线模型摘要事实预检：默认不运行、不联网。
+#[test]
+#[ignore = "真机评测：需要 PKOS_LIVE_REMOTE_KEY（可选代理）"]
+fn live_deepseek_summary_fact_precheck() {
+    let Some(key) = std::env::var("PKOS_LIVE_REMOTE_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        eprintln!("跳过：未设置 PKOS_LIVE_REMOTE_KEY");
+        return;
+    };
+    let base = std::env::var("PKOS_LIVE_REMOTE_BASE")
+        .unwrap_or_else(|_| "https://api.deepseek.com".into());
+    let model = std::env::var("PKOS_LIVE_REMOTE_MODEL").unwrap_or_else(|_| "deepseek-flash".into());
+    let limit: usize = std::env::var("PKOS_LIVE_SUMMARY_CASES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(20)
+        .min(100);
+    let fixture = Fixture::new();
+    fixture.configure_remote_model(&base, &model, &key);
+    let topics: [(&str, &str, &[&[&str]]); 10] = [
+        (
+            "SQLite 全文索引",
+            "SQLite FTS5 使用倒排索引。中文检索采用双字短语扩展。索引过期后需要增量重建。",
+            &[&["倒排索引"], &["双字", "中文检索"], &["增量重建", "过期"]],
+        ),
+        (
+            "WebDAV 冲突",
+            "WebDAV 使用 ETag 条件写入。manifest 冲突进入三方合并。远端对象保存为密文。",
+            &[&["ETag"], &["三方合并"], &["密文", "加密"]],
+        ),
+        (
+            "加密备份",
+            "备份包含附件、历史、回收站和逐文件哈希。恢复前验证清单与路径。远端不得出现明文。",
+            &[
+                &["附件", "历史", "回收站"],
+                &["哈希", "清单"],
+                &["明文", "密文"],
+            ],
+        ),
+        (
+            "更新器安全",
+            "Tauri updater 使用签名清单。篡改载荷必须拒绝。更新失败后旧版本继续可启动。",
+            &[&["签名"], &["篡改", "拒绝"], &["旧版本", "旧版"]],
+        ),
+        (
+            "研究证据",
+            "研究结论至少需要两个独立来源。过期来源不能进入结论。证据不足时必须报告缺口。",
+            &[&["独立来源", "两个来源"], &["过期"], &["证据不足", "缺口"]],
+        ),
+        (
+            "写作审查",
+            "写作草稿先展示 diff。接受前检查目标哈希和来源区间。只有用户确认后才写入。",
+            &[&["diff"], &["哈希", "来源区间"], &["确认", "写入"]],
+        ),
+        (
+            "图谱抽样",
+            "知识图谱按分类配额降采样。连接优先保留桥梁节点。孤立节点可能被过滤。",
+            &[&["分类配额", "降采样"], &["桥梁"], &["孤立节点", "过滤"]],
+        ),
+        (
+            "混合检索",
+            "混合检索用 RRF 融合 BM25 与向量名次。向量索引未构建时回退关键词检索。",
+            &[&["RRF", "混合检索"], &["BM25"], &["未构建", "关键词检索"]],
+        ),
+        (
+            "文件监听",
+            "文件监听处理外部修改。原生监听失效时退回轮询。索引必须保留可用状态。",
+            &[&["外部修改", "外部"], &["轮询"], &["索引", "可用状态"]],
+        ),
+        (
+            "诊断隐私",
+            "诊断日志只保存短码和耗时。日志默认不上传。导出内容不得包含 API Key 或正文。",
+            &[&["短码"], &["不上传"], &["API Key", "正文"]],
+        ),
+    ];
+    let foreign_markers = ["量子退火", "火星殖民", "负利率", "光速飞船"];
+    let service = fixture.organize();
+    let mut remote_success = 0usize;
+    let mut fallback = 0usize;
+    let mut fact_total = 0usize;
+    let mut fact_covered = 0usize;
+    let mut foreign_hits = Vec::new();
+    let started = std::time::Instant::now();
+    for index in 0..limit {
+        let (topic, body, expected_facts) = topics[index % topics.len()];
+        let note_id = fixture.note(&format!("{topic} 摘要 {index:03}"), body);
+        let suggestion = service
+            .generate_with_confirmation(&note_id, SuggestionKind::Summary, true)
+            .expect("生成摘要建议");
+        if suggestion.model.starts_with("remote.openai-compatible:") {
+            remote_success += 1;
+        } else {
+            fallback += 1;
+        }
+        let (summary, bullets) = match suggestion.payload {
+            AiSuggestionPayload::Summary { summary, bullets } => (summary, bullets),
+            other => panic!("摘要建议返回了错误载荷：{other:?}"),
+        };
+        let combined = format!("{summary}\n{}", bullets.join("\n")).to_lowercase();
+        for alternatives in expected_facts {
+            fact_total += 1;
+            if alternatives
+                .iter()
+                .any(|term| combined.contains(&term.to_lowercase()))
+            {
+                fact_covered += 1;
+            }
+        }
+        for marker in foreign_markers {
+            if combined.contains(&marker.to_lowercase()) {
+                foreign_hits.push(format!("#{index:03} {topic}: {marker}\n{combined}"));
+            }
+        }
+        println!(
+            "PKOS_LIVE_SUMMARY #{index:03} topic={} model={} summary={} bullets={}",
+            topic,
+            suggestion.model,
+            summary,
+            bullets.len()
+        );
+    }
+    let coverage = fact_covered as f64 / fact_total.max(1) as f64;
+    println!(
+        "PKOS_LIVE_SUMMARY cases={limit} remote_success={remote_success} fallback={fallback} \
+         facts={fact_covered}/{fact_total} coverage={:.2}% foreign_hits={} elapsed_ms={}",
+        coverage * 100.0,
+        foreign_hits.len(),
+        started.elapsed().as_millis()
+    );
+    if !foreign_hits.is_empty() {
+        println!("PKOS_LIVE_SUMMARY foreign=\n{}", foreign_hits.join("\n"));
+    }
+    assert_eq!(remote_success, limit, "真实模型摘要出现降级");
+    assert!(coverage >= 0.80, "摘要关键事实覆盖率低于 80%");
+    assert!(foreign_hits.is_empty(), "摘要出现跨笔记虚构标记");
+}
+
 fn spawn_model_server(reply: &'static str) -> (String, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("绑定端口");
     let port = listener.local_addr().expect("端口").port();
