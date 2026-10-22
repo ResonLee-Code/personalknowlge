@@ -591,6 +591,84 @@ fn the_api_key_never_leaks_into_settings_or_responses() {
     assert!(!fixture.policy().policy().remote_model_key_set);
 }
 
+/// 真实 DeepSeek 已配置但未授权：供系统级 `nettop` 复核零外发。
+#[test]
+#[ignore = "真机抓包：需要 PKOS_LIVE_REMOTE_KEY；可设置 PKOS_LIVE_HOLD_MS"]
+fn live_unauthorized_deepseek_keeps_zero_outbound() {
+    let Some(key) = std::env::var("PKOS_LIVE_REMOTE_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        eprintln!("跳过：未设置 PKOS_LIVE_REMOTE_KEY");
+        return;
+    };
+    let base = std::env::var("PKOS_LIVE_REMOTE_BASE")
+        .unwrap_or_else(|_| "https://api.deepseek.com".into());
+    let model = std::env::var("PKOS_LIVE_REMOTE_MODEL").unwrap_or_else(|_| "deepseek-flash".into());
+    let fixture = Fixture::new();
+    seed_notes(&fixture);
+    credential_store::set_remote_model_key(fixture.data.path(), Some(&key))
+        .expect("写入临时在线模型 Key");
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            remote_model_base_url: Some(base),
+            remote_model_name: Some(model),
+            remote_model_compose: Some(true),
+            remote_model_score: Some(true),
+            ..Default::default()
+        })
+        .expect("保存在线模型配置");
+    let policy = fixture.policy().policy();
+    assert!(
+        policy.remote_model_key_set,
+        "真实 Key 必须存在于临时数据目录"
+    );
+    assert!(
+        policy.remote_model_authorized_at.is_none(),
+        "本测试故意不完成在线模型授权"
+    );
+    let ready_ms = std::env::var("PKOS_LIVE_CAPTURE_READY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    println!(
+        "PKOS_LIVE_ZERO_OUTBOUND pid={} stage=before-research capture_ready_ms={}",
+        std::process::id(),
+        ready_ms
+    );
+    if ready_ms > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(ready_ms));
+    }
+
+    let research = ResearchService::new(fixture.context());
+    let session = research.start(request("Rust 异步调度")).expect("立项");
+    let collected = research.collect(&session.id, false).expect("收集");
+    assert_eq!(collected.decision_provider.as_deref(), Some("rule"));
+    research.verify(&session.id, false).expect("验证");
+    let composed = research.compose(&session.id, false).expect("汇总");
+    let report = composed.report.as_ref().expect("模板报告");
+    assert_eq!(report.composer, "template.draft");
+    let audit =
+        serde_json::to_string(&fixture.policy().audit_tail(100).expect("审计")).expect("审计 JSON");
+    assert!(audit.contains("REMOTE_MODEL_UNCONFIRMED"));
+    assert!(!audit.contains(&key), "审计不得出现 Key");
+
+    let hold_ms = std::env::var("PKOS_LIVE_HOLD_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    println!(
+        "PKOS_LIVE_ZERO_OUTBOUND pid={} stage=after-research hold_ms={} result=template",
+        std::process::id(),
+        hold_ms
+    );
+    if hold_ms > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(hold_ms));
+    }
+}
+
 /// 开启「逐次外发确认」（Track C2）。
 fn enable_per_send_confirmation(fixture: &Fixture) {
     fixture
