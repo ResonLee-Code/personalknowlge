@@ -99,6 +99,21 @@ impl Fixture {
             .expect("配置本地模型");
     }
 
+    fn configure_remote_model(&self, base: &str, model: &str, key: &str) {
+        credential_store::set_remote_model_key(self.data.path(), Some(key))
+            .expect("写入在线模型凭据");
+        AiPolicyService::new(self.context())
+            .update(UpdateAiPolicyInput {
+                enabled: Some(true),
+                remote_model_base_url: Some(base.to_string()),
+                remote_model_name: Some(model.to_string()),
+                remote_model_compose: Some(true),
+                confirm_remote_model: Some(true),
+                ..Default::default()
+            })
+            .expect("授权在线模型");
+    }
+
     fn configure_remote_embedding(&self, endpoint: &str) {
         credential_store::set_remote_model_key(self.data.path(), Some("sk-test"))
             .expect("写嵌入凭据");
@@ -115,6 +130,242 @@ impl Fixture {
             })
             .expect("配置远端嵌入");
     }
+}
+
+/// 真实在线模型标签质量：默认不运行、不联网。
+///
+/// ```text
+/// PKOS_LIVE_REMOTE_KEY=sk-xxx \
+/// cargo test --offline --test organize_flow live_deepseek_200_tag_suggestions \
+///   -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "真机评测：需要 PKOS_LIVE_REMOTE_KEY（可选代理）"]
+fn live_deepseek_200_tag_suggestions() {
+    let Some(key) = std::env::var("PKOS_LIVE_REMOTE_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        eprintln!("跳过：未设置 PKOS_LIVE_REMOTE_KEY");
+        return;
+    };
+    let base = std::env::var("PKOS_LIVE_REMOTE_BASE")
+        .unwrap_or_else(|_| "https://api.deepseek.com".into());
+    let model = std::env::var("PKOS_LIVE_REMOTE_MODEL").unwrap_or_else(|_| "deepseek-flash".into());
+    let limit: usize = std::env::var("PKOS_LIVE_TAG_CASES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(200)
+        .min(200);
+    let fixture = Fixture::new();
+    fixture.configure_remote_model(&base, &model, &key);
+    let topics: [(&str, &str, &[&str]); 20] = [
+        (
+            "Rust 异步调度",
+            "Rust 异步运行时使用工作窃取调度器，阻塞调用会拖慢任务，结构化并发负责取消传播。",
+            &["Rust", "异步", "并发", "工作窃取", "阻塞", "结构化并发"],
+        ),
+        (
+            "SQLite FTS5",
+            "SQLite FTS5 使用倒排索引和 BM25 排序，中文检索通过双字短语扩展。",
+            &["SQLite", "FTS5", "全文检索", "倒排索引", "BM25", "中文检索"],
+        ),
+        (
+            "WebDAV 同步",
+            "WebDAV 同步使用 ETag 条件写入，manifest 冲突需要三方合并，远端对象使用密文。",
+            &[
+                "WebDAV",
+                "同步",
+                "加密",
+                "ETag",
+                "manifest",
+                "三方合并",
+                "密文",
+            ],
+        ),
+        (
+            "S3 兼容存储",
+            "S3 兼容存储通过 SigV4 签名访问 bucket，If-Match 防止 manifest 被并发覆盖。",
+            &[
+                "S3",
+                "对象存储",
+                "签名",
+                "If-Match",
+                "并发控制",
+                "bucket",
+                "SigV4",
+                "manifest",
+            ],
+        ),
+        (
+            "Markdown 原子写入",
+            "Markdown 原子写入先写临时文件再替换，磁盘满和权限错误必须保留旧正文。",
+            &[
+                "Markdown",
+                "原子写入",
+                "文件",
+                "错误处理",
+                "磁盘",
+                "权限",
+                "旧正文",
+                "保留",
+            ],
+        ),
+        (
+            "知识图谱降采样",
+            "知识图谱降采样按分类配额保留节点，同时优先保留桥梁和高连接节点。",
+            &["知识图谱", "图谱", "降采样", "分类配额", "桥梁", "节点"],
+        ),
+        (
+            "向量混合检索",
+            "向量混合检索使用 RRF 融合 BM25 与嵌入名次，索引未构建时回退关键词检索。",
+            &["向量", "检索", "BM25", "RRF", "嵌入", "索引"],
+        ),
+        (
+            "Ollama 本地模型",
+            "Ollama 通过本机 HTTP 提供量化模型，qwen2.5 7b 适合中文摘要与写作。",
+            &["Ollama", "本地模型", "模型", "qwen2.5", "中文摘要"],
+        ),
+        (
+            "加密备份",
+            "加密备份包含附件、历史、回收站和逐文件哈希，恢复时先验证路径与清单。",
+            &["备份", "加密", "恢复", "附件", "历史", "回收站", "哈希"],
+        ),
+        (
+            "更新器签名",
+            "Tauri updater 使用签名清单，篡改载荷必须拒绝，失败后旧版本继续可启动。",
+            &["更新", "签名", "Tauri", "updater", "篡改", "旧版本"],
+        ),
+        (
+            "引用式问答",
+            "引用式问答把 chunk 映射到原文区间，未知引用编号会让整份回答降级。",
+            &["问答", "引用", "RAG", "chunk", "原文区间", "降级"],
+        ),
+        (
+            "写作草稿审查",
+            "写作草稿逐段展示 diff，接受前检查来源漂移和目标哈希，确认后才写入。",
+            &["写作", "diff", "引用", "草稿", "哈希", "来源", "写入确认"],
+        ),
+        (
+            "全文搜索分片",
+            "全文搜索按笔记 ID 稳定哈希拆成四个 FTS 分片，分页查询跨分片合并。",
+            &["搜索", "分片", "SQLite", "FTS", "分页", "索引"],
+        ),
+        (
+            "文件监听",
+            "文件监听处理外部新增、修改和删除，监听失效时退回轮询并保留索引状态。",
+            &[
+                "文件监听",
+                "同步",
+                "索引",
+                "轮询",
+                "外部修改",
+                "文件变更处理",
+            ],
+        ),
+        (
+            "双向链接解析",
+            "双向链接解析标题、别名和段落锚点，代码块中的链接不会被误解析。",
+            &[
+                "双向链接",
+                "Markdown",
+                "笔记",
+                "别名",
+                "段落锚点",
+                "代码块过滤",
+                "代码块链接排除",
+            ],
+        ),
+        (
+            "版本历史快照",
+            "版本历史按节流间隔保存快照，每篇最多保留五十份，并支持命名版本恢复。",
+            &["版本历史", "快照", "恢复", "命名版本"],
+        ),
+        (
+            "研究证据充分性",
+            "研究证据需要至少两个独立来源，过期来源和单一来源不能进入结论段。",
+            &["研究", "证据", "来源", "独立来源", "过期"],
+        ),
+        (
+            "标签建议",
+            "标签建议优先复用已有标签，接受前只写建议表，用户确认后才修改笔记元数据。",
+            &["标签", "知识管理", "AI", "元数据", "建议"],
+        ),
+        (
+            "加密同步队列",
+            "加密同步在离线时把变更写入持久队列，重新联网后重试且不丢本地编辑。",
+            &["同步", "离线", "队列", "加密", "重试"],
+        ),
+        (
+            "应用诊断日志",
+            "应用诊断日志只保存短码和耗时，默认不上传，导出时不包含正文与 API Key。",
+            &["日志", "诊断", "隐私", "导出", "API Key", "数据最小化"],
+        ),
+    ];
+
+    let service = fixture.organize();
+    let mut remote_success = 0usize;
+    let mut fallback = 0usize;
+    let mut suggested_total = 0usize;
+    let mut suggested_relevant = 0usize;
+    let mut notes_with_relevant = 0usize;
+    let mut misses = Vec::new();
+    let started = std::time::Instant::now();
+    for index in 0..limit {
+        let (topic, body, expected) = topics[index % topics.len()];
+        let note_id = fixture.note(
+            &format!("{topic} 实践 {index:03}"),
+            &format!("# {topic}\n\n{body}"),
+        );
+        let suggestion = service
+            .generate_with_confirmation(&note_id, SuggestionKind::Tags, true)
+            .expect("生成标签建议");
+        if suggestion.model.starts_with("remote.openai-compatible:") {
+            remote_success += 1;
+        } else {
+            fallback += 1;
+        }
+        let tags = match suggestion.payload {
+            AiSuggestionPayload::Tags { tags } => tags,
+            other => panic!("标签建议返回了错误载荷：{other:?}"),
+        };
+        let mut note_relevant = false;
+        for tag in &tags {
+            suggested_total += 1;
+            let haystack = format!("{} {}", tag.tag, tag.reason).to_lowercase();
+            let relevant = expected
+                .iter()
+                .any(|term| haystack.contains(&term.to_lowercase()));
+            if relevant {
+                suggested_relevant += 1;
+                note_relevant = true;
+            } else if misses.len() < 30 {
+                misses.push(format!(
+                    "#{index:03} {topic}: {} / {}；期望 {:?}",
+                    tag.tag, tag.reason, expected
+                ));
+            }
+        }
+        if note_relevant {
+            notes_with_relevant += 1;
+        }
+    }
+    let precision = suggested_relevant as f64 / suggested_total.max(1) as f64;
+    let recall = notes_with_relevant as f64 / limit.max(1) as f64;
+    println!(
+        "PKOS_LIVE_TAGS cases={limit} remote_success={remote_success} fallback={fallback} \
+         suggestions={suggested_total} relevant={suggested_relevant} precision={:.2}% \
+         notes_with_relevant={notes_with_relevant} recall={:.2}% elapsed_ms={}",
+        precision * 100.0,
+        recall * 100.0,
+        started.elapsed().as_millis()
+    );
+    if !misses.is_empty() {
+        println!("PKOS_LIVE_TAGS misses=\n{}", misses.join("\n"));
+    }
+    assert_eq!(remote_success, limit, "真实模型调用出现降级");
+    assert!(precision >= 0.80, "标签建议精确率低于 80%");
+    assert!(recall >= 0.80, "至少包含一个相关标签的笔记比例低于 80%");
 }
 
 fn spawn_model_server(reply: &'static str) -> (String, Arc<AtomicUsize>) {
@@ -429,9 +680,9 @@ fn relation_suggestion_applies_typed_relation_with_reason_and_undoes_exactly() {
         .map(|note| note.note.title)
         .collect::<Vec<_>>();
     assert!(
-        target_titles
-            .iter()
-            .any(|title| source_after_accept.content.contains(&format!("[[{title}]]"))),
+        target_titles.iter().any(|title| source_after_accept
+            .content
+            .contains(&format!("[[{title}]]"))),
         "接受普通链接建议后必须写入目标 Wiki 链接：{}",
         source_after_accept.content
     );
@@ -740,11 +991,7 @@ fn forced_process_termination_is_recovered_on_the_next_open() {
         .expect("关闭父进程工作区");
 
     let output = Command::new(std::env::current_exe().expect("测试二进制"))
-        .args([
-            "--exact",
-            "organize_crash_fixture_child",
-            "--nocapture",
-        ])
+        .args(["--exact", "organize_crash_fixture_child", "--nocapture"])
         .env("PKOS_TEST_ORGANIZE_CRASH_ROOT", &root)
         .env(
             "PKOS_TEST_ORGANIZE_CRASH_DATA",
