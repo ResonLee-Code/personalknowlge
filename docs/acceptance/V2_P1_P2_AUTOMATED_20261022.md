@@ -17,7 +17,7 @@
 | ESLint | 通过 |
 | TypeScript / Vite production build | 通过 |
 | Playwright E2E | **7/7 通过**（含 Ask 保存、Research 计划/模板/重跑、Graph 洞察、Writing diff、Sync 设置） |
-| macOS 原生自动验收 | **238 步通过 / 0 失败 / 13 条含人工判断** |
+| macOS 原生自动验收 | **321 步通过 / 0 失败 / 11 条含人工判断**（用例 3、9 整体通过） |
 | updater 正负验签 | 有效载荷通过、篡改拒绝、版本绑定 `2.0.0` |
 | 前端生产依赖审计 | `pnpm audit --prod --audit-level high`：**No known vulnerabilities** |
 | Rust 依赖审计 | `cargo-audit 0.22.2`：**0 vulnerabilities**；6 个上游 unmaintained/unsound warnings |
@@ -80,7 +80,7 @@ CI preflight 固定安装 `cargo-audit 0.22.2` 并以 `cargo audit --no-yanked` 
 - 发布 workflow 通过 `actionlint 1.7.12` 语义检查；Release job 直接依赖 `preflight`，
   可合法读取版本 output 生成 `latest.json`。
 
-真机验收脚手架另有 5 个 Node 测试通过：错误 workspace 在任何 UI 写入前中止；
+真机验收脚手架另有 7 个 Node 测试通过：错误 workspace 在任何 UI 写入前中止；
 “最近生成 + 正文匹配”必须命中同一个最新文件。真实 App 复测用例 1 为 10/10、
 用例 4 为 39/39。
 
@@ -88,9 +88,13 @@ CI preflight 固定安装 `cargo-audit 0.22.2` 并以 `cargo audit --no-yanked` 
 13 条仅因包含主观观感、原生面板或真实网络确认而待人工。验收器已能自动创建目标笔记、
 过期时效笔记、唯一分类和标签夹具，不再依赖旧 `/private/tmp/pkos-acceptance` 的残留数据。
 
-2026-10-22 最后一轮重验时 macOS 会话已锁屏。进程级启动、数据库迁移、文件监听和主窗口
-创建可验证，但锁屏会屏蔽窗口内容、辅助功能树和截图，因此最新 `.app` 的“内容可见且可
-交互”冒烟不能在锁屏状态下记通过；解锁后必须补跑。
+随后把原生导出 / DOCX 回读 / 备份恢复 / 待复核跳转加入同一套件，在全新隔离工作区重跑为
+**321 步通过 / 0 失败 / 11 条待人工**。用例 3 备份恢复和用例 9 待复核跳转已整体通过；
+用例 2 的格式与正文已自动验证，仅保留 Word / 浏览器最终排版观感。详见
+[V2_NATIVE_EXPORT_RESTORE_20261022.md](./V2_NATIVE_EXPORT_RESTORE_20261022.md)。
+
+随后解锁 macOS 会话，在隔离工作区用最新 `.app` 完成窗口内容、交互、迁移和全量原生套件
+复测；锁屏期间的进程级结果已由这次可交互实跑补齐，不再作为未完成门禁。
 
 ## 保留人工
 

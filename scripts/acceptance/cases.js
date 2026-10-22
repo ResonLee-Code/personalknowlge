@@ -44,6 +44,12 @@ const RUN_TAG = Date.now().toString(36);
 const OUTLINE_TITLE = `大纲栏位（真机验收）-${RUN_TAG}`;
 const CATEGORY_NAME = `技术-${RUN_TAG}`;
 const TAG_NAME = '入门';
+const EXPORT_TITLE = `验收-原生导出-${RUN_TAG}`;
+const EXPORT_MARKER = `DOCX-ROUNDTRIP-${RUN_TAG}`;
+const EXPORT_FILE = `ACCEPT-EXPORT-${RUN_TAG}.md`;
+const RESTORE_TITLE = `验收-备份恢复-${RUN_TAG}`;
+const RESTORE_MARKER = `RESTORE-CONTENT-${RUN_TAG}`;
+const RESTORE_FILE = `ACCEPT-RESTORE-${RUN_TAG}.md`;
 
 /**
  * 把「大纲位置」摆回默认（与笔记列表共用一栏）。
@@ -98,28 +104,145 @@ const CASES = [
   },
   {
     id: 2,
-    title: '导入对话框与导出（md / html / docx / pdf）',
-    expect: '三种导出各得合法文件，导入 .docx 能回读正文',
+    title: '原生导出（md / html / docx）与 DOCX 回读',
+    expect: '系统保存面板各产出一个合法文件，DOCX 可重新导入且正文完整',
     steps: [
       { op: 'app' },
       { op: 'keyCode', code: 53 },
-      // 设置入口只有右上角那一个（2026-10-15 起侧边栏不再重复放一个）
-      { op: 'click', frame: { role: 'AXButton', description: '设置' } },
+      {
+        op: 'writeFile',
+        path: `00_Inbox/${EXPORT_FILE}`,
+        content: `---\nid: note_acceptance_export_${RUN_TAG}\ntitle: ${EXPORT_TITLE}\ntype: note\nstatus: active\n---\n\n# 原生导出验收\n\n${EXPORT_MARKER}\n`,
+      },
+      { op: 'pause', ms: 2500 },
+      { op: 'click', frame: { role: 'AXLink', title: 'Inbox' } },
+      { op: 'pause', ms: 900 },
+      { op: 'click', frame: { role: 'AXButton', title: '最近修改' } },
+      { op: 'pause', ms: 900 },
+      /**
+       * 列表行在 AX 里合并成一个按钮（标题、子文档按钮和“笔记操作”同名），
+       * AXPress 可能命中其子按钮。这里按行左侧标题区域投递真实点击，再用
+       * “更多操作 → 导出”的键盘路径进入导出弹窗。
+       */
+      {
+        op: 'click',
+        frame: { role: 'AXButton', title: EXPORT_TITLE },
+        offset: { x: -70, y: 0 },
+        bypassAx: true,
+        label: '打开本轮唯一导出夹具',
+      },
+      { op: 'pause', ms: 1200 },
+      {
+        op: 'focus',
+        query: { role: 'AXPopUpButton', description: '更多操作' },
+        label: '笔记“更多操作”',
+      },
+      { op: 'pause', ms: 400 },
+      { op: 'keyCode', code: 36 },
+      { op: 'pause', ms: 900 },
+      {
+        op: 'expectElement',
+        query: { role: 'AXMenuItem', title: '导出（Markdown / HTML / Word / PDF）' },
+        label: '笔记菜单里的导出入口',
+      },
+      { op: 'click', frame: { role: 'AXMenuItem', title: '导出（Markdown' } },
+      { op: 'pause', ms: 900 },
       { op: 'shot', name: '02-export-dialog.png' },
       {
-        op: 'manual',
-        note: '导出走 macOS 原生保存面板：需要人眼选目录并确认三种格式的文件可打开；导入 .docx 需人眼核对正文',
+        op: 'click',
+        frame: { role: 'AXButton', title: '导出', exact: true },
+        label: '导出 Markdown',
       },
-      { op: 'check', path: '00_Inbox', exists: true },
+      { op: 'pause', ms: 1800 },
+      { op: 'nativeSave', artifact: `exports/${EXPORT_TITLE}.md` },
+      {
+        op: 'checkArtifact',
+        path: `exports/${EXPORT_TITLE}.md`,
+        type: 'markdown',
+        contains: ['---', EXPORT_TITLE, EXPORT_MARKER],
+      },
+      { op: 'click', frame: { role: 'AXButton', title: '网页' } },
+      {
+        op: 'click',
+        frame: { role: 'AXButton', title: '导出', exact: true },
+        label: '导出 HTML',
+      },
+      { op: 'pause', ms: 1800 },
+      { op: 'nativeSave', artifact: `exports/${EXPORT_TITLE}.html` },
+      {
+        op: 'checkArtifact',
+        path: `exports/${EXPORT_TITLE}.html`,
+        type: 'html',
+        contains: [EXPORT_TITLE, EXPORT_MARKER],
+      },
+      { op: 'click', frame: { role: 'AXButton', title: 'Word' } },
+      {
+        op: 'click',
+        frame: { role: 'AXButton', title: '导出', exact: true },
+        label: '导出 DOCX',
+      },
+      { op: 'pause', ms: 1800 },
+      { op: 'nativeSave', artifact: `exports/${EXPORT_TITLE}.docx` },
+      {
+        op: 'checkArtifact',
+        path: `exports/${EXPORT_TITLE}.docx`,
+        type: 'docx',
+        contains: [EXPORT_TITLE, EXPORT_MARKER],
+      },
+      { op: 'click', frame: { role: 'AXButton', title: '完成' } },
+      { op: 'pause', ms: 600 },
+      { op: 'click', frame: { role: 'AXButton', title: '新建笔记' } },
+      { op: 'pause', ms: 600 },
+      { op: 'click', frame: { role: 'AXButton', title: '导入外部文件' } },
+      { op: 'pause', ms: 600 },
+      { op: 'click', frame: { role: 'AXButton', title: '选择文件' } },
+      { op: 'pause', ms: 1500 },
+      { op: 'nativeOpen', artifact: `exports/${EXPORT_TITLE}.docx` },
+      { op: 'pause', ms: 1200 },
+      {
+        op: 'expectElement',
+        query: { role: 'AXButton', title: '导入到知识库' },
+        label: 'DOCX 已进入待导入列表',
+      },
+      { op: 'click', frame: { role: 'AXButton', title: '导入到知识库' } },
+      { op: 'pause', ms: 5000 },
+      {
+        op: 'expectValue',
+        query: { role: 'AXTextField', description: '笔记标题', value: EXPORT_TITLE },
+        label: `回读标题 ${EXPORT_TITLE}`,
+      },
+      {
+        op: 'expectElement',
+        query: { role: 'AXTextArea', value: EXPORT_MARKER },
+        label: 'DOCX 回读正文含唯一标记',
+      },
+      {
+        op: 'check',
+        path: '00_Inbox',
+        containsFile: EXPORT_TITLE,
+        grep: EXPORT_MARKER,
+        modifiedWithinMinutes: 2,
+      },
+      { op: 'shot', name: '02-docx-roundtrip.png' },
+      {
+        op: 'manual',
+        note: '机器已验证三种文件格式与正文；Word / 浏览器中的最终排版、分页和字体观感仍需人眼确认',
+      },
     ],
   },
   {
     id: 3,
     title: '备份创建 / 校验 / 恢复',
-    expect: '创建出 zip、校验逐项通过、恢复到空目录得到可用知识库',
+    expect: '创建并校验 zip → 通过系统面板恢复到空目录 → 打开恢复库核对正文 → 回到原库',
     steps: [
       { op: 'app' },
       { op: 'keyCode', code: 53 },
+      {
+        op: 'writeFile',
+        path: `00_Inbox/${RESTORE_FILE}`,
+        content: `---\nid: note_acceptance_restore_${RUN_TAG}\ntitle: ${RESTORE_TITLE}\ntype: note\nstatus: active\n---\n\n# 备份恢复验收\n\n${RESTORE_MARKER}\n`,
+      },
+      { op: 'pause', ms: 2500 },
       { op: 'click', frame: { role: 'AXButton', description: '设置' } },
       // 设置页自 2026-10-16 起分节显示（左侧导航）：备份相关的行在「备份与导出」这一节里
       { op: 'pause', ms: 900 },
@@ -142,11 +265,74 @@ const CASES = [
         label: '备份校验：Markdown 数量一致',
       },
       { op: 'shot', name: '03-backup-created.png' },
+      { op: 'prepareDirectory', path: 'restore' },
+      { op: 'click', frame: { role: 'AXButton', title: '恢复', exact: true } },
+      { op: 'pause', ms: 1800 },
+      { op: 'nativeOpen', artifact: 'restore' },
+      { op: 'pause', ms: 5000 },
       {
-        op: 'manual',
-        note: '「恢复」需要选目录（原生面板）：由人选一个空目录，确认恢复出来的知识库能打开',
+        op: 'checkArtifact',
+        path: 'restore',
+        type: 'directory',
+        minFiles: 3,
+        containsFile: RESTORE_FILE,
+      },
+      {
+        op: 'checkArtifact',
+        path: 'restore/.knowledge/database.sqlite',
+        type: 'sqlite',
+        sql: `SELECT COUNT(*) FROM notes WHERE title = '${RESTORE_TITLE}';`,
+        expect: '1',
+      },
+      {
+        op: 'checkArtifact',
+        path: `restore/00_Inbox/${RESTORE_FILE}`,
+        type: 'markdown',
+        contains: [RESTORE_TITLE, RESTORE_MARKER],
+      },
+      { op: 'workspaceMenu' },
+      { op: 'click', frame: { role: 'AXButton', title: '打开知识库' } },
+      { op: 'pause', ms: 1500 },
+      { op: 'nativeOpen', artifact: 'restore' },
+      { op: 'pause', ms: 5000 },
+      { op: 'expectWorkspace', artifact: 'restore' },
+      // 打开原生目录面板期间 Radix 菜单会保持展开；先关掉它，侧栏导航才重新进入 AX 树。
+      { op: 'keyCode', code: 53 },
+      { op: 'pause', ms: 500 },
+      { op: 'click', frame: { role: 'AXLink', title: '全部笔记' } },
+      { op: 'pause', ms: 1200 },
+      {
+        op: 'click',
+        frame: { role: 'AXButton', title: RESTORE_TITLE },
+        offset: { x: -70, y: 0 },
+        bypassAx: true,
+        label: '打开恢复库里的唯一夹具',
+      },
+      { op: 'pause', ms: 1200 },
+      {
+        op: 'expectValue',
+        query: { role: 'AXTextField', description: '笔记标题', value: RESTORE_TITLE },
+        label: `恢复库标题 ${RESTORE_TITLE}`,
+      },
+      {
+        op: 'expectElement',
+        query: { role: 'AXTextArea', value: RESTORE_MARKER },
+        label: '恢复库正文含唯一标记',
       },
       { op: 'shot', name: '03b-backup-restored.png' },
+      /**
+       * 后续用例仍假定当前工作区是最初验收库。恢复库核对完必须切回去，
+       * 否则下一次 `ensureScene` 会如实中止，整轮无法继续。
+       */
+      { op: 'workspaceMenu' },
+      { op: 'click', frame: { role: 'AXButton', title: '打开知识库' } },
+      { op: 'pause', ms: 1500 },
+      { op: 'nativeOpen', workspace: true },
+      { op: 'pause', ms: 5000 },
+      { op: 'expectWorkspace', workspace: true },
+      { op: 'keyCode', code: 53 },
+      { op: 'pause', ms: 500 },
+      { op: 'shot', name: '03c-backup-returned.png' },
     ],
   },
   {
@@ -437,9 +623,31 @@ const CASES = [
       { op: 'expectElement', query: { title: '已过期' }, label: '时效角标「已过期」' },
       { op: 'shot', name: '09-review-due.png' },
       {
-        op: 'manual',
-        note: '角标文案与跳转后的详情行（⚠ 可能已过期 / ✓ 已索引）需人眼确认',
+        op: 'click',
+        frame: { role: 'AXButton', title: `验收-待复核笔记-${RUN_TAG}` },
+        label: '点击待复核卡片里的笔记',
       },
+      { op: 'pause', ms: 1200 },
+      {
+        op: 'expectValue',
+        query: {
+          role: 'AXTextField',
+          description: '笔记标题',
+          value: `验收-待复核笔记-${RUN_TAG}`,
+        },
+        label: '跳转后标题是过期夹具',
+      },
+      {
+        op: 'expectElement',
+        query: { title: '可能已过期' },
+        label: '详情页的「可能已过期」时效角标',
+      },
+      {
+        op: 'expectElement',
+        query: { title: '已索引' },
+        label: '详情页的「已索引」状态',
+      },
+      { op: 'shot', name: '09-review-due-detail.png' },
     ],
   },
   {

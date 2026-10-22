@@ -115,6 +115,14 @@ function frameOf(appName, query) {
   return agent({ op: 'frame', app: appName, query });
 }
 
+function sheetState(appName) {
+  return agent({ op: 'sheetState', app: appName });
+}
+
+function clickSheetPrimary(appName) {
+  return agent({ op: 'clickSheetPrimary', app: appName });
+}
+
 /**
  * 点击：`query` 给得出元素时优先 AXPress，否则用 `point` 投递真实鼠标事件。
  *
@@ -180,6 +188,8 @@ module.exports = {
   workspaceRootOf,
   activate,
   frameOf,
+  sheetState,
+  clickSheetPrimary,
   click,
   focus,
   drag,

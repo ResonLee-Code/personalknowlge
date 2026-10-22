@@ -94,14 +94,17 @@ function findElement(process, query) {
     return null;
   }
   const wanted = query.title || query.description || query.value;
+  const matches = (current) => {
+    if (!current || !wanted) return false;
+    return query.exact ? current === wanted : current.indexOf(wanted) >= 0;
+  };
   for (let index = 0; index < elements.length; index += 1) {
     const element = elements[index];
     const role = read(element, 'role');
     if (query.role && role !== query.role) continue;
     if (!wanted) return element;
     for (const property of ['title', 'description', 'value']) {
-      const current = read(element, property);
-      if (current && current.indexOf(wanted) >= 0) return element;
+      if (matches(read(element, property))) return element;
     }
   }
   return null;
@@ -183,6 +186,37 @@ function run(argv) {
         if (!element) return out({ ok: false, error: '没找到元素' });
         const frame = frameOfElement(element);
         return out(frame ? { ok: true, frame: frame } : { ok: false, error: '拿不到坐标' });
+      }
+      /**
+       * 原生保存 / 打开面板是当前窗口的 sheet。先只读 sheets，再把范围限制在
+       * sheet 内找确认按钮，避免每次都对整个 WebView 跑一遍 entireContents()。
+       */
+      case 'sheetState': {
+        const process = Application('System Events').processes.byName(request.app);
+        const window = process.windows[0];
+        if (!window) return out({ ok: false, error: '拿不到应用窗口' });
+        const sheets = window.sheets();
+        return out({ ok: true, count: sheets.length });
+      }
+      /**
+       * 原生打开 / 保存面板的主确认按钮固定在 sheet 右下。直接找整个 sheet 的
+       * AX 树在文件很多会慢到数十秒；这里用 sheet 的几何位置投递真实点击，
+       * 对 AppKit 原生按钮可靠，也避开 WebView 的坐标点击限制。
+       */
+      case 'clickSheetPrimary': {
+        const process = Application('System Events').processes.byName(request.app);
+        const window = process.windows[0];
+        if (!window) return out({ ok: false, error: '拿不到应用窗口' });
+        const sheets = window.sheets();
+        if (sheets.length === 0) return out({ ok: true, clicked: false });
+        const frame = frameOfElement(sheets[0]);
+        if (!frame) return out({ ok: false, error: '拿不到系统面板坐标' });
+        clickAt({
+          x: frame.x + frame.width - 55,
+          y: frame.y + frame.height - 27,
+        });
+        delay(0.2);
+        return out({ ok: true, clicked: true });
       }
       /**
        * 把元素设为**焦点**（2026-10-18）。

@@ -23,11 +23,12 @@ const { spawn } = require('node:child_process');
 
 const mac = require('./lib/mac');
 const report = require('./lib/report');
-const { runCheck } = require('./lib/file-check');
+const { runArtifactCheck, runCheck } = require('./lib/file-check');
 const { resolveWorkspaceFile } = require('./lib/fixture');
 const { APP_NAME, CASES, MANUAL_ONLY } = require('./cases');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
+let nativeArtifactsRoot = null;
 
 /** 与 `lib/ax-keepalive.js` 约定的忙碌锁：脚本查元素时让保活轮询停下（避免互相拖垮）。 */
 const AX_LOCK = process.env.PKOS_AX_LOCK || path.join(os.tmpdir(), 'pkos-ax-busy.lock');
@@ -118,6 +119,47 @@ function resolvePoint(appName, target) {
 /** 睡一会儿（不 spin，也不起子进程）。 */
 function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function artifactPath(root, relative) {
+  return resolveWorkspaceFile(root, relative);
+}
+
+function nativePanelOpen(appName, target) {
+  mac.activate(appName);
+  mac.keystroke('g', ['command down', 'shift down']);
+  sleepMs(900);
+  mac.keystroke('a', ['command down']);
+  mac.paste(target);
+  sleepMs(500);
+  mac.keyCode(36);
+  sleepMs(900);
+  mac.keyCode(36);
+  sleepMs(700);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const sheets = mac.sheetState(appName);
+    if (!sheets.ok) throw new Error(sheets.error);
+    if (sheets.count === 0) return;
+    mac.clickSheetPrimary(appName);
+    sleepMs(700);
+    const after = mac.sheetState(appName);
+    if (after.ok && after.count === 0) return;
+    mac.keyCode(36);
+    sleepMs(700);
+  }
+  const state = mac.sheetState(appName);
+  if (!state.ok || state.count > 0) {
+    throw new Error('系统文件面板没有关闭');
+  }
+}
+
+function waitForFile(file, timeoutMs = 6000) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    if (fs.existsSync(file)) return true;
+    sleepMs(250);
+  } while (Date.now() < deadline);
+  return false;
 }
 
 /** 轮询等待某个元素出现（界面渲染需要时间，一次查不到不代表失败）。 */
@@ -258,6 +300,9 @@ function ensureScene(appName, workspace) {
 
 function runCase(appName, workspace, outDir, item, dryRun) {
   const steps = [];
+  const caseArtifacts = nativeArtifactsRoot
+    ? path.join(nativeArtifactsRoot, String(item.id))
+    : null;
   /**
    * 每条用例开始时先把应用切前台（2026-10-15 实测教训）。
    *
@@ -312,6 +357,31 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           }
           break;
         }
+        /**
+         * 准备本次验收独占的产物目录。恢复目标必须为空，目录只落在
+         * `nativeArtifactsRoot/<case>/<step.path>`，不会碰工作区或用户文件。
+         */
+        case 'prepareDirectory': {
+          if (!caseArtifacts) {
+            record.status = 'failed';
+            record.detail = '验收产物根目录未初始化';
+            break;
+          }
+          try {
+            const target = artifactPath(caseArtifacts, step.path);
+            fs.mkdirSync(target, { recursive: true });
+            if (fs.readdirSync(target).length > 0) {
+              throw new Error(`目录不是空的：${target}`);
+            }
+            record.status = 'passed';
+            record.detail = `已准备空目录：${target}`;
+            record.evidence = `✓ 空目录 ${target}`;
+          } catch (error) {
+            record.status = 'failed';
+            record.detail = `准备产物目录失败：${error.message}`;
+          }
+          break;
+        }
         case 'click': {
           const point = resolvePoint(appName, step.frame);
           if (!point.ok) {
@@ -319,7 +389,15 @@ function runCase(appName, workspace, outDir, item, dryRun) {
             record.detail = point.error;
             break;
           }
-          const clicked = mac.click(appName, point.point, step.frame);
+          const clickPoint = {
+            x: point.point.x + (Number(step.offset?.x) || 0),
+            y: point.point.y + (Number(step.offset?.y) || 0),
+          };
+          const clicked = mac.click(
+            appName,
+            clickPoint,
+            step.bypassAx ? undefined : step.frame,
+          );
           record.status = clicked.ok ? 'passed' : 'failed';
           const why = clicked.pressError
             ? `（AXPress 失败：${clicked.pressError}）`
@@ -327,7 +405,7 @@ function runCase(appName, workspace, outDir, item, dryRun) {
               ? '（没找到元素，按坐标点）'
               : '';
           record.detail = clicked.ok
-            ? `click(${Math.round(point.point.x)},${Math.round(point.point.y)}) · ${clicked.method ?? 'CGEvent'}${why}`
+            ? `click(${Math.round(clickPoint.x)},${Math.round(clickPoint.y)}) · ${clicked.method ?? 'CGEvent'}${why}`
             : clicked.error;
           break;
         }
@@ -427,6 +505,129 @@ function runCase(appName, workspace, outDir, item, dryRun) {
           break;
         }
         /**
+         * 通过 macOS 原生保存面板保存。调用前界面应已打开保存 sheet。
+         * `artifact` 是本次用例产物目录内的相对路径，不允许绝对路径或 `..`。
+         */
+        case 'nativeSave': {
+          try {
+            if (!caseArtifacts) throw new Error('验收产物根目录未初始化');
+            const target = artifactPath(caseArtifacts, step.artifact);
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            if (fs.existsSync(target)) throw new Error(`拒绝覆盖已有产物：${target}`);
+            nativePanelOpen(appName, path.dirname(target));
+            if (!waitForFile(target)) throw new Error(`保存面板操作后没有生成：${target}`);
+            const bytes = fs.statSync(target).size;
+            record.status = 'passed';
+            record.detail = `系统保存面板已保存 ${path.basename(target)}（${bytes} B）`;
+            record.evidence = `✓ 原生保存 ${target}（${bytes} B）`;
+          } catch (error) {
+            record.status = 'failed';
+            record.detail = `原生保存失败：${error.message}`;
+          }
+          break;
+        }
+        /**
+         * 通过 macOS 原生打开面板选择文件或目录。`workspace: true` 只允许重新打开
+         * 当前已核验工作区；普通 `artifact` 仍限制在本次验收临时产物目录内。
+         */
+        case 'nativeOpen': {
+          try {
+            const target = step.workspace
+              ? path.resolve(workspace)
+              : artifactPath(caseArtifacts, step.artifact);
+            if (!fs.existsSync(target)) throw new Error(`目标不存在：${target}`);
+            nativePanelOpen(appName, target);
+            record.status = 'passed';
+            record.detail = `系统打开面板已选择 ${target}`;
+            record.evidence = `✓ 原生打开 ${target}`;
+          } catch (error) {
+            record.status = 'failed';
+            record.detail = `原生打开失败：${error.message}`;
+          }
+          break;
+        }
+        case 'checkArtifact': {
+          try {
+            if (!caseArtifacts) throw new Error('验收产物根目录未初始化');
+            const checked = runArtifactCheck(caseArtifacts, step);
+            record.status = checked.ok ? 'passed' : 'failed';
+            record.detail = checked.ok ? '产物断言通过' : checked.error;
+            record.evidence = checked.evidence || '';
+          } catch (error) {
+            record.status = 'failed';
+            record.detail = `产物断言失败：${error.message}`;
+          }
+          break;
+        }
+        case 'expectWorkspace': {
+          const pid = mac.pidOf(appName);
+          if (!pid.ok) {
+            record.status = 'failed';
+            record.detail = pid.error;
+            break;
+          }
+          const actual = mac.workspaceRootOf(pid.pid);
+          if (!actual.ok) {
+            record.status = 'failed';
+            record.detail = actual.error;
+            break;
+          }
+          try {
+            const target = step.workspace
+              ? path.resolve(workspace)
+              : artifactPath(caseArtifacts, step.artifact);
+            const actualReal = fs.realpathSync(actual.root);
+            const targetReal = fs.realpathSync(target);
+            const ok = actualReal === targetReal;
+            record.status = ok ? 'passed' : 'failed';
+            record.detail = ok
+              ? `当前打开的数据库属于 ${targetReal}`
+              : `当前打开 ${actualReal}，期望 ${targetReal}`;
+            record.evidence = ok ? `✓ 已打开工作区 ${targetReal}` : '';
+          } catch (error) {
+            record.status = 'failed';
+            record.detail = `校验当前工作区失败：${error.message}`;
+          }
+          break;
+        }
+        /**
+         * 打开工作区切换菜单。不能只按“第一个 AXPopUpButton”找：笔记页还有
+         * 标签、来源等下拉，AX 顺序会随页面变化。这里先从已打开的数据库反推当前
+         * 工作区根路径，再找标题里带该路径的切换器，并等“打开知识库”真正出现。
+         */
+        case 'workspaceMenu': {
+          const pid = mac.pidOf(appName);
+          if (!pid.ok) {
+            record.status = 'failed';
+            record.detail = pid.error;
+            break;
+          }
+          const actual = mac.workspaceRootOf(pid.pid);
+          if (!actual.ok) {
+            record.status = 'failed';
+            record.detail = actual.error;
+            break;
+          }
+          const switcher = { role: 'AXPopUpButton', title: actual.root };
+          const focused = mac.focus(appName, switcher);
+          if (!focused.ok) {
+            record.status = 'failed';
+            record.detail = `找不到工作区切换器：${focused.error}`;
+            break;
+          }
+          mac.keyCode(36);
+          const opened = waitForFrame(
+            appName,
+            { role: 'AXButton', title: '打开知识库' },
+            8000,
+          );
+          record.status = opened.ok ? 'passed' : 'failed';
+          record.detail = opened.ok
+            ? `已打开工作区菜单：${actual.root}`
+            : `工作区菜单没有展开：${opened.error}`;
+          break;
+        }
+        /**
          * 明确地等一会儿（毫秒）。
          *
          * 用途：等**界面自己完成一件事**——例如剪藏的「抓取」要联网取回网页，
@@ -465,6 +666,15 @@ function runCase(appName, workspace, outDir, item, dryRun) {
             ? `界面上找到了：${step.label || JSON.stringify(step.query)}`
             : `界面上没有找到：${step.label || JSON.stringify(step.query)}`;
           record.evidence = found.ok ? `✓ 界面存在「${step.label || ''}」` : '';
+          break;
+        }
+        case 'expectValue': {
+          const found = mac.frameOf(appName, { ...step.query, exact: true });
+          record.status = found.ok ? 'passed' : 'failed';
+          record.detail = found.ok
+            ? `界面值匹配：${step.label || JSON.stringify(step.query)}`
+            : `界面值不匹配：${step.label || JSON.stringify(step.query)}`;
+          record.evidence = found.ok ? `✓ 界面值「${step.label || ''}」匹配` : '';
           break;
         }
         /**
@@ -772,6 +982,11 @@ function main() {
     ? path.resolve(options.out)
     : path.join(repoRoot, 'docs', 'acceptance', timestamp());
   const mode = options.dryRun ? 'dry-run（未执行）' : 'real（真机执行）';
+  nativeArtifactsRoot = path.join(
+    os.tmpdir(),
+    'pkos-native-acceptance',
+    `${timestamp()}-${process.pid}`,
+  );
 
   if (options.sceneOnly) {
     if (!mac.isMac) {
@@ -876,6 +1091,7 @@ function main() {
     mode,
     appName: options.app,
     workspace: options.workspace,
+    nativeArtifactsRoot,
     scene,
     summary,
     autoSteps: { passed: autoPassed, failed: autoFailed },

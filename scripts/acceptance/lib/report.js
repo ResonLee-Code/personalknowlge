@@ -40,6 +40,9 @@ function renderMarkdown(run) {
     );
   }
   lines.push(`- 工作区：\`${run.workspace}\``);
+  if (run.nativeArtifactsRoot) {
+    lines.push(`- 原生导出 / 恢复产物：\`${run.nativeArtifactsRoot}\``);
+  }
   lines.push(`- 应用：${run.appName}`);
   lines.push(`- 模式：${run.mode}`);
   lines.push(
