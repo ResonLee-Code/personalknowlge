@@ -4,19 +4,19 @@
 > 四个 P0 主题，并落实 V2.0.0 发布出口中属于 P0 的验证门槛。
 > 本文件是执行状态的事实清单；只有代码、测试、产物或真机报告能作为完成证据。
 
-**当前结论（2026-10-21）**：P0 的可编码、可自动验证部分已完成；全量自动化测试、
+**当前结论（2026-10-22）**：P0 的可编码、可自动验证部分已完成；全量自动化测试、
 桌面二进制构建、签名清单生成器和性能守护均通过。剩余项全部是需要外部凭据、真实模型或
 真实设备的人工验收，统一见 [V2_P0_MANUAL_ACCEPTANCE.md](./V2_P0_MANUAL_ACCEPTANCE.md)。
 在这些人工项完成前，本目标仍保持 active，不能宣称 V2.0.x P0 全量完成。
 
-### 自动化证据（2026-10-21）
+### 自动化证据（2026-10-22）
 
 | 检查 | 结果 |
 | --- | --- |
-| `pnpm test` | 76 文件 / 399 测试通过 |
-| `cargo test --offline` | 全部通过；仅既有环境探测 / 基准 / 真机探针按 `#[ignore]` 跳过 |
+| `pnpm test` | 83 文件 / 416 测试通过 |
+| `cargo test --offline` | 全部通过；library 204 passed / 1 ignored，全部集成测试通过 |
 | `pnpm lint` / `pnpm build` | 通过 |
-| `pnpm test:e2e` | 2 条通过，含 Ask/Research/Organize 入口冒烟 |
+| `pnpm test:e2e` | 7 条通过，含 Ask、Research、Graph、Writing、Sync 用户路径 |
 | `pnpm tauri build --debug --no-bundle` | 桌面二进制构建通过 |
 | `pnpm test:ask-eval` | 50 正样本、20 负样本全部过门禁 |
 | Ask 作用域与追问隔离 | 10 条查询覆盖 Note / Category / Tag / All；5 轮虚构历史答案均未进入本轮结论或引用 |

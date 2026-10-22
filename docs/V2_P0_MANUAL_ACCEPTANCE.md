@@ -58,7 +58,7 @@
 
 ### Windows
 
-- 构建对象：使用 `9504027` 对应的 Windows 安装器与便携版；哈希见
+- 构建对象：使用 `49de15f` 对应的 Windows 安装器与便携版；哈希见
   [跨平台产物记录](./acceptance/V2_PLATFORM_ARTIFACTS_20261022.md)。以下真实设备项仍须执行。
 - [ ] 全新用户目录安装 NSIS 包。
 - [ ] 安装到含中文与空格的路径。
@@ -71,7 +71,7 @@
 
 ### Linux
 
-- 构建对象：使用 `9504027` 对应的 deb / rpm / AppImage；哈希见
+- 构建对象：使用 `49de15f` 对应的 deb / rpm / AppImage；哈希见
   [跨平台产物记录](./acceptance/V2_PLATFORM_ARTIFACTS_20261022.md)。以下物理机 / 指定版本项仍须执行。
 - [ ] Ubuntu 22.04 安装 `.deb` 并启动。
 - [ ] Ubuntu 24.04 安装 `.deb` 并启动。

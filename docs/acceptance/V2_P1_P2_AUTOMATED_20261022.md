@@ -13,7 +13,7 @@
 | 门禁 | 结果 |
 | --- | --- |
 | Rust 全量测试 | 通过；library 204 passed / 1 ignored，全部集成测试通过 |
-| 前端 Vitest | **82 文件 / 413 用例通过** |
+| 前端 Vitest | **83 文件 / 416 用例通过** |
 | ESLint | 通过 |
 | TypeScript / Vite production build | 通过 |
 | Playwright E2E | **7/7 通过**（含 Ask 保存、Research 计划/模板/重跑、Graph 洞察、Writing diff、Sync 设置） |
@@ -29,6 +29,16 @@
 | `.app` 包内二进制 / 包文件合计 | **13,553,840 B / 13,713,206 B**；包内二进制 SHA-256 `bb5df9ba5b18826bed072bc859e87acaf1a2eb05fd80e88695c714152665bbd5` |
 | macOS `.app` 构建 | ad-hoc 签名成功；公证因无凭据跳过 |
 | macOS `.app` 后端启动冒烟 | 进程存活，迁移 1–16 全部完成，文件监听启动，主窗口存在 |
+
+当前 Research 候选提交 `49de15f` 的流水线结果已补充验证：Rust 全量、前端
+83 / 416、Playwright 7 / 7、ESLint、production build、发布清单 / workflow /
+updater 验签、`actionlint`、前端生产依赖审计与 `cargo-audit` 均通过；三平台产物哈希见
+[跨平台产物记录](./V2_PLATFORM_ARTIFACTS_20261022.md)。`cargo-audit` 为
+0 vulnerabilities / 6 个上游 unmaintained 或 unsound warnings。
+
+macOS 原生完整套件在本候选上的重跑仍待宿主机解锁后执行；表中的
+**321 步通过 / 0 失败**是此前 `7539e4f` 基线的有效历史证据，不能直接冒充
+`49de15f` 已完成原生门禁。
 
 `cargo clippy --all-targets -D warnings` 仍被仓库已有的历史 lint 债务拦住（策略/服务/文本处理
 等旧文件）；本轮新增文件与改动点已按 Clippy 反馈清零，未把全仓历史债混入本功能提交。
