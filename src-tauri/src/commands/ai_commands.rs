@@ -2,6 +2,8 @@
 //!
 //! 这一层**只做转发**：闸门在 `application::ai::policy`，工具在 `application::ai::tools`。
 
+use std::path::Path;
+
 use tauri::State;
 
 use crate::application::ai::diagnose::{self, AiDiagnosis, DiagnoseInputs, HttpLocalModelProbe};
@@ -30,9 +32,9 @@ pub async fn ai_policy_get(state: State<'_, AppState>) -> Result<AiPolicy> {
 
 /// 更新 AI 策略（总开关 / 联网档位 / 抓取正文 / 白黑名单 / 本地与在线模型 / 预算）。
 ///
-/// **API Key 只写不读**：`remote_model_api_key` 在这里落到应用数据目录的凭据文件，
+/// **API Key 只写不读**：在线模型与决策模型的 Key 都在这里落到应用数据目录的凭据文件，
 /// 不进工作区设置库（否则备份包、导出的 Markdown 会把 Key 一起带走）；
-/// 响应里只用 `remote_model_key_set` 回显「配没配」。
+/// 响应里只用 `*_key_set` 回显「配没配」。
 #[tauri::command]
 pub async fn ai_policy_set(
     state: State<'_, AppState>,
@@ -41,12 +43,67 @@ pub async fn ai_policy_set(
     let context = state.inner.context()?;
     let data_dir = state.inner.data_dir.clone();
     run(move || {
-        if let Some(key) = input.remote_model_api_key.clone() {
-            credential_store::set_remote_model_key(&data_dir, Some(&key))?;
-        }
+        persist_api_keys(&data_dir, &input)?;
         AiPolicyService::new(context).update(input)
     })
     .await
+}
+
+/// 把两类只写密钥落到应用数据目录；`None` 表示不改，空串表示清除。
+fn persist_api_keys(data_dir: &Path, input: &UpdateAiPolicyInput) -> Result<()> {
+    if let Some(key) = input.remote_model_api_key.as_deref() {
+        credential_store::set_remote_model_key(data_dir, Some(key))?;
+    }
+    if let Some(key) = input.decision_api_key.as_deref() {
+        credential_store::set_decision_key(data_dir, Some(key))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod key_persistence_tests {
+    use super::*;
+
+    #[test]
+    fn saves_and_clears_remote_and_decision_keys_independently() {
+        let data = tempfile::tempdir().expect("应用数据目录");
+
+        persist_api_keys(
+            data.path(),
+            &UpdateAiPolicyInput {
+                remote_model_api_key: Some("sk-remote".into()),
+                decision_api_key: Some("pplx-decision".into()),
+                ..Default::default()
+            },
+        )
+        .expect("保存两类 Key");
+        assert!(credential_store::remote_model_key_set(data.path()));
+        assert!(credential_store::decision_key_set(data.path()));
+
+        persist_api_keys(
+            data.path(),
+            &UpdateAiPolicyInput {
+                remote_model_api_key: Some(String::new()),
+                ..Default::default()
+            },
+        )
+        .expect("只清在线模型 Key");
+        assert!(!credential_store::remote_model_key_set(data.path()));
+        assert!(
+            credential_store::decision_key_set(data.path()),
+            "未传 decisionApiKey 时不能误清决策 Key"
+        );
+
+        persist_api_keys(
+            data.path(),
+            &UpdateAiPolicyInput {
+                decision_api_key: Some(String::new()),
+                ..Default::default()
+            },
+        )
+        .expect("清决策 Key");
+        assert!(!credential_store::decision_key_set(data.path()));
+    }
 }
 
 /// 最近的行为审计（新的在前；不含正文）。

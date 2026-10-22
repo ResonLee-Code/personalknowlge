@@ -61,7 +61,9 @@ export function AiSettingsPanel() {
   const [vectorPreview, setVectorPreview] = useState<VectorIndexPreview | null>(null);
   const [vectorAskOpen, setVectorAskOpen] = useState(false);
   const [vectorBusy, setVectorBusy] = useState(false);
-  const [vectorProgress, setVectorProgress] = useState<{ done: number; total: number } | null>(null);
+  const [vectorProgress, setVectorProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
   const [embeddingDraft, setEmbeddingDraft] = useState('');
   /** 决策模型（D4）：配置草稿 + 探针结果 */
   const [decisionBaseDraft, setDecisionBaseDraft] = useState('');
@@ -117,7 +119,10 @@ export function AiSettingsPanel() {
     void Promise.resolve().then(() => load());
   }, [load]);
 
-  const apply = async (input: Parameters<typeof aiService.setPolicy>[0], message?: string) => {
+  const apply = async (
+    input: Parameters<typeof aiService.setPolicy>[0],
+    message?: string,
+  ): Promise<boolean> => {
     setBusy(true);
     try {
       const next = await aiService.setPolicy(input);
@@ -130,8 +135,10 @@ export function AiSettingsPanel() {
         // 审计刷新失败：保留上一次的列表，并记下原因（下面会显示）
         setAuditError('审计刷新失败：下次打开设置页可重试');
       }
+      return true;
     } catch (error) {
-      reportFailure('读取审计日志失败', errorMessage(error));
+      reportFailure('保存 AI 设置失败', errorMessage(error));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -239,7 +246,10 @@ export function AiSettingsPanel() {
           data-testid="ai-enabled"
           checked={policy.enabled}
           onCheckedChange={(checked) =>
-            void apply({ enabled: checked }, checked ? '已开启 AI 能力（仍不会自动联网）' : '已关闭 AI 能力')
+            void apply(
+              { enabled: checked },
+              checked ? '已开启 AI 能力（仍不会自动联网）' : '已关闭 AI 能力',
+            )
           }
         />
       </Row>
@@ -317,9 +327,9 @@ export function AiSettingsPanel() {
             onBlur={(event) => void apply({ searchEndpoint: event.target.value }, '已保存检索源')}
           />
           <p className="text-[11px] text-[var(--ink-subtle)]">
-            应用不预置任何第三方检索服务：这里填你自己可用的检索接口（返回 JSON，
-            支持 SearxNG 的 {'{ "results": [ … ] }'} 形状）。留空表示不联网检索；
-            地址不合法或缺少 {'{query}'} 会被清空。
+            应用不预置任何第三方检索服务：这里填你自己可用的检索接口（返回 JSON， 支持 SearxNG 的{' '}
+            {'{ "results": [ … ] }'} 形状）。留空表示不联网检索； 地址不合法或缺少 {'{query}'}{' '}
+            会被清空。
           </p>
         </div>
         <div className="space-y-1">
@@ -346,9 +356,7 @@ export function AiSettingsPanel() {
             rows={2}
             placeholder={'ads.example.com'}
             onChange={(event) => setDenylistDraft(event.target.value)}
-            onBlur={() =>
-              void apply({ domainDenylist: parseLines(denylistDraft) }, '已保存黑名单')
-            }
+            onBlur={() => void apply({ domainDenylist: parseLines(denylistDraft) }, '已保存黑名单')}
             className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--ink)]"
           />
         </div>
@@ -396,7 +404,10 @@ export function AiSettingsPanel() {
             data-testid="ai-vector-authorize"
             disabled={!policy.vectorEnabled || policy.vectorAuthorizedAt !== null}
             onClick={() =>
-              void apply({ confirmVector: true }, '已授权：查询词会发给嵌入端点（换地址/换模型后需重新确认）')
+              void apply(
+                { confirmVector: true },
+                '已授权：查询词会发给嵌入端点（换地址/换模型后需重新确认）',
+              )
             }
           >
             授权向量检索
@@ -485,7 +496,10 @@ export function AiSettingsPanel() {
             onCheckedChange={(checked) => void apply({ localModelCompose: checked })}
           />
         </Row>
-        <Row label="用本地模型打分" hint="与规则档 A/B 用；模型分未校准，级别折算仍占一半（不是 Jev）">
+        <Row
+          label="用本地模型打分"
+          hint="与规则档 A/B 用；模型分未校准，级别折算仍占一半（不是 Jev）"
+        >
           <Switch
             data-testid="ai-local-score"
             checked={policy.localModelScore}
@@ -547,8 +561,13 @@ export function AiSettingsPanel() {
               disabled={busy || remoteKeyDraft.trim().length === 0}
               onClick={() => {
                 const key = remoteKeyDraft;
-                setRemoteKeyDraft('');
-                void apply({ remoteModelApiKey: key }, '已保存 API Key（存储在本机应用数据目录）');
+                void apply(
+                  { remoteModelApiKey: key },
+                  '已保存 API Key（存储在本机应用数据目录）',
+                ).then((saved) => {
+                  // 只写不读：成功落盘后才清空，失败时保留用户唯一副本。
+                  if (saved) setRemoteKeyDraft('');
+                });
               }}
             >
               保存
@@ -567,10 +586,7 @@ export function AiSettingsPanel() {
             </Button>
           </div>
         </div>
-        <Row
-          label="用在线模型写报告"
-          hint="材料片段会离开本机；失败自动降级到本地模型或模板实现"
-        >
+        <Row label="用在线模型写报告" hint="材料片段会离开本机；失败自动降级到本地模型或模板实现">
           <Switch
             data-testid="ai-remote-compose"
             checked={policy.remoteModelCompose}
@@ -636,7 +652,9 @@ export function AiSettingsPanel() {
             const next = event.target.value as 'rule' | 'system_one';
             void apply(
               { decisionProvider: next },
-              next === 'rule' ? '已切回规则档' : '已选择 System One（还需填端点、模型与 Key 并授权）',
+              next === 'rule'
+                ? '已切回规则档'
+                : '已选择 System One（还需填端点、模型与 Key 并授权）',
             );
           }}
           className="h-8 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs"
@@ -708,15 +726,21 @@ export function AiSettingsPanel() {
                 type="password"
                 value={decisionKeyDraft}
                 onChange={(event) => setDecisionKeyDraft(event.target.value)}
-                placeholder={policy.decisionKeySet ? '已配置（只写不读，重填可覆盖）' : 'API Key（只写不读）'}
+                placeholder={
+                  policy.decisionKeySet ? '已配置（只写不读，重填可覆盖）' : 'API Key（只写不读）'
+                }
               />
               <Button
                 size="sm"
                 variant="secondary"
                 data-testid="ai-decision-key-save"
                 onClick={() => {
-                  void apply({ decisionApiKey: decisionKeyDraft }, '已保存决策模型 Key');
-                  setDecisionKeyDraft('');
+                  void apply({ decisionApiKey: decisionKeyDraft }, '已保存决策模型 Key').then(
+                    (saved) => {
+                      // 与在线 Key 同一纪律：保存失败不能把输入框里的唯一副本清掉。
+                      if (saved) setDecisionKeyDraft('');
+                    },
+                  );
                 }}
               >
                 保存 Key
@@ -730,7 +754,10 @@ export function AiSettingsPanel() {
                 清除
               </Button>
             </div>
-            <p data-testid="ai-decision-authorized" className="text-[11px] text-[var(--ink-subtle)]">
+            <p
+              data-testid="ai-decision-authorized"
+              className="text-[11px] text-[var(--ink-subtle)]"
+            >
               {policy.decisionAuthorizedAt
                 ? `已授权外发（${formatDateTime(policy.decisionAuthorizedAt)}）；换地址或模型名后需要重新确认。`
                 : '尚未授权：这一档不会向任何地址发送内容。'}
@@ -781,7 +808,7 @@ export function AiSettingsPanel() {
                     : probe.outOfSampleEce.toFixed(4)}
                 </p>
                 <p data-testid="ai-decision-calibration-families">
-                   确定性题 ECE {probe.calibrationDeterminable.ece.toFixed(4)}（
+                  确定性题 ECE {probe.calibrationDeterminable.ece.toFixed(4)}（
                   {probe.calibrationDeterminable.samples} 题）· 材料外题 ECE{' '}
                   {probe.calibrationUnderdetermined.ece.toFixed(4)}（
                   {probe.calibrationUnderdetermined.samples} 题），平均说{' '}
@@ -802,9 +829,8 @@ export function AiSettingsPanel() {
                   </ul>
                 ) : null}
                 <p data-testid="ai-decision-ab">
-                  A/B（{probe.ab.cases} 条打分，相关/不相关各半）：规则档{' '}
-                  {probe.ab.rule.correct}/{probe.ab.rule.total}（区分度{' '}
-                  {probe.ab.rule.separation.toFixed(3)}）· 决策档{' '}
+                  A/B（{probe.ab.cases} 条打分，相关/不相关各半）：规则档 {probe.ab.rule.correct}/
+                  {probe.ab.rule.total}（区分度 {probe.ab.rule.separation.toFixed(3)}）· 决策档{' '}
                   {probe.ab.decision.correct}/{probe.ab.decision.total}（区分度{' '}
                   {probe.ab.decision.separation.toFixed(3)}）→{' '}
                   {probe.ab.decisionBetter ? '决策档更好' : '规则档不落下风'}
@@ -914,7 +940,10 @@ export function AiSettingsPanel() {
         ) : audit.length === 0 ? (
           <p className="text-[11px] text-[var(--ink-subtle)]">还没有 AI 行为记录。</p>
         ) : (
-          <ul data-testid="ai-audit-list" className="space-y-0.5 text-[11px] text-[var(--ink-muted)]">
+          <ul
+            data-testid="ai-audit-list"
+            className="space-y-0.5 text-[11px] text-[var(--ink-muted)]"
+          >
             {audit.map((entry, index) => (
               <li key={`${entry.at}-${index}`} className="flex items-center gap-2">
                 <span className="w-28 shrink-0 tabular-nums text-[var(--ink-subtle)]">
@@ -936,7 +965,10 @@ export function AiSettingsPanel() {
 
       {/* 决策模型授权确认（D4）：与在线模型同一套口径——说清"内容会离开本机、发给谁" */}
       <Dialog open={decisionAskOpen} onOpenChange={(open) => !open && setDecisionAskOpen(false)}>
-        <DialogContent className="w-[min(560px,calc(100vw-2rem))]" data-testid="ai-decision-confirm">
+        <DialogContent
+          className="w-[min(560px,calc(100vw-2rem))]"
+          data-testid="ai-decision-confirm"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1.5">
               <Sparkles className="h-4 w-4 text-[var(--brand)]" />
@@ -980,10 +1012,7 @@ export function AiSettingsPanel() {
 
       {/* 向量索引构建确认（D3）：**先把"要发什么、发给谁"摆出来** */}
       <Dialog open={vectorAskOpen} onOpenChange={(open) => !open && setVectorAskOpen(false)}>
-        <DialogContent
-          className="w-[min(560px,calc(100vw-2rem))]"
-          data-testid="ai-vector-confirm"
-        >
+        <DialogContent className="w-[min(560px,calc(100vw-2rem))]" data-testid="ai-vector-confirm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1.5">
               <Sparkles className="h-4 w-4 text-[var(--brand)]" />
@@ -1000,8 +1029,8 @@ export function AiSettingsPanel() {
                 · 目标主机：<code>{vectorPreview.host ?? '（未知）'}</code>
               </p>
               <p>
-                · 涉及 {vectorPreview.notes} 篇笔记 / {vectorPreview.chunksTotal} 个分块；本次实际外发{' '}
-                {vectorPreview.chunksToEmbed} 个片段（增量：内容没变的不重发）
+                · 涉及 {vectorPreview.notes} 篇笔记 / {vectorPreview.chunksTotal}{' '}
+                个分块；本次实际外发 {vectorPreview.chunksToEmbed} 个片段（增量：内容没变的不重发）
               </p>
               <p>· {vectorPreview.reason}</p>
               <p>· 向量存在本地；随时可以关掉向量检索，回退到纯关键词检索。</p>
@@ -1033,10 +1062,7 @@ export function AiSettingsPanel() {
           setPendingRemoteSwitch(null);
         }}
       >
-        <DialogContent
-          className="w-[min(560px,calc(100vw-2rem))]"
-          data-testid="ai-remote-confirm"
-        >
+        <DialogContent className="w-[min(560px,calc(100vw-2rem))]" data-testid="ai-remote-confirm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1.5">
               <Sparkles className="h-4 w-4 text-[var(--brand)]" />
@@ -1096,8 +1122,8 @@ export function AiSettingsPanel() {
               启用「允许联网检索」
             </DialogTitle>
             <DialogDescription>
-              开启后，AI 能力在**你每次确认**之后才可以访问公开网页：
-              会上传的内容是**检索片段 + 待验证的问题**（不会上传整篇知识库），
+              开启后，AI 能力在**你每次确认**之后才可以访问公开网页： 会上传的内容是**检索片段 +
+              待验证的问题**（不会上传整篇知识库），
               抓取的域名受白/黑名单约束；随时可以切回「仅本地」，切回后正在进行的联网动作会中止。
             </DialogDescription>
           </DialogHeader>

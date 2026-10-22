@@ -13,6 +13,8 @@
 
 > 2026-10-23 后续已安装 Ollama 与 `qwen2.5:7b`；真实本地模型结果见
 > [本地模型、updater 与同步存储准备记录](./V2_LOCAL_AI_STORAGE_20261023.md)。
+> 真实 DeepSeek、引用准确率、降级与决策档接线见
+> [DeepSeek 在线模型与决策档实测](./V2_DEEPSEEK_DECISION_20261023.md)。
 
 ## 操作与证据
 

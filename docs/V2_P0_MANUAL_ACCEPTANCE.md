@@ -97,9 +97,11 @@
 - [x] AI 总开关关闭时，系统级 `nettop` 对应用进程无 TCP / UDP 记录，审计为
       `AI_DISABLED`（[证据](./acceptance/V2_AI_ON_SMOKE_20261022.md)）。
 - [ ] 在线模型未授权时，网络代理 / 抓包确认 0 外发。
-- [ ] “逐次外发确认”未勾选时，确认 0 请求。
+- [x] “逐次外发确认”未勾选时，确认 0 请求
+      （真实 DeepSeek Key + `OUTBOUND_UNCONFIRMED` + macOS `nettop` 零连接）。
 - [x] 审计日志不含笔记正文与 API Key（`ai_policy_flow.rs` / `remote_model_flow.rs`）。
-- [ ] 在真实模型请求中核对审计日志不包含完整提示词。
+- [x] 在真实模型请求中核对审计日志不包含完整提示词
+      （DeepSeek 实测问题、唯一标记和提示词均未出现在 `ai-audit.jsonl`）。
 - [x] 取消 / 拒绝 / 撤销后不残留半成品或未登记文件（Research abandon、Organize reject/undo、
       批量删除撤销与历史恢复测试）。
 

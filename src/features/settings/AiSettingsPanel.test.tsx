@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiSettingsPanel } from '@/features/settings/AiSettingsPanel';
@@ -179,12 +180,10 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
   });
 
   it('检索源地址在失焦时保存（D3：应用不预置第三方检索服务）', async () => {
-    const setPolicy = vi
-      .spyOn(aiService, 'setPolicy')
-      .mockResolvedValue({
-        ...conservative,
-        searchEndpoint: 'https://searx.example/search?q={query}&format=json',
-      });
+    const setPolicy = vi.spyOn(aiService, 'setPolicy').mockResolvedValue({
+      ...conservative,
+      searchEndpoint: 'https://searx.example/search?q={query}&format=json',
+    });
     render(<AiSettingsPanel />);
 
     const field = await screen.findByTestId('ai-search-endpoint');
@@ -220,10 +219,7 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
       .mockImplementation(async (input) => ({ ...conservative, enabled: true, ...input }));
     render(<AiSettingsPanel />);
 
-    await userEvent.type(
-      await screen.findByTestId('ai-local-endpoint'),
-      'http://127.0.0.1:11434',
-    );
+    await userEvent.type(await screen.findByTestId('ai-local-endpoint'), 'http://127.0.0.1:11434');
     await userEvent.tab();
     await waitFor(() =>
       expect(setPolicy).toHaveBeenCalledWith({ localModelEndpoint: 'http://127.0.0.1:11434' }),
@@ -301,18 +297,32 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     expect(await screen.findByTestId('ai-remote-key-badge')).toHaveTextContent('未配置 Key');
   });
 
+  it('Key 保存失败时保留输入内容，不能让用户丢失唯一副本', async () => {
+    vi.spyOn(aiService, 'setPolicy').mockRejectedValue(new Error('磁盘写满'));
+    render(<AiSettingsPanel />);
+
+    const keyInput = await screen.findByTestId('ai-remote-key');
+    await userEvent.type(keyInput, 'sk-failure-keep-me');
+    await userEvent.click(screen.getByTestId('ai-remote-key-save'));
+
+    await waitFor(() => expect(aiService.setPolicy).toHaveBeenCalled());
+    expect(keyInput).toHaveValue('sk-failure-keep-me');
+    expect(toast.error).toHaveBeenCalledWith(
+      '保存 AI 设置失败',
+      expect.objectContaining({ description: '磁盘写满' }),
+    );
+  });
+
   it('打开「用在线模型写报告」先弹授权说明，确认后才提交开关', async () => {
-    const setPolicy = vi
-      .spyOn(aiService, 'setPolicy')
-      .mockImplementation(async (input) => ({
-        ...conservative,
-        enabled: true,
-        ...input,
-        // 后端在收到确认后写入授权时间戳（界面据此显示「已授权」）
-        remoteModelAuthorizedAt: input.confirmRemoteModel
-          ? '2026-10-11T10:00:00+08:00'
-          : conservative.remoteModelAuthorizedAt,
-      }));
+    const setPolicy = vi.spyOn(aiService, 'setPolicy').mockImplementation(async (input) => ({
+      ...conservative,
+      enabled: true,
+      ...input,
+      // 后端在收到确认后写入授权时间戳（界面据此显示「已授权」）
+      remoteModelAuthorizedAt: input.confirmRemoteModel
+        ? '2026-10-11T10:00:00+08:00'
+        : conservative.remoteModelAuthorizedAt,
+    }));
     render(<AiSettingsPanel />);
 
     await userEvent.click(await screen.findByTestId('ai-remote-compose'));
@@ -351,17 +361,15 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
       remoteModelKeySet: true,
       remoteModelAuthorizedAt: '2026-10-11T10:00:00+08:00',
     });
-    const setPolicy = vi
-      .spyOn(aiService, 'setPolicy')
-      .mockImplementation(async (input) => ({
-        ...conservative,
-        enabled: true,
-        remoteModelBaseUrl: 'https://api.example.com/v1',
-        remoteModelName: 'deepseek-chat',
-        remoteModelKeySet: true,
-        remoteModelAuthorizedAt: '2026-10-11T10:00:00+08:00',
-        ...input,
-      }));
+    const setPolicy = vi.spyOn(aiService, 'setPolicy').mockImplementation(async (input) => ({
+      ...conservative,
+      enabled: true,
+      remoteModelBaseUrl: 'https://api.example.com/v1',
+      remoteModelName: 'deepseek-chat',
+      remoteModelKeySet: true,
+      remoteModelAuthorizedAt: '2026-10-11T10:00:00+08:00',
+      ...input,
+    }));
     render(<AiSettingsPanel />);
 
     expect(await screen.findByTestId('ai-remote-authorized')).toHaveTextContent('已授权外发');
@@ -491,9 +499,13 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
       chunksToEmbed: 12,
       reason: '本次会把 12 个片段的文本发给嵌入端点',
     });
-    const build = vi
-      .spyOn(aiService, 'vectorIndexBuild')
-      .mockResolvedValue({ model: 'remote.embeddings:x', totalChunks: 12, embedded: 12, skipped: 0, tookMs: 5 });
+    const build = vi.spyOn(aiService, 'vectorIndexBuild').mockResolvedValue({
+      model: 'remote.embeddings:x',
+      totalChunks: 12,
+      embedded: 12,
+      skipped: 0,
+      tookMs: 5,
+    });
 
     render(<AiSettingsPanel />);
     await userEvent.click(await screen.findByTestId('ai-vector-build'));
@@ -525,6 +537,27 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
         decisionModel: 'pplx-decider-v1.1-27b',
       }),
     );
+  });
+
+  it('决策模型的 Key 能独立保存，失败时不清空输入', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      decisionProvider: 'system_one',
+      decisionBaseUrl: 'https://api.perplexity.ai',
+      decisionModel: 'pplx-decider-v1.1-27b',
+    });
+    const setPolicy = vi.spyOn(aiService, 'setPolicy').mockRejectedValueOnce(new Error('磁盘写满'));
+    render(<AiSettingsPanel />);
+
+    const keyInput = await screen.findByTestId('ai-decision-key');
+    await userEvent.type(keyInput, 'pplx-failure-keep-me');
+    await userEvent.click(screen.getByTestId('ai-decision-key-save'));
+
+    await waitFor(() =>
+      expect(setPolicy).toHaveBeenCalledWith({ decisionApiKey: 'pplx-failure-keep-me' }),
+    );
+    expect(keyInput).toHaveValue('pplx-failure-keep-me');
   });
 
   /** Track D4：探针报告要显示真实指标（准确率 / 自洽性 / 一致性），并如实标注"不是校准"。 */

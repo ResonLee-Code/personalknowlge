@@ -4,17 +4,17 @@
 > 四个 P0 主题，并落实 V2.0.0 发布出口中属于 P0 的验证门槛。
 > 本文件是执行状态的事实清单；只有代码、测试、产物或真机报告能作为完成证据。
 
-**当前结论（2026-10-22）**：P0 的可编码、可自动验证部分已完成；全量自动化测试、
+**当前结论（2026-10-23）**：P0 的可编码、可自动验证部分已完成；全量自动化测试、
 桌面二进制构建、签名清单生成器和性能守护均通过。剩余项全部是需要外部凭据、真实模型或
 真实设备的人工验收，统一见 [V2_P0_MANUAL_ACCEPTANCE.md](./V2_P0_MANUAL_ACCEPTANCE.md)。
 在这些人工项完成前，本目标仍保持 active，不能宣称 V2.0.x P0 全量完成。
 
-### 自动化证据（2026-10-22）
+### 自动化证据（2026-10-22 / 23）
 
 | 检查 | 结果 |
 | --- | --- |
-| `pnpm test` | 83 文件 / 416 测试通过 |
-| `cargo test --offline` | 全部通过；library 204 passed / 1 ignored，全部集成测试通过 |
+| `pnpm test` | 83 文件 / 418 测试通过 |
+| `cargo test --offline` | 全部通过；library 205 passed / 1 ignored，全部集成测试通过 |
 | `pnpm lint` / `pnpm build` | 通过 |
 | `pnpm test:e2e` | 7 条通过，含 Ask、Research、Graph、Writing、Sync 用户路径 |
 | `pnpm tauri build --debug --no-bundle` | 桌面二进制构建通过 |
@@ -25,6 +25,9 @@
 | AI 关闭 / 模板零外发 | 真实 Ask 交互下，AI 关闭与模板档均被 macOS `nettop` 观察为无 TCP / UDP 连接 |
 | 本地 Ollama 真实模型 | `qwen2.5:7b` 100% Metal GPU、RSS 4.84GB；应用内 Ask `1769ms` / 追问 `905ms`，provider `local.ollama:qwen2.5:7b` |
 | 本机真实同步服务 | rclone WebDAV / S3 均完成 PUT / GET / DELETE；应用两逻辑设备上传、dry-run、下载解密通过，远端无明文 |
+| DeepSeek 在线模型 | `deepseek-flash` 首个正文 token 中位 1201.6ms、总耗时中位 1780.5ms；10 题最终引用正确 10/10，首轮在线引用合规 9/10，失败均安全降级 |
+| 决策 Key 持久化 | 修复后端忽略 `decisionApiKey` 与前端保存失败仍清空输入的问题；Rust 凭据测试和前端保留输入测试通过 |
+| macOS release `.app` 最终复建 | ad-hoc 签名校验通过；真实 `knowledge` 工作区打开成功；假决策 Key 可保存并清除，凭据文件仍为 `0600` |
 | `pnpm test:release-manifest` | 三平台映射、Linux `AppImage.tar.gz`、GitHub 资产名归一化与缺签名拒绝测试通过 |
 | `pnpm test:update-signature` | 一次性测试密钥：有效载荷通过、篡改载荷拒绝、版本签名绑定校验通过 |
 | `runtime_contract` / release App 实启 | updater 配置可反序列化；窗口位置恢复权限完整；macOS release 包真实打开 10 万篇工作区 |
