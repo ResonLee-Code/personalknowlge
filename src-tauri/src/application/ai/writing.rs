@@ -236,11 +236,9 @@ impl WritingService {
         let end = input.target_end.clamp(start as i64, chars.len() as i64) as usize;
         let (insertion, citations) =
             validate_and_join_segments(&notes, &input.accepted_segments, MAX_GENERATED_CHARS)?;
-        let mut content: String = chars[..start]
-            .iter()
-            .chain(insertion.chars().collect::<Vec<_>>().iter())
-            .chain(chars[end..].iter())
-            .collect();
+        let prefix = chars[..start].iter().collect::<String>();
+        let suffix = chars[end..].iter().collect::<String>();
+        let mut content = join_writing_blocks(&prefix, &insertion, &suffix);
         append_source_section(&mut content, &citations);
         let added_chars = insertion.chars().count();
         let removed_chars = end.saturating_sub(start);
@@ -332,6 +330,29 @@ impl WritingService {
             detail,
         })
     }
+}
+
+/// 写作结果始终是块级 Markdown；把它插入正文时必须保留空行边界。
+///
+/// 典型反例：笔记以代码围栏结尾时，直接字符串拼接会得到 ```` ```- 新段落 ````，
+/// 下一次预览会把后续段落误当成代码块内容。
+fn join_writing_blocks(prefix: &str, insertion: &str, suffix: &str) -> String {
+    let mut content = prefix.trim_end_matches('\n').to_string();
+    let insertion = insertion.trim_matches('\n');
+    if !insertion.is_empty() {
+        if !content.is_empty() {
+            content.push_str("\n\n");
+        }
+        content.push_str(insertion);
+    }
+    let suffix = suffix.trim_start_matches('\n');
+    if !suffix.is_empty() {
+        if !content.is_empty() {
+            content.push_str("\n\n");
+        }
+        content.push_str(suffix);
+    }
+    content
 }
 
 fn generation_prompt(mode: WritingMode, instruction: &str, selected: Option<&str>) -> String {

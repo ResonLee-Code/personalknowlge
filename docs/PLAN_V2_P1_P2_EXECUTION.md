@@ -114,6 +114,8 @@ P0 的状态与人工项仍以 [V2_P0_MANUAL_ACCEPTANCE.md](./V2_P0_MANUAL_ACCEP
       （[证据](./acceptance/V2_WRITING_LIVE_MODELS_20261023.md)）。
 - [x] 未授权真实 DeepSeek 的 Writing 调用经系统级 `nettop` 验证零 TCP，并降级模板
       （[证据](./acceptance/V2_WRITING_ZERO_OUTBOUND_20261023.md)）。
+- [x] macOS 隔离库完成逐段拒绝、diff、取消不写、确认写入和历史恢复；修复代码围栏后缺少
+      块级空行的问题（[证据](./acceptance/V2_WRITING_UI_MACOS_20261023.md)）。
 - [ ] 人工使用真实模型评估结构、语气、引用准确性；逐段编辑体验需真机确认。
 
 ## 6. 收口顺序

@@ -64,6 +64,9 @@
 - [x] 来源笔记被外部修改后，旧草稿拒绝写入（Rust 集成测试）。
 - [x] 目标笔记被外部修改后，旧草稿返回 `NOTE_CONFLICT`（Rust 集成测试）。
 - [ ] 在 macOS / Windows 真机检查长文 diff、逐段选择、取消、确认和历史回滚。
+      macOS 已完成本地模型 4 段生成、逐段拒绝、diff、取消字节不变、确认写入和历史恢复；
+      Windows 仍待真机，见
+      [V2 Writing macOS 交互与边界修复](./acceptance/V2_WRITING_UI_MACOS_20261023.md)。
 - [x] 验证未确认在线外发时，网络抓包与审计均证明零请求
       （真实 WritingService、未授权 DeepSeek、`nettop` 15 次采样零 TCP，见
       [V2 Writing 未授权零外发实测](./acceptance/V2_WRITING_ZERO_OUTBOUND_20261023.md)）。

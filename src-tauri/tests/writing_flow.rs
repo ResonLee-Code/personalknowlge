@@ -253,6 +253,47 @@ fn source_changed_after_generation_blocks_apply() {
     assert_eq!(summary_error.code, ErrorCode::NoteConflict);
 }
 
+#[test]
+fn applying_after_a_closing_fence_keeps_a_block_boundary() {
+    let fixture = Fixture::new();
+    let target = fixture.note(
+        "代码块边界",
+        "# 一级标题\n\n```mermaid\nflowchart LR\n  A[开始] --> B[结束]\n```",
+    );
+    let draft = fixture
+        .writing()
+        .draft(WritingRequest {
+            note_id: target.clone(),
+            mode: Some(WritingMode::Outline),
+            instruction: "整理为两层大纲".to_string(),
+            ..Default::default()
+        })
+        .expect("生成模板草稿");
+    let preview = fixture
+        .writing()
+        .apply_preview(&WritingApplyInput {
+            note_id: target,
+            base_content_hash: draft.base_content_hash.clone(),
+            mode: WritingMode::Outline,
+            target_start: draft.target_start,
+            target_end: draft.target_end,
+            accepted_segments: draft.segments,
+            confirm: true,
+        })
+        .expect("预览写入");
+
+    assert!(
+        !preview.content.contains("```-"),
+        "写作段落不能紧贴代码围栏：{}",
+        preview.content
+    );
+    assert!(
+        preview.content.contains("```\n\n"),
+        "代码围栏后必须用空行分隔后续块：{}",
+        preview.content
+    );
+}
+
 /// 真实模型五模式冒烟：默认不运行、不联网。
 ///
 /// ```text
