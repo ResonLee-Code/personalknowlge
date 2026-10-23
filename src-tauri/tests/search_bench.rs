@@ -9,7 +9,8 @@
 //!
 //! **发布前必跑（Track E2）**：一条命令入口是 `pnpm bench`（脚本 `scripts/bench/run.sh`），
 //! 它按 1 万篇规格跑本基准并在**超阈值时以非零码退出**。阈值可用环境变量覆盖：
-//! `BENCH_MAX_P95_MS`（默认 200）、`BENCH_MIN_RECALL_PCT`（默认 100）、
+//! `BENCH_MAX_P95_MS`（默认 200）、`BENCH_MAX_EXPLICIT_SORT_P95_MS`
+//! （1 万默认 200；10 万高频显式排序默认 400）、`BENCH_MIN_RECALL_PCT`（默认 100）、
 //! `BENCH_SCAN_TIMEOUT_S`（默认 600）。基准最后会打印一行机器可读的
 //! `PKOS_BENCH search …`，脚本靠它确认「基准真的跑了」，避免空跑变绿灯。
 
@@ -24,7 +25,7 @@ use personal_knowledge_os_lib::application::search_service::SearchService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
 use personal_knowledge_os_lib::domain::category::CreateCategoryInput;
-use personal_knowledge_os_lib::domain::search::SearchQuery;
+use personal_knowledge_os_lib::domain::search::{SearchQuery, SearchSort};
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -124,6 +125,9 @@ fn prepare_workspace() -> BenchWorkspace {
 fn bench_search_with_10k_notes() {
     let total_notes = note_count();
     let max_p95_ms = env_f64("BENCH_MAX_P95_MS", 200.0);
+    let default_explicit_sort_p95_ms = if total_notes >= 100_000 { 400.0 } else { 200.0 };
+    let max_explicit_sort_p95_ms =
+        env_f64("BENCH_MAX_EXPLICIT_SORT_P95_MS", default_explicit_sort_p95_ms);
     let min_recall_pct = env_f64("BENCH_MIN_RECALL_PCT", 100.0);
     let scan_timeout_s = env_f64("BENCH_SCAN_TIMEOUT_S", 600.0);
     let data = tempfile::tempdir().expect("应用数据目录");
@@ -233,6 +237,8 @@ fn bench_search_with_10k_notes() {
     let mut cjk_recall_at_5 = 0usize;
     let mut latin_recall_at_5 = 0usize;
     let mut latencies: Vec<Duration> = Vec::new();
+    let mut explicit_sort_latencies: Vec<Duration> = Vec::new();
+    let mut explicit_sort_by_kind: Vec<(SearchSort, Vec<Duration>)> = Vec::new();
     let mut cjk_phrase_hits = 0usize;
     let probes = PROBE_COUNT.min(total_notes);
     for probe in 0..probes {
@@ -285,6 +291,39 @@ fn bench_search_with_10k_notes() {
         / latencies.len().max(1) as f64;
     let p95 = latencies[((latencies.len() as f64 * 0.95) as usize).min(latencies.len() - 1)];
     let p95_ms = p95.as_micros() as f64 / 1000.0;
+    for sort in [
+        SearchSort::UpdatedDesc,
+        SearchSort::CreatedDesc,
+        SearchSort::TitleAsc,
+    ] {
+        let mut samples = Vec::new();
+        for _ in 0..3 {
+            let started = Instant::now();
+            let response = search
+                .search(SearchQuery {
+                    keyword: "查询优化".into(),
+                    page_size: Some(10),
+                    sort: Some(sort),
+                    ..Default::default()
+                })
+                .expect("显式排序检索");
+            let elapsed = started.elapsed();
+            samples.push(elapsed);
+            explicit_sort_latencies.push(elapsed);
+            assert_eq!(
+                response.hits.len(),
+                10,
+                "{sort:?} 应返回一页结果；实际 {} 条",
+                response.hits.len()
+            );
+        }
+        explicit_sort_by_kind.push((sort, samples));
+    }
+    explicit_sort_latencies.sort();
+    let explicit_sort_p95 = explicit_sort_latencies[((explicit_sort_latencies.len() as f64
+        * 0.95) as usize)
+        .min(explicit_sort_latencies.len() - 1)];
+    let explicit_sort_p95_ms = explicit_sort_p95.as_micros() as f64 / 1000.0;
     let recall_at1_pct = recall_at_1 as f64 * 100.0 / probe_total as f64;
     let recall_at5_pct = recall_at_5 as f64 * 100.0 / probe_total as f64;
 
@@ -337,6 +376,16 @@ fn bench_search_with_10k_notes() {
         latencies.len()
     );
     println!(
+        "显式排序（全量命中）    : p95 {:.1} ms（最近修改 / 创建时间 / 标题各 3 次）",
+        explicit_sort_p95_ms
+    );
+    for (sort, samples) in &explicit_sort_by_kind {
+        let mut samples = samples.clone();
+        samples.sort();
+        let max = samples.last().copied().unwrap_or_default();
+        println!("  {sort:?} 最大 {:.1} ms", max.as_secs_f64() * 1000.0);
+    }
+    println!(
         "独特术语 recall@1 / @5  : {:.1}% / {:.1}%（中文+英文各 {} 次）",
         recall_at1_pct,
         recall_at5_pct,
@@ -357,7 +406,10 @@ fn bench_search_with_10k_notes() {
         cjk_phrase_hits as f64 * 100.0 / probes as f64,
         probes
     );
-    println!("护栏（发布前必跑）      : p95 < {max_p95_ms:.0} ms、recall@5 ≥ {min_recall_pct:.1}%");
+    println!(
+        "护栏（发布前必跑）      : 默认 p95 < {max_p95_ms:.0} ms、显式排序 p95 < \
+         {max_explicit_sort_p95_ms:.0} ms、recall@5 ≥ {min_recall_pct:.1}%"
+    );
     if scale_gate {
         println!(
             "10 万扩展门禁           : 重新打开 {reopen_ms:.0} ms（≤{max_startup_ms:.0}）/ RSS {rss_mb:.1} MB（≤{max_rss_mb:.0}）"
@@ -368,6 +420,7 @@ fn bench_search_with_10k_notes() {
     // 机器可读摘要：`scripts/bench/run.sh` 靠这一行确认基准真的跑完（防「空跑变绿灯」）
     println!(
         "PKOS_BENCH search notes={total_notes} avg_ms={avg_ms:.2} p95_ms={p95_ms:.2} \
+         explicit_sort_p95_ms={explicit_sort_p95_ms:.2} \
          recall_at1_pct={recall_at1_pct:.1} recall_at5_pct={recall_at5_pct:.1} \
          db_mb={:.2} db_kb_per_note={:.1} scan_s={:.2} fts_s={:.2} writes_s={:.2} \
          reopen_ms={reopen_ms:.2} rss_mb={rss_mb:.2}",
@@ -382,6 +435,11 @@ fn bench_search_with_10k_notes() {
     assert!(
         p95_ms < max_p95_ms,
         "p95 检索延迟过高：{p95_ms:.1} ms（红线 {max_p95_ms:.0} ms）"
+    );
+    assert!(
+        explicit_sort_p95_ms < max_explicit_sort_p95_ms,
+        "显式排序 p95 过高：{explicit_sort_p95_ms:.1} ms（红线 \
+         {max_explicit_sort_p95_ms:.0} ms）"
     );
     // 召回：1 万篇规格下是**硬门槛**（历史上一直是 100%，掉下来就是真回归）。
     // 小规模（< 1000 篇）时探针索引会互相撞号、可能不是真缺口，故只观察不判失败。

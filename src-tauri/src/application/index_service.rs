@@ -152,16 +152,15 @@ impl IndexService {
     pub fn status(&self) -> Result<IndexStatus> {
         // 三个计数放进同一条只读查询：搜索每次都要报告 indexStale，分开取会反复
         // 争用连接并重复遍历大表，10 万篇时这部分会进入查询热路径。
+        // FTS5 虚拟表的 COUNT(*) 需要逐表扫描；映射表与 FTS 写入同生共死，
+        // 用它的 B-tree 行数做索引覆盖计数，口径相同但不会在每次搜索热路径重扫全文库。
         let (indexed_notes, total_notes, chunk_rows) = self
             .ctx
             .db
             .with_conn(|conn| {
                 conn.query_row(
                     "SELECT
-                        (SELECT COUNT(*) FROM search_documents_fts)
-                        + (SELECT COUNT(*) FROM search_documents_fts_1)
-                        + (SELECT COUNT(*) FROM search_documents_fts_2)
-                        + (SELECT COUNT(*) FROM search_documents_fts_3),
+                        (SELECT COUNT(*) FROM search_documents_map),
                         (SELECT COUNT(*) FROM notes
                           WHERE workspace_id = ?1 AND status = 'active'),
                         (SELECT COUNT(*) FROM note_chunks)",

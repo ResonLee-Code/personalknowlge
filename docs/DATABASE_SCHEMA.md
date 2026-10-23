@@ -497,7 +497,9 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 `013_chunk_embeddings`（D3/N7 向量索引：分块向量 + 内容指纹）、
 `014_ai_organize`（Organize 建议队列 + 持久化任务）、
 `015_organize_undo_hash`（撤销冲突保护）、
-`016_search_shards`（4 个稳定 FTS 分片 + 映射表 shard 列），`SCHEMA_VERSION = 16`。
+`016_search_shards`（4 个稳定 FTS 分片 + 映射表 shard 列）、
+`017_search_sort_indexes`（高频检索的更新时间 / 创建时间 / 标题稳定排序索引），
+`SCHEMA_VERSION = 17`。
 
 Sync 2.0 与 Writing 2.0 本身没有新增业务表：
 

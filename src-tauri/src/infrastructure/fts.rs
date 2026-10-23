@@ -9,6 +9,8 @@
 //! 因此额外写入「单字 + 双字」扩展，查询时把中文关键词转换成双字短语，
 //! 从而既能支持单字查询，也能按连续短语精确匹配。
 
+use std::collections::HashSet;
+
 use rusqlite::types::Value;
 use rusqlite::OptionalExtension;
 use rusqlite::{params_from_iter, Connection};
@@ -139,7 +141,12 @@ impl SqliteSearchIndex {
     fn build_where(table: &str, request: &FtsRequest<'_>, params: &mut Vec<Value>) -> String {
         let mut conditions = vec![format!("{table} MATCH ?")];
         params.push(Value::Text(request.match_expression.to_string()));
-        conditions.push("n.status = 'active'".to_string());
+        conditions.extend(Self::note_conditions(request, params));
+        conditions.join(" AND ")
+    }
+
+    fn note_conditions(request: &FtsRequest<'_>, params: &mut Vec<Value>) -> Vec<String> {
+        let mut conditions = vec!["n.status = 'active'".to_string()];
 
         if let Some(category_id) = request.category_id {
             conditions.push("n.category_id = ?".to_string());
@@ -168,7 +175,7 @@ impl SqliteSearchIndex {
             params.push(Value::Text(tag_id.to_string()));
         }
 
-        conditions.join(" AND ")
+        conditions
     }
 
     fn order_clause(sort: SearchSort) -> &'static str {
@@ -181,6 +188,137 @@ impl SqliteSearchIndex {
             SearchSort::CreatedDesc => "created_at DESC, note_id DESC",
             SearchSort::TitleAsc => "title COLLATE NOCASE ASC, note_id ASC",
         }
+    }
+
+    fn notes_order_clause(sort: SearchSort) -> &'static str {
+        match sort {
+            SearchSort::UpdatedDesc => "updated_at DESC, id DESC",
+            SearchSort::CreatedDesc => "created_at DESC, id DESC",
+            SearchSort::TitleAsc => "title COLLATE NOCASE ASC, id ASC",
+            SearchSort::Relevance => unreachable!("相关度排序不使用 notes 排序索引"),
+        }
+    }
+
+    fn sort_index(sort: SearchSort) -> &'static str {
+        match sort {
+            SearchSort::UpdatedDesc => "idx_notes_search_updated",
+            SearchSort::CreatedDesc => "idx_notes_search_created",
+            SearchSort::TitleAsc => "idx_notes_search_title",
+            SearchSort::Relevance => unreachable!("相关度排序不使用 notes 排序索引"),
+        }
+    }
+
+    /// 显式排序：内存命中集合 + 沿覆盖索引按目标顺序扫描当前页。
+    ///
+    /// 直接对四个分片的全部命中做 UNION + 全排序需要约 300 ms（10 万篇实测）；
+    /// 命中集合很大时，按用户顺序扫描 `notes` 并提前停止，避免把 10 万个字符串
+    /// 物化到 SQLite 临时 B-tree，也避免对全部命中做跨分片排序。
+    fn search_explicit_sorted(
+        &self,
+        conn: &Connection,
+        request: &FtsRequest<'_>,
+    ) -> Result<(Vec<FtsHit>, i64)> {
+        let mut params: Vec<Value> = Vec::new();
+        let mut selects = Vec::new();
+        for table in SEARCH_SHARDS {
+            let where_clause = Self::build_where(table, request, &mut params);
+            selects.push(format!(
+                "SELECT f.note_id
+                 FROM {table} f
+                 JOIN notes n ON n.id = f.note_id
+                 WHERE {where_clause}"
+            ));
+        }
+        let hit_sql = format!(
+            "SELECT note_id FROM ({})",
+            selects.join(" UNION ALL ")
+        );
+        let mut matched: HashSet<String> = HashSet::new();
+        {
+            let mut statement = conn.prepare(&hit_sql)?;
+            let rows = statement.query_map(params_from_iter(params.iter()), |row| {
+                row.get::<_, String>(0)
+            })?;
+            for row in rows {
+                matched.insert(row?);
+            }
+        }
+        let total = matched.len() as i64;
+
+        if total <= MAX_RANKED_MATCHES {
+            let ids: Vec<String> = matched.into_iter().collect();
+            let placeholders = vec!["?"; ids.len()].join(", ");
+            let sql = format!(
+                "SELECT id, title, created_at, updated_at FROM notes WHERE id IN ({placeholders})"
+            );
+            let mut statement = conn.prepare(&sql)?;
+            let rows = statement.query_map(params_from_iter(ids.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            let mut sorted = Vec::new();
+            for row in rows {
+                sorted.push(row?);
+            }
+            match request.sort {
+                SearchSort::UpdatedDesc => sorted.sort_by(|left, right| {
+                    right.3.cmp(&left.3).then(right.0.cmp(&left.0))
+                }),
+                SearchSort::CreatedDesc => sorted.sort_by(|left, right| {
+                    right.2.cmp(&left.2).then(right.0.cmp(&left.0))
+                }),
+                SearchSort::TitleAsc => sorted.sort_by(|left, right| {
+                    left.1
+                        .to_ascii_lowercase()
+                        .cmp(&right.1.to_ascii_lowercase())
+                        .then(left.0.cmp(&right.0))
+                }),
+                SearchSort::Relevance => unreachable!("显式排序不应收到相关度"),
+            }
+            let hits = sorted
+                .into_iter()
+                .skip(request.offset.max(0) as usize)
+                .take(request.limit.max(0) as usize)
+                .map(|(note_id, _, _, _)| FtsHit { note_id, score: 0.0 })
+                .collect();
+            return Ok((hits, total));
+        }
+
+        let mut note_params: Vec<Value> = Vec::new();
+        let note_where = Self::note_conditions(request, &mut note_params).join(" AND ");
+        let sql = format!(
+            "SELECT n.id
+             FROM notes n INDEXED BY {}
+             WHERE {note_where}
+             ORDER BY {}",
+            Self::sort_index(request.sort),
+            Self::notes_order_clause(request.sort),
+        );
+        let mut statement = conn.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(note_params.iter()), |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut skipped = 0i64;
+        let mut hits = Vec::new();
+        for row in rows {
+            let note_id = row?;
+            if !matched.contains(&note_id) {
+                continue;
+            }
+            if skipped < request.offset {
+                skipped += 1;
+                continue;
+            }
+            hits.push(FtsHit { note_id, score: 0.0 });
+            if hits.len() as i64 >= request.limit {
+                break;
+            }
+        }
+        Ok((hits, total))
     }
 
     fn count_matches_fast(conn: &Connection, request: &FtsRequest<'_>) -> Result<i64> {
@@ -373,14 +511,20 @@ impl SearchIndex for SqliteSearchIndex {
     }
 
     fn search(&self, conn: &Connection, request: &FtsRequest<'_>) -> Result<(Vec<FtsHit>, i64)> {
+        if request.sort != SearchSort::Relevance {
+            return self.search_explicit_sorted(conn, request);
+        }
         let total = Self::count_matches_fast(conn, request)?;
         // 超高频相关度搜索仍然保留原有的流式分页降级，避免对全库计算 BM25。
-        // 显式排序不能走该路径，否则会丢失用户要求的全局顺序。
-        if request.sort == SearchSort::Relevance && total > MAX_RANKED_MATCHES {
+        if total > MAX_RANKED_MATCHES {
             return self.search_by_rowid(conn, request, total);
         }
         let mut params: Vec<Value> = Vec::new();
         let mut selects = Vec::new();
+        let order_by = Self::order_clause(request.sort);
+        // 每个分片只保留足以组成全局页面的前缀；再对最多 4 个短列表做全局
+        // 排序，避免高频命中时把 4×N 条记录全部送进外层次级排序。
+        let per_shard_limit = request.offset.saturating_add(request.limit);
         for table in SEARCH_SHARDS {
             let title_hit = if request.sort == SearchSort::Relevance
                 && !request.title_terms.is_empty()
@@ -409,16 +553,21 @@ impl SearchIndex for SqliteSearchIndex {
                 "0.0".to_string()
             };
             selects.push(format!(
-                "SELECT f.note_id AS note_id,
-                        {score} AS score,
-                        {title_hit} AS title_hit,
-                        n.updated_at AS updated_at,
-                        n.created_at AS created_at,
-                        n.title AS title
-                 FROM {table} f
-                 JOIN notes n ON n.id = f.note_id
-                 WHERE {where_clause}"
+                "SELECT * FROM (
+                     SELECT f.note_id AS note_id,
+                            {score} AS score,
+                            {title_hit} AS title_hit,
+                            n.updated_at AS updated_at,
+                            n.created_at AS created_at,
+                            n.title AS title
+                     FROM {table} f
+                     JOIN notes n ON n.id = f.note_id
+                     WHERE {where_clause}
+                     ORDER BY {order_by}
+                     LIMIT ?
+                 )"
             ));
+            params.push(Value::Integer(per_shard_limit));
         }
         let sql = format!(
             "SELECT note_id, score
@@ -426,7 +575,7 @@ impl SearchIndex for SqliteSearchIndex {
              ORDER BY {}
              LIMIT ? OFFSET ?",
             selects.join(" UNION ALL "),
-            Self::order_clause(request.sort),
+            order_by,
         );
         params.push(Value::Integer(request.limit));
         params.push(Value::Integer(request.offset));

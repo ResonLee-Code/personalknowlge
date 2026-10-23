@@ -56,7 +56,7 @@ describe('AboutPage · 运行信息', () => {
     vi.spyOn(appService, 'info').mockResolvedValue({
       name: 'Personal Knowledge OS',
       version: '2.0.0',
-      schemaVersion: 16,
+      schemaVersion: 17,
       dataDir: '/tmp/data',
       platform: 'macos-aarch64',
       sqliteVersion: '3.45',

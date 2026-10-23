@@ -1,7 +1,8 @@
 //! 升级路径验收：旧版本工作区打开后应完成迁移并自动重建搜索索引。
 //!
 //! 场景：库停留在迁移 005（没有 FTS rowid 映射表，索引里是旧格式记录），
-//! 用当前版本打开，期望：schema → **16**（006 映射表 / 007–010 层级与展示 / 011–016 AI 与分片）、
+//! 用当前版本打开，期望：schema → **17**（006 映射表 / 007–010 层级与展示 / 011–017 AI、
+//! 分片与检索排序索引）、
 //! 映射表建立、FTS 自动重建（已索引 == 总数）、检索可用。
 
 use std::sync::Arc;
@@ -66,7 +67,7 @@ fn opening_a_v1_1_workspace_migrates_and_rebuilds_search_index() {
                     rusqlite::params!["note_legacy", "旧索引记录", "旧正文", "旧"],
                 )?;
                 // 回退 FTS 映射与分片迁移；007–015 的列已存在，保留其迁移记录。
-                conn.execute("DELETE FROM schema_migrations WHERE version IN (6, 16)", [])?;
+                conn.execute("DELETE FROM schema_migrations WHERE version IN (6, 16, 17)", [])?;
                 Ok(())
             })
             .expect("构造旧库状态");
@@ -83,8 +84,8 @@ fn opening_a_v1_1_workspace_migrates_and_rebuilds_search_index() {
     let context = app.context().expect("上下文");
     assert_eq!(
         context.db.schema_version().expect("schema 版本"),
-        16,
-        "应自动迁移到最新 schema（011 分块 / 012 决策缓存 / 013 向量索引 / 014 Organize / 015 撤销哈希 / 016 FTS 分片）"
+        17,
+        "应自动迁移到最新 schema（011 分块 / 012 决策缓存 / 013 向量索引 / 014 Organize / 015 撤销哈希 / 016 FTS 分片 / 017 排序索引）"
     );
     let (has_map, fts_rows, map_rows): (i64, i64, i64) = context
         .db

@@ -711,6 +711,7 @@ fn rebuilds_index_and_reports_status() {
             for table in personal_knowledge_os_lib::infrastructure::fts::SEARCH_SHARDS {
                 conn.execute(&format!("DELETE FROM {table}"), [])?;
             }
+            conn.execute("DELETE FROM search_documents_map", [])?;
             Ok(())
         })
         .expect("清空索引");
@@ -1212,8 +1213,8 @@ fn applies_note_links_migration() {
     // 006 = note_links / note_assets / note_file_stamp / search_rowid_map，
     // 007 = notes.parent_id 子文档层级，008 = notes.sort_order 手动排序，009 = notes.pinned 置顶，
     // 010 = notes.declared_parent，011 = note_chunks（N5 分块索引），
-    // 012 = decision_cache（D2 决策缓存）
-    assert_eq!(context.db.schema_version().expect("schema 版本"), 16);
+    // 012 = decision_cache（D2 决策缓存），013–017 = V2 索引与稳定排序
+    assert_eq!(context.db.schema_version().expect("schema 版本"), 17);
 
     // 004：来源/时效列与类型化关系表
     let (has_relations, source_column) = context

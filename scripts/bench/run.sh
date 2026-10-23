@@ -7,8 +7,10 @@
 #
 # 口径（与 docs/PLAN_V1.3.0.md 的 E2 一致）：
 #   - 两个基准都是**真跑**（不是读旧数字），各自打印一行 `PKOS_BENCH …` 机器可读摘要；
-#   - **超阈值即失败**：检索 p95 < 200 ms、召回 ≥ 100%；图谱全量查询 < 1.5 s（M3 红线）；
-#   - 阈值可用环境变量覆盖：BENCH_MAX_P95_MS / BENCH_MIN_RECALL_PCT / BENCH_MAX_GRAPH_MS；
+#   - **超阈值即失败**：默认检索 p95 < 200 ms、1 万显式排序 p95 < 200 ms、
+#     10 万全命中显式排序 p95 < 400 ms、召回 ≥ 100%；图谱全量查询 < 1.5 s（M3 红线）；
+#   - 阈值可用环境变量覆盖：BENCH_MAX_P95_MS / BENCH_MAX_EXPLICIT_SORT_P95_MS /
+#     BENCH_MIN_RECALL_PCT / BENCH_MAX_GRAPH_MS；
 #   - 脚本会核对 `PKOS_BENCH …` 摘要存在——**没跑到就不会变绿灯**（防「0 个用例也算通过」）；
 #   - 日志默认落在 `src-tauri/target/bench/`（已在 .gitignore 里），失败时打印路径供复查。
 #
