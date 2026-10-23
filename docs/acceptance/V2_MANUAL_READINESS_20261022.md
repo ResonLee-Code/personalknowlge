@@ -5,11 +5,31 @@
 当前候选的代码、自动测试、三平台开发产物和 Linux 隔离环境证据已就绪，但还不具备开始完整
 人工真机验收的外部条件。本文只记录准备状态，不是验收通过报告，不勾选任何权威人工清单项。
 
-- 候选代码：`49de15fbb17cbc468157ef2c477e901c4cffef9a`
-- 候选产物：[V2_PLATFORM_ARTIFACTS_20261022.md](./V2_PLATFORM_ARTIFACTS_20261022.md)
+- 当前候选代码：`d385f9fcf9c698410883a666db370ac0bacc9b23`
+- 当前候选产物：[V2 当前候选发布门禁](./V2_RELEASE_GATE_20261023.md)
 - 权威剩余项：[V2 P0 人工清单](../V2_P0_MANUAL_ACCEPTANCE.md)
   + [V2 P1 / P2 人工清单](../V2_P1_P2_MANUAL_ACCEPTANCE.md)
 - 当前剩余：P0 **36 项**、P1 / P2 **24 项**，合计 **60 项**
+
+> 下方“2026-10-22 环境盘点”保留为历史快照；当前状态以紧接着的
+> “2026-10-23 复盘点”为准。
+
+## 2026-10-23 当前环境复盘点
+
+| 前置条件 | 当前状态 | 对统一人工验收的影响 |
+| --- | --- | --- |
+| 三平台开发候选 | `d385f9f` 的 macOS ad-hoc、Windows NSIS/便携版、Linux deb/rpm/AppImage 已重建并校验 | 可以开始使用当前包的人工复跑；仍需按平台逐项留存证据 |
+| macOS 签名身份 | 钥匙串 `0 valid identities found` | Developer ID、公证、浏览器首次打开和签名冷启动未解锁 |
+| Apple 公证环境变量 | `APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID`、`APPLE_API_KEY*` 均未设置 | 无法提交公证 |
+| Windows 签名环境变量 | `WINDOWS_CERTIFICATE`、密码均未设置 | 正签安装器、SmartScreen 和签名更新拒绝未解锁 |
+| updater 密钥 | `TAURI_SIGNING_PRIVATE_KEY`、密码、`PKOS_UPDATER_PUBKEY` 与环境变量 / `~/.tauri` 均未发现 | 正式 `.sig`、可信 `latest.json` 和更新回滚未解锁 |
+| GitHub 发布 | `gh` CLI 未安装；远端为 `ResonLee-Code/personalknowlge` | 可由网页或安装 CLI 后执行正式 Release |
+| 在线模型 | 应用凭据文件中 DeepSeek Key 已配置；Perplexity Decisions Key 未配置 | DeepSeek 质量评测可复跑；System One 决策档仍不可启用 |
+| 本地模型 | Ollama `qwen2.5:7b` 已安装并可用 | 可完成本地模型质量与离线链路复测 |
+| WebDAV / S3 | `rclone` 当前没有已列出 remote；应用配置中未发现可用同步 profile | 真实 WebDAV、S3 与物理双设备仍未解锁 |
+| Windows / Linux 真机 | 当前只有交叉构建、隔离容器 / VM 与 Xvfb 冒烟 | 安装、升级、卸载、ACL 和物理桌面体验保留人工 |
+
+未设置和凭据存在性只按变量名 / 文件元数据检查，未读取、打印或写入任何密钥值。
 
 ## 2026-10-22 环境盘点
 
@@ -33,8 +53,9 @@ AI 总开关已额外通过真实 UI 打开并完成本地 / 模板链路冒烟�
 在线模型现已可用。真实 50 题引用评测已连续两轮达标，但逐题语义断言审查仍保留人工。模板证据见
 [AI 总开关开启与本地性能冒烟](./V2_AI_ON_SMOKE_20261022.md)。
 
-2026-10-23 已补齐 updater 正式密钥、本地 `qwen2.5:7b`、本机 WebDAV/S3 服务及应用跨设备
-加密同步预检。当前准备了什么、性能如何以及还缺什么，见
+2026-10-23 的阶段性准备曾覆盖 updater 一次性测试密钥、本地 `qwen2.5:7b`、本机
+WebDAV/S3 桩及应用跨设备加密同步预检；当前复盘点确认正式 updater 密钥与真实同步 remote
+尚未保留在本机。当前准备了什么、性能如何以及还缺什么，见
 [本地模型、updater 与同步存储准备记录](./V2_LOCAL_AI_STORAGE_20261023.md)。
 
 ## 剩余项分组
