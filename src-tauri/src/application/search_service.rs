@@ -10,7 +10,7 @@ use std::time::Instant;
 use crate::core::error::Result;
 use crate::core::text::{build_fts_match, build_snippet, highlight_terms, markdown_to_plain_text};
 use crate::domain::note::{Note, NoteListQuery, NoteSummary};
-use crate::domain::search::{IndexStatus, SearchHit, SearchQuery, SearchResponse, SearchSort};
+use crate::domain::search::{IndexStatus, SearchHit, SearchQuery, SearchResponse};
 use crate::infrastructure::fts::{FtsRequest, SearchIndex, SqliteSearchIndex};
 use crate::repositories::chunk_repository::{ChunkRepository, SqliteChunkRepository};
 use crate::repositories::{NoteRepository, SqliteNoteRepository};
@@ -77,8 +77,10 @@ impl SearchService {
             });
         };
 
+        let terms = highlight_terms(&keyword);
         let request = FtsRequest {
             match_expression: &match_expression,
+            title_terms: &terms,
             category_id: query.category_id.as_deref(),
             tag_id: query.tag_id.as_deref(),
             favorite_only: query.favorite_only,
@@ -87,8 +89,7 @@ impl SearchService {
             scope_note_id: query.scope_note_id.as_deref(),
             limit: page_size,
             offset,
-            by_relevance: sort == SearchSort::Relevance,
-            sort_by_updated_desc: sort != SearchSort::UpdatedDesc,
+            sort,
         };
 
         let (fts_hits, total) = self.ctx.db.with_conn(|conn| {
@@ -119,7 +120,6 @@ impl SearchService {
         let mut summary_by_id: HashMap<String, NoteSummary> =
             summaries.into_iter().map(|summary| (summary.id.clone(), summary)).collect();
 
-        let terms = highlight_terms(&keyword);
         let mut hits: Vec<SearchHit> = Vec::with_capacity(fts_hits.len());
         for fts_hit in fts_hits {
             let Some(summary) = summary_by_id.remove(&fts_hit.note_id) else {
@@ -140,17 +140,6 @@ impl SearchService {
                 matched_terms: terms.clone(),
                 location,
             });
-        }
-
-        // 标题命中优先，其次按相关度（设计文档 18.2）
-        hits.sort_by(|a, b| {
-            b.title_matched
-                .cmp(&a.title_matched)
-                .then(a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
-                .then(b.note.updated_at.cmp(&a.note.updated_at))
-        });
-        if sort == SearchSort::TitleAsc {
-            hits.sort_by(|a, b| a.note.title.cmp(&b.note.title));
         }
 
         Ok(SearchResponse {

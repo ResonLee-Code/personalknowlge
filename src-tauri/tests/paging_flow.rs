@@ -11,7 +11,7 @@ use personal_knowledge_os_lib::application::search_service::SearchService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
 use personal_knowledge_os_lib::domain::note::{CreateNoteInput, NoteListQuery};
-use personal_knowledge_os_lib::domain::search::SearchQuery;
+use personal_knowledge_os_lib::domain::search::{SearchQuery, SearchSort};
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -74,12 +74,18 @@ fn list_page(fixture: &Fixture, page: i64, page_size: i64) -> Vec<String> {
         .collect()
 }
 
-fn search_page(fixture: &Fixture, page: i64, page_size: i64) -> Vec<String> {
+fn search_page(
+    fixture: &Fixture,
+    sort: SearchSort,
+    page: i64,
+    page_size: i64,
+) -> Vec<String> {
     SearchService::new(fixture.context())
         .search(SearchQuery {
             keyword: "分页关键词".to_string(),
             page: Some(page),
             page_size: Some(page_size),
+            sort: Some(sort),
             ..Default::default()
         })
         .expect("检索")
@@ -176,7 +182,12 @@ fn search_paging_is_stable_and_covers_every_hit() {
 
     let mut paged: Vec<String> = Vec::new();
     for page in 1..=(TOTAL / PAGE + 1) {
-        paged.extend(search_page(&fixture, page as i64, PAGE as i64));
+        paged.extend(search_page(
+            &fixture,
+            SearchSort::Relevance,
+            page as i64,
+            PAGE as i64,
+        ));
     }
     assert_eq!(paged.len(), TOTAL, "检索分页取回的条数要对得上：{}", paged.len());
     let mut unique = paged.clone();
@@ -185,8 +196,79 @@ fn search_paging_is_stable_and_covers_every_hit() {
     assert_eq!(unique.len(), TOTAL, "同一篇命中的笔记不能出现在两页里");
     assert_eq!(paged, single, "检索分页顺序必须与一次性取回一致（没有抖动）");
     assert_eq!(
-        search_page(&fixture, 2, PAGE as i64),
-        search_page(&fixture, 2, PAGE as i64),
+        search_page(&fixture, SearchSort::Relevance, 2, PAGE as i64),
+        search_page(&fixture, SearchSort::Relevance, 2, PAGE as i64),
         "同一页重复检索必须得到同样的顺序"
     );
+}
+
+#[test]
+fn explicit_search_sorts_are_global_across_pages() {
+    let fixture = Fixture::new();
+    seed(&fixture);
+    let search = SearchService::new(fixture.context());
+
+    for sort in [
+        SearchSort::UpdatedDesc,
+        SearchSort::CreatedDesc,
+        SearchSort::TitleAsc,
+    ] {
+        let single = search
+            .search(SearchQuery {
+                keyword: "分页关键词".to_string(),
+                page: Some(1),
+                page_size: Some(TOTAL as i64 + 5),
+                sort: Some(sort),
+                ..Default::default()
+            })
+            .expect("一次性检索")
+            .hits;
+        let mut expected_ids: Vec<String> = match sort {
+            SearchSort::UpdatedDesc => {
+                let mut rows: Vec<(String, String)> = single
+                    .iter()
+                    .map(|hit| (hit.note.updated_at.clone(), hit.note.id.clone()))
+                    .collect();
+                rows.sort_by(|left, right| right.0.cmp(&left.0).then(right.1.cmp(&left.1)));
+                rows.into_iter().map(|(_, id)| id).collect()
+            }
+            SearchSort::CreatedDesc => {
+                let mut rows: Vec<(String, String)> = single
+                    .iter()
+                    .map(|hit| (hit.note.created_at.clone(), hit.note.id.clone()))
+                    .collect();
+                rows.sort_by(|left, right| right.0.cmp(&left.0).then(right.1.cmp(&left.1)));
+                rows.into_iter().map(|(_, id)| id).collect()
+            }
+            SearchSort::TitleAsc => {
+                let mut rows: Vec<(String, String)> = single
+                    .iter()
+                    .map(|hit| (hit.note.title.clone(), hit.note.id.clone()))
+                    .collect();
+                rows.sort_by(|left, right| {
+                    left.0
+                        .to_lowercase()
+                        .cmp(&right.0.to_lowercase())
+                        .then(left.1.cmp(&right.1))
+                });
+                rows.into_iter().map(|(_, id)| id).collect()
+            }
+            SearchSort::Relevance => unreachable!("相关度已由另一条用例覆盖"),
+        };
+        let actual_ids: Vec<String> = single.iter().map(|hit| hit.note.id.clone()).collect();
+        assert_eq!(actual_ids, expected_ids, "{sort:?} 的一次性检索顺序不正确");
+
+        let mut paged: Vec<String> = Vec::new();
+        for page in 1..=(TOTAL / PAGE + 1) {
+            paged.extend(search_page(&fixture, sort, page as i64, PAGE as i64));
+        }
+        assert_eq!(paged.len(), TOTAL, "{sort:?} 分页条数不正确");
+        let mut unique = paged.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), TOTAL, "{sort:?} 分页出现重复或遗漏");
+        assert_eq!(paged, actual_ids, "{sort:?} 分页顺序与全局排序不一致");
+
+        expected_ids.clear();
+    }
 }

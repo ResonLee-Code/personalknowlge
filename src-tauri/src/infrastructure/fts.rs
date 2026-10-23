@@ -15,6 +15,7 @@ use rusqlite::{params_from_iter, Connection};
 
 use crate::core::error::Result;
 use crate::core::text::cjk_search_tokens;
+use crate::domain::search::SearchSort;
 
 /// 超过这个命中数时不再对整个结果集计算 BM25 全排序。
 ///
@@ -96,6 +97,8 @@ pub struct FtsHit {
 pub struct FtsRequest<'a> {
     /// 已经过安全处理的 MATCH 表达式
     pub match_expression: &'a str,
+    /// 高亮词，用于在 SQL 中计算全局“标题命中优先”排序
+    pub title_terms: &'a [String],
     pub category_id: Option<&'a str>,
     pub tag_id: Option<&'a str>,
     pub favorite_only: bool,
@@ -105,9 +108,8 @@ pub struct FtsRequest<'a> {
     pub scope_note_id: Option<&'a str>,
     pub limit: i64,
     pub offset: i64,
-    /// true 时按相关度，否则按更新时间
-    pub by_relevance: bool,
-    pub sort_by_updated_desc: bool,
+    /// 用户选择的全局排序。分页之前就在 SQL 中应用，不能只排当前页。
+    pub sort: SearchSort,
 }
 
 /// 搜索索引接口，便于未来替换实现（设计文档 6.5）。
@@ -169,14 +171,15 @@ impl SqliteSearchIndex {
         conditions.join(" AND ")
     }
 
-    fn order_clause(request: &FtsRequest<'_>) -> &'static str {
-        // 与笔记列表一致：追加 id 作为次级键，保证分页在「同分同时间」时也是确定的
-        if request.by_relevance {
-            "score ASC, updated_at DESC, note_id DESC"
-        } else if request.sort_by_updated_desc {
-            "updated_at DESC, note_id DESC"
-        } else {
-            "updated_at ASC, note_id ASC"
+    fn order_clause(sort: SearchSort) -> &'static str {
+        // 排序键可能同时相同（例如同一秒写入）；追加 id 保证每页的边界可复现。
+        match sort {
+            SearchSort::Relevance => {
+                "title_hit DESC, score ASC, updated_at DESC, note_id DESC"
+            }
+            SearchSort::UpdatedDesc => "updated_at DESC, note_id DESC",
+            SearchSort::CreatedDesc => "created_at DESC, note_id DESC",
+            SearchSort::TitleAsc => "title COLLATE NOCASE ASC, note_id ASC",
         }
     }
 
@@ -371,17 +374,47 @@ impl SearchIndex for SqliteSearchIndex {
 
     fn search(&self, conn: &Connection, request: &FtsRequest<'_>) -> Result<(Vec<FtsHit>, i64)> {
         let total = Self::count_matches_fast(conn, request)?;
-        if !request.by_relevance || total > MAX_RANKED_MATCHES {
+        // 超高频相关度搜索仍然保留原有的流式分页降级，避免对全库计算 BM25。
+        // 显式排序不能走该路径，否则会丢失用户要求的全局顺序。
+        if request.sort == SearchSort::Relevance && total > MAX_RANKED_MATCHES {
             return self.search_by_rowid(conn, request, total);
         }
         let mut params: Vec<Value> = Vec::new();
         let mut selects = Vec::new();
         for table in SEARCH_SHARDS {
+            let title_hit = if request.sort == SearchSort::Relevance
+                && !request.title_terms.is_empty()
+            {
+                let conditions = request
+                    .title_terms
+                    .iter()
+                    .map(|_| "instr(lower(n.title), lower(?)) > 0")
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
+                params.extend(
+                    request
+                        .title_terms
+                        .iter()
+                        .cloned()
+                        .map(Value::Text),
+                );
+                format!("CASE WHEN ({conditions}) THEN 1 ELSE 0 END")
+            } else {
+                "0".to_string()
+            };
             let where_clause = Self::build_where(table, request, &mut params);
+            let score = if request.sort == SearchSort::Relevance {
+                format!("bm25({table}, 0.0, 6.0, 1.0, 2.0)")
+            } else {
+                "0.0".to_string()
+            };
             selects.push(format!(
                 "SELECT f.note_id AS note_id,
-                        bm25({table}, 0.0, 6.0, 1.0, 2.0) AS score,
-                        n.updated_at AS updated_at
+                        {score} AS score,
+                        {title_hit} AS title_hit,
+                        n.updated_at AS updated_at,
+                        n.created_at AS created_at,
+                        n.title AS title
                  FROM {table} f
                  JOIN notes n ON n.id = f.note_id
                  WHERE {where_clause}"
@@ -393,7 +426,7 @@ impl SearchIndex for SqliteSearchIndex {
              ORDER BY {}
              LIMIT ? OFFSET ?",
             selects.join(" UNION ALL "),
-            Self::order_clause(request),
+            Self::order_clause(request.sort),
         );
         params.push(Value::Integer(request.limit));
         params.push(Value::Integer(request.offset));

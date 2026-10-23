@@ -963,6 +963,7 @@ fn search_sorting_and_paging_work() {
             keyword: "分页测试".into(),
             page: Some(2),
             page_size: Some(3),
+            sort: Some(SearchSort::UpdatedDesc),
             ..Default::default()
         })
         .expect("第二页");
