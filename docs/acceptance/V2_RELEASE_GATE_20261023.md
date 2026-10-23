@@ -2,31 +2,32 @@
 
 ## 候选
 
-- 应用代码提交：`d385f9fcf9c698410883a666db370ac0bacc9b23`
-  （`fix(v2): 保证搜索结果全局排序与稳定分页`）
+- 应用代码提交：`fa07c6cb4670d2b7b69eeec435a32c9c7e355d04`
+  （`fix(v2): 优化大规模搜索结果排序`）
 - 版本号：`1.3.7`（V2 开发线，尚未创建 V2 tag）
 - macOS release `.app` CDHash：
-  `a150213cda67cb507972f37076cb19ac8d50fc44`
+  `d8c982da9ceaef57c1883ef117df73de3c2c1545`
 - macOS 签名：ad-hoc；Developer ID / 公证仍为人工验收项
-- 产物目录：`dist-macos/candidate-d385f9f`、`dist-windows/candidate-d385f9f`、
-  `dist-linux/candidate-d385f9f`；各目录内的 `SHA256SUMS` 可逐文件复核。
+- 数据库 schema：`17`（新增高频检索稳定排序索引）
+- 产物目录：`dist-macos/candidate-fa07c6c`、`dist-windows/candidate-fa07c6c`、
+  `dist-linux/candidate-fa07c6c`；各目录内的 `SHA256SUMS` 可逐文件复核。
 
 ## 当前产物
 
 | 平台 / 对象 | 大小（字节） | SHA-256 |
 | --- | ---: | --- |
-| macOS `.app.zip` | 7,631,741 | `95ef957be1de4aa3d7e4f2079d7872e39008401200ca33ebe4840ff1676daed9` |
-| Windows NSIS | 4,607,686 | `8f723311d96e6385b4c5487eff7cd790e594a612988f347e0deb0fea51da650a` |
-| Windows 便携 ZIP | 6,133,423 | `0006cbbd2561ebc4d0f53285227f26f8f56e9442ae73b736eeeac9ac53a56b82` |
-| Linux `.deb` | 7,191,442 | `133b721d262eb7d475d8d02418d10adda34b8ec55887650dedacacc8c820655a` |
-| Linux `.rpm` | 8,508,562 | `6447f942ecead367f0e49c1a5dfc9a3b04e1f53902f416433995d3b3e255a1b8` |
-| Linux `.AppImage` | 86,542,840 | `0e7ccf3555ca930e8acc8415b1f7a174be226c9db716c18adcf3840be8a44fe2` |
+| macOS `.app.zip` | 7,640,210 | `5854d674b2406ebb0171e45dde34b0ee312ed28b4225c645a46644428a7be2ea` |
+| Windows NSIS | 4,615,605 | `1b9bd35f0f2290124e5b8b5824df8c879edd0f9e1c9cb90ac7d21c5ce645b715` |
+| Windows 便携 ZIP | 6,144,167 | `b8f568e37baf542bfc7fbe856ec3b4d587b15570ac8b1ce5995db8ec690f48c3` |
+| Linux `.deb` | 5,311,184 | `9b35fc5fb085c4d3c31228281b901ae828dacf51cc2322aaf908fdfca5fcd005` |
+| Linux `.rpm` | 6,633,926 | `fa325703e6579d278fcd4b34eb086dbf06e331dfb3b6e2727d85e7d8b71d1d89` |
+| Linux `.AppImage` | 84,683,256 | `c3fa8ce8085aa61fb8b99fb4b56fd78c4137f0d6b38be5cdc95a83863f4adf1e` |
 
 | 平台可执行文件 | 大小（字节） | SHA-256 / Build ID |
 | --- | ---: | --- |
-| macOS arm64 | 13,537,408 | `10764db258426909a89ebd2ea1f62f1c2635b6bffdc7803007d19f1b3be804bc` |
-| Windows x64 PE | 13,410,816 | `36344b330c3b555a884047329b2a12c387c9689ec0e55bf54cc40f0c1a573fa5` |
-| Linux x64 ELF | 17,515,576 | Build ID `27c1b3fec49db494df42b6551edba7d35353619e` |
+| macOS arm64 | 13,570,288 | `ba4fa53546898b2b21a43af3bb6f757b4803ce68b289a8fe09eccf5dabb86e2c` |
+| Windows x64 PE | 13,435,392 | `783eeaafe11cd0fee85f97cf9050746dc990b2ee961c1e258296cfb7f5ffc6e2` |
+| Linux x64 ELF | 15,646,008 | Build ID `dec06f748f7fd5df7bb96adca9f2d920b75a7cd5` |
 
 Windows NSIS 与便携 ZIP 内嵌的应用 PE 哈希一致。Linux deb / rpm 内嵌 ELF 与 release
 构建逐字节一致；AppImage 仅额外设置可移植 RUNPATH `$ORIGIN/../lib`，Build ID 与 release
@@ -44,6 +45,7 @@ Release workflow 从零生成的资产。
 | --- | --- |
 | Rust library | 205 passed / 1 ignored |
 | Rust 集成测试 | 全部通过；含四种搜索排序的全局分页一致性 |
+| 数据库迁移 | schema 17；001–017 升级与 FTS 重建通过 |
 | 前端 | 83 文件 / 418 用例 |
 | Lint / production build | 通过 |
 | Playwright E2E | 7 / 7 |
@@ -55,6 +57,7 @@ Release workflow 从零生成的资产。
 | macOS release 启动冒烟 | 进程稳定存活，数据目录与窗口状态日志正常 |
 | Windows PE / NSIS / 便携包 | x64 GUI 结构、归档完整性、内嵌 PE 哈希通过 |
 | Linux deb / rpm / AppImage | 元数据、依赖、内嵌 Build ID、Xvfb 启动冒烟通过 |
+| 10 万全命中排序 | 默认相关度 p95 `160.2ms`；显式全库排序 p95 `326.3ms` |
 
 `cargo audit` 本机未安装，未擅自修改工具链；CI 仍按仓库固定版本执行。
 
@@ -62,11 +65,15 @@ Release workflow 从零生成的资产。
 
 命令：`pnpm bench`
 
-- 1 万检索：平均 **10.96 ms**、p95 **20.10 ms**、recall@1 **100%**、
-  recall@5 **100%**；
-- 3 万图谱：首屏 / 全量 **903.9 ms**、分类过滤 **347.2 ms**、
-  2 跳聚焦 **670.7 ms**；
+- 1 万检索：平均 **7.32 ms**、p95 **16.94 ms**、显式排序 p95 **30.44 ms**、
+  recall@1 **100%**、recall@5 **100%**；
+- 3 万图谱：首屏 / 全量 **840.1 ms**、分类过滤 **343.9 ms**、
+  2 跳聚焦 **617.1 ms**；
 - 两项性能守护均通过。
+
+10 万专项：默认检索 p95 **160.2ms**、recall@5 **100%**、重开 **1566ms**、
+RSS **326.4MB**；全库命中的显式排序 p95 **326.3ms**，低于该类排序独立的 400ms
+上限。默认检索仍执行 200ms 硬门禁。
 
 ## 边界
 

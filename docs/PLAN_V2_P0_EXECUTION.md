@@ -4,7 +4,7 @@
 > 四个 P0 主题，并落实 V2.0.0 发布出口中属于 P0 的验证门槛。
 > 本文件是执行状态的事实清单；只有代码、测试、产物或真机报告能作为完成证据。
 
-**当前结论（2026-10-23，候选 `d385f9f`）**：P0 的可编码、可自动验证部分已完成；
+**当前结论（2026-10-23，候选 `fa07c6c`）**：P0 的可编码、可自动验证部分已完成；
 全量自动化测试、三平台产物构建、签名清单生成器和性能守护均通过。剩余项全部是需要外部
 凭据、真实模型或真实设备的人工验收，统一见
 [V2_P0_MANUAL_ACCEPTANCE.md](./V2_P0_MANUAL_ACCEPTANCE.md)。
@@ -33,7 +33,7 @@
 | Organize 标签 200 题预检 | 真实 DeepSeek 200/200 成功，生成 936 个标签；精确率 97.86%、至少含一个相关标签的召回 100% |
 | Organize 摘要 20 题预检 | DeepSeek 20/20 成功，关键事实 60/60，未发现跨主题虚构标记 |
 | 决策 Key 持久化 | 修复后端忽略 `decisionApiKey` 与前端保存失败仍清空输入的问题；Rust 凭据测试和前端保留输入测试通过 |
-| macOS release `.app` 当前候选 | `d385f9f` 干净重建；ad-hoc 签名与独立临时 HOME 启动冒烟通过，CDHash `a150213cda67cb507972f37076cb19ac8d50fc44` |
+| macOS release `.app` 当前候选 | `fa07c6c` 干净重建；ad-hoc 签名与独立临时 HOME 启动冒烟通过，CDHash `d8c982da9ceaef57c1883ef117df73de3c2c1545` |
 | `pnpm test:release-manifest` | 三平台映射、Linux `AppImage.tar.gz`、GitHub 资产名归一化与缺签名拒绝测试通过 |
 | `pnpm test:update-signature` | 一次性测试密钥：有效载荷通过、篡改载荷拒绝、版本签名绑定校验通过 |
 | `runtime_contract` / release App 实启 | updater 配置可反序列化；窗口位置恢复权限完整；macOS release 包真实打开 10 万篇工作区 |
@@ -41,11 +41,11 @@
 | macOS P0 用例 4 状态污染复测 | 39 个自动步骤通过 / 0 失败；拖拽/悬停手感仍人工 |
 | macOS 历史完整原生套件 | `49de15f` 全新隔离工作区 321 步通过 / 0 失败；11 条视觉或外部条件待人工；当前候选仍需统一复跑 |
 | 验收脚手架工作区核验 / 文件断言 | 4 个 Node 测试通过；错误 workspace 写入前中止；用例 1 为 10/10 |
-| `pnpm bench` | 当前候选 1 万检索平均 10.96ms / p95 20.10ms、recall@5 100%；3 万图谱 903.9ms |
+| `pnpm bench` | 当前候选 1 万检索平均 7.32ms / p95 16.94ms、显式排序 p95 30.44ms、recall@5 100%；3 万图谱 840.1ms |
 | 10 万扩展门禁 | 检索 p95 77.76ms、recall@5 100%、后端重开 1140.77ms、RSS 350.84MB |
 | macOS 完整 App 10 万篇 | release/ad-hoc：稳定首帧 1001ms、RSS 224.23MB；重建后首次 2947ms 已单独记录；截图为 100001 篇就绪界面 |
 | updater manifest 脚本 / release.yml | 合成夹具通过；YAML 解析通过 |
-| 当前候选 Windows / Linux 产物 | `d385f9f` 的 PE / NSIS / 便携包与 deb / rpm / AppImage 已重建；内嵌本体哈希、依赖、Build ID、归档完整性与 Xvfb 启动冒烟通过 |
+| 当前候选 Windows / Linux 产物 | `fa07c6c` 的 PE / NSIS / 便携包与 deb / rpm / AppImage 已重建；内嵌本体哈希、依赖、Build ID、归档完整性与 Xvfb 启动冒烟通过 |
 
 当前候选的完整自动门禁汇总见
 [V2 当前候选发布门禁](./acceptance/V2_RELEASE_GATE_20261023.md)。

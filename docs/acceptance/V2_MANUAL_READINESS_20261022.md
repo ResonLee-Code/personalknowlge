@@ -5,7 +5,7 @@
 当前候选的代码、自动测试、三平台开发产物和 Linux 隔离环境证据已就绪，但还不具备开始完整
 人工真机验收的外部条件。本文只记录准备状态，不是验收通过报告，不勾选任何权威人工清单项。
 
-- 当前候选代码：`d385f9fcf9c698410883a666db370ac0bacc9b23`
+- 当前候选代码：`fa07c6cb4670d2b7b69eeec435a32c9c7e355d04`
 - 当前候选产物：[V2 当前候选发布门禁](./V2_RELEASE_GATE_20261023.md)
 - 权威剩余项：[V2 P0 人工清单](../V2_P0_MANUAL_ACCEPTANCE.md)
   + [V2 P1 / P2 人工清单](../V2_P1_P2_MANUAL_ACCEPTANCE.md)
@@ -18,7 +18,7 @@
 
 | 前置条件 | 当前状态 | 对统一人工验收的影响 |
 | --- | --- | --- |
-| 三平台开发候选 | `d385f9f` 的 macOS ad-hoc、Windows NSIS/便携版、Linux deb/rpm/AppImage 已重建并校验 | 可以开始使用当前包的人工复跑；仍需按平台逐项留存证据 |
+| 三平台开发候选 | `fa07c6c` 的 macOS ad-hoc、Windows NSIS/便携版、Linux deb/rpm/AppImage 已重建并校验 | 可以开始使用当前包的人工复跑；仍需按平台逐项留存证据 |
 | macOS 签名身份 | 钥匙串 `0 valid identities found` | Developer ID、公证、浏览器首次打开和签名冷启动未解锁 |
 | Apple 公证环境变量 | `APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID`、`APPLE_API_KEY*` 均未设置 | 无法提交公证 |
 | Windows 签名环境变量 | `WINDOWS_CERTIFICATE`、密码均未设置 | 正签安装器、SmartScreen 和签名更新拒绝未解锁 |

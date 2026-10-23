@@ -11,7 +11,7 @@
 > **321 步通过 / 0 失败 / 11 条待人工**，该结果作为历史证据，不能替代当前候选复跑；
 > 原始报告见
 > [V2 原生验收记录](./acceptance/V2_NATIVE_EXPORT_RESTORE_20261022.md)。
-> 当前候选为 `d385f9f`；其自动门禁、三平台产物与启动冒烟见
+> 当前候选为 `fa07c6c`；其自动门禁、三平台产物与启动冒烟见
 > [V2 当前候选发布门禁](./acceptance/V2_RELEASE_GATE_20261023.md)。统一人工真机测试必须
 > 使用本文档末尾列出的当前候选产物。
 
@@ -70,7 +70,7 @@
 
 ### Windows
 
-- 当前构建对象：`d385f9f` 的 Windows NSIS 与便携版；实际文件哈希见
+- 当前构建对象：`fa07c6c` 的 Windows NSIS 与便携版；实际文件哈希见
   [V2 当前候选发布门禁](./acceptance/V2_RELEASE_GATE_20261023.md#当前产物)。
 - 自动化已证明 PE x64/GUI 结构、NSIS / ZIP 归档完整性及两者内嵌 PE 哈希一致；
   以下真实设备项仍须执行。
@@ -85,7 +85,7 @@
 
 ### Linux
 
-- 当前构建对象：`d385f9f` 的 deb / rpm / AppImage；实际文件哈希见
+- 当前构建对象：`fa07c6c` 的 deb / rpm / AppImage；实际文件哈希见
   [V2 当前候选发布门禁](./acceptance/V2_RELEASE_GATE_20261023.md#当前产物)。
 - 自动化已证明包元数据、依赖、内嵌 ELF Build ID 一致，并在 Ubuntu 22.04 容器 Xvfb
   下完成三条启动冒烟；以下物理机 / 指定版本项仍须执行。
@@ -99,8 +99,8 @@
 ### macOS
 
 - 当前 ad-hoc 候选：`.app.zip` SHA-256
-  `95ef957be1de4aa3d7e4f2079d7872e39008401200ca33ebe4840ff1676daed9`，
-  CDHash `a150213cda67cb507972f37076cb19ac8d50fc44`。
+  `5854d674b2406ebb0171e45dde34b0ee312ed28b4225c645a46644428a7be2ea`，
+  CDHash `d8c982da9ceaef57c1883ef117df73de3c2c1545`。
 - [ ] Developer ID 签名通过 `codesign --verify --deep --strict`。
 - [ ] 公证通过 `spctl --assess`。
 - [ ] 从浏览器下载后首次打开不需要“仍要打开”。
