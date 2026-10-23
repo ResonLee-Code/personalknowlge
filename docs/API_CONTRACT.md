@@ -136,6 +136,12 @@ Markdown 会保留源 frontmatter 的 `id` / `title` / `tags` / 时间字段。
 
 搜索命中超过 5000 条时不计算全量 BM25 排序，改用 FTS rowid 流式分页以控制 10 万篇
 交互延迟；小结果集仍按 BM25 相关度排序。`total` 在两种路径下都是准确命中数。
+
+`SearchSort` 支持 `relevance`（默认）、`updatedDesc`、`createdDesc`、`titleAsc`。
+四种排序都在分页前对同一查询的全结果集执行，并追加 `noteId` 作为稳定次级键；
+小结果集的相关度排序先保证标题命中优先，再比较 BM25 分数。显式排序不会因为高频命中走
+BM25/rowid 降级路径而丢失用户选择的全局顺序。
+
 | `search_rebuild_index` | — | `IndexStatus` |
 | `search_get_status` | — | `IndexStatus` |
 

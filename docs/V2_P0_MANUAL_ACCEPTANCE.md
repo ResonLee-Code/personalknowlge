@@ -7,9 +7,13 @@
 > [V2 统一人工真机验收执行包](./acceptance/V2_UNIFIED_MANUAL_PLAN.md)。
 > 2026-10-21 macOS 已执行关键 UI 与 P0 原生入口自动步骤 126/126；完整记录见
 > [macOS P0 真机报告](./acceptance/20261021-V2-P0-macOS/report.md)。
-> 2026-10-22 当前候选 `49de15f` 已在全新隔离工作区完成完整原生套件
-> **321 步通过 / 0 失败 / 11 条待人工**，原始报告见
+> 2026-10-22 的 `49de15f` 已在全新隔离工作区完成完整原生套件
+> **321 步通过 / 0 失败 / 11 条待人工**，该结果作为历史证据，不能替代当前候选复跑；
+> 原始报告见
 > [V2 原生验收记录](./acceptance/V2_NATIVE_EXPORT_RESTORE_20261022.md)。
+> 当前候选为 `d385f9f`；其自动门禁、三平台产物与启动冒烟见
+> [V2 当前候选发布门禁](./acceptance/V2_RELEASE_GATE_20261023.md)。统一人工真机测试必须
+> 使用本文档末尾列出的当前候选产物。
 
 ## A. Ask 质量评测
 
@@ -66,8 +70,10 @@
 
 ### Windows
 
-- 构建对象：使用 `49de15f` 对应的 Windows 安装器与便携版；哈希见
-  [跨平台产物记录](./acceptance/V2_PLATFORM_ARTIFACTS_20261022.md)。以下真实设备项仍须执行。
+- 当前构建对象：`d385f9f` 的 Windows NSIS 与便携版；实际文件哈希见
+  [V2 当前候选发布门禁](./acceptance/V2_RELEASE_GATE_20261023.md#当前产物)。
+- 自动化已证明 PE x64/GUI 结构、NSIS / ZIP 归档完整性及两者内嵌 PE 哈希一致；
+  以下真实设备项仍须执行。
 - [ ] 全新用户目录安装 NSIS 包。
 - [ ] 安装到含中文与空格的路径。
 - [ ] 普通用户权限安装，无非必要管理员权限。
@@ -79,8 +85,10 @@
 
 ### Linux
 
-- 构建对象：使用 `49de15f` 对应的 deb / rpm / AppImage；哈希见
-  [跨平台产物记录](./acceptance/V2_PLATFORM_ARTIFACTS_20261022.md)。以下物理机 / 指定版本项仍须执行。
+- 当前构建对象：`d385f9f` 的 deb / rpm / AppImage；实际文件哈希见
+  [V2 当前候选发布门禁](./acceptance/V2_RELEASE_GATE_20261023.md#当前产物)。
+- 自动化已证明包元数据、依赖、内嵌 ELF Build ID 一致，并在 Ubuntu 22.04 容器 Xvfb
+  下完成三条启动冒烟；以下物理机 / 指定版本项仍须执行。
 - [ ] Ubuntu 22.04 安装 `.deb` 并启动。
 - [ ] Ubuntu 24.04 安装 `.deb` 并启动。
 - [ ] AppImage 赋权后启动。
@@ -90,6 +98,9 @@
 
 ### macOS
 
+- 当前 ad-hoc 候选：`.app.zip` SHA-256
+  `95ef957be1de4aa3d7e4f2079d7872e39008401200ca33ebe4840ff1676daed9`，
+  CDHash `a150213cda67cb507972f37076cb19ac8d50fc44`。
 - [ ] Developer ID 签名通过 `codesign --verify --deep --strict`。
 - [ ] 公证通过 `spctl --assess`。
 - [ ] 从浏览器下载后首次打开不需要“仍要打开”。
@@ -114,8 +125,8 @@
 
 ## F. 发布前人工抽验
 
-- [x] 三平台产物哈希按用户下载方式校验
-      （[跨平台产物记录](./acceptance/V2_PLATFORM_ARTIFACTS_20261022.md)）。
+- [x] 当前三平台产物哈希按用户下载方式校验，内嵌本体和归档完整性一致
+      （[当前候选发布门禁](./acceptance/V2_RELEASE_GATE_20261023.md#当前产物)）。
 - [ ] macOS 签名、版本号、公证。
 - [x] Windows PE 结构、安装器与便携版版本一致（PE x64/GUI、NSIS 内嵌本体哈希一致）。
 - [x] Linux 包依赖与 AppImage 可执行权限（deb/rpm 元数据、AppImage ELF 权限与实启通过）。

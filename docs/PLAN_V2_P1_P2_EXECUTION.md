@@ -89,6 +89,8 @@ P0 的状态与人工项仍以 [V2_P0_MANUAL_ACCEPTANCE.md](./V2_P0_MANUAL_ACCEP
 - [x] 10 万 Graph 与完整 App 冷启动分开记录，不混写。
 - [x] macOS release 完成 10 万高频结果的分页、连续滚动与虚拟列表预检；无白块或跳位
       （[证据](./acceptance/V2_SCALE_UI_100K_20261023.md)）。
+- [x] 搜索结果的相关度、更新时间、创建时间与标题四种排序均在分页前全局执行，并以
+      `note_id` 作为稳定次级键；自动化逐页检查无重复、遗漏或顺序漂移（候选 `d385f9f`）。
 
 人工：Developer ID / 公证后的干净机器冷启动、Windows 与 Linux 真机安装升级。
 

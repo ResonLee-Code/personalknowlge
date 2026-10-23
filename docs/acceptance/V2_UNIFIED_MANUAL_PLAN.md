@@ -4,9 +4,9 @@
 > 权威勾选项仍是 [P0 清单](../V2_P0_MANUAL_ACCEPTANCE.md) 和
 > [P1 / P2 清单](../V2_P1_P2_MANUAL_ACCEPTANCE.md)；本文件负责顺序、前置条件与证据口径。
 > 当前未完成：P0 36 项、P1 / P2 24 项。自动测试通过不能替这些项目勾选。
-> 当前 V2 开发版三平台对象已生成；Windows / Linux 的本地结构与虚拟机证据见
-> [跨平台产物记录](./V2_PLATFORM_ARTIFACTS_20261022.md)。人工真机仍必须使用该记录中的
-> commit 与哈希，不能换成未记录的新包。
+> 当前候选已更新为 `d385f9f`，三平台产物、完整哈希和自动门禁见
+> [V2 当前候选发布门禁](./V2_RELEASE_GATE_20261023.md)。人工真机必须使用本文件第 1 节
+> 冻结的 commit 与产物，不能与历史 `49de15f` 的报告混用。
 > 当前环境缺项与剩余项分组见
 > [人工验收准备报告](./V2_MANUAL_READINESS_20261022.md)。
 
@@ -18,21 +18,24 @@
 
 | 字段 | 值 |
 | --- | --- |
-| Git commit | `49de15fbb17cbc468157ef2c477e901c4cffef9a` |
+| Git commit | `d385f9fcf9c698410883a666db370ac0bacc9b23` |
 | 版本号 / tag | `1.3.7`（V2 开发线，尚未创建 V2 tag） |
-| 自动验收报告 | [V2 P1/P2 自动验收](./V2_P1_P2_AUTOMATED_20261022.md) + [平台产物记录](./V2_PLATFORM_ARTIFACTS_20261022.md) |
-| macOS 产物与 SHA-256 | 包内二进制 `6d47bb88f1b40563cacb57f0857d106d93f532b5f86ea3614d3b5b922496a260`；ad-hoc，非发布签名 |
-| Windows 产物与 SHA-256 | NSIS `7233a98d4e49633824ddaa75d37bb3e8c6c42f85f6663cc6c51b5de100d50c17`；便携版 `a7890cdc7649c0441182c7f3315b17af52be9c08e6d66f6958b5a340e1fa03cc` |
-| Linux 产物与 SHA-256 | deb `5da7b72cf7b11ed04a260ff0fb102724283b92ed5a432db1a67c93449df73dd0`；rpm `cac444993777e679aa114b33eb66a94acd2c475fd78d3f34f174e00f6ba7af2c`；AppImage `48d10dd0778eadc3b1449bc32271a6c9e8b96b21087e99ad07ad0ad064b5483c` |
+| 自动验收报告 | [V2 当前候选发布门禁](./V2_RELEASE_GATE_20261023.md) + [V2 P1/P2 自动验收](./V2_P1_P2_AUTOMATED_20261022.md) |
+| macOS 产物与 SHA-256 | `.app.zip` `95ef957be1de4aa3d7e4f2079d7872e39008401200ca33ebe4840ff1676daed9`；包内二进制 `10764db258426909a89ebd2ea1f62f1c2635b6bffdc7803007d19f1b3be804bc`；CDHash `a150213cda67cb507972f37076cb19ac8d50fc44`；ad-hoc，非发布签名 |
+| Windows 产物与 SHA-256 | NSIS `8f723311d96e6385b4c5487eff7cd790e594a612988f347e0deb0fea51da650a`；便携版 `0006cbbd2561ebc4d0f53285227f26f8f56e9442ae73b736eeeac9ac53a56b82`；内嵌 PE `36344b330c3b555a884047329b2a12c387c9689ec0e55bf54cc40f0c1a573fa5` |
+| Linux 产物与 SHA-256 | deb `133b721d262eb7d475d8d02418d10adda34b8ec55887650dedacacc8c820655a`；rpm `6447f942ecead367f0e49c1a5dfc9a3b04e1f53902f416433995d3b3e255a1b8`；AppImage `0e7ccf3555ca930e8acc8415b1f7a174be226c9db716c18adcf3840be8a44fe2`；内嵌 ELF Build ID `27c1b3fec49db494df42b6551edba7d35353619e` |
 | `latest.json` SHA-256 | 尚未生成：等待正式 updater 签名密钥与 Release 资产 |
 
-当前候选开发版本 `49de15f` 的三平台对象与哈希已记录在
-[跨平台产物记录](./V2_PLATFORM_ARTIFACTS_20261022.md)。这些对象尚未经过 Developer ID、
-公证、Windows 代码签名或真实设备安装，不能当成 Release 签名产物。
+当前候选 `d385f9f` 的三平台对象与哈希已记录在
+[V2 当前候选发布门禁](./V2_RELEASE_GATE_20261023.md)。这些对象尚未经过 Developer ID、
+公证、Windows 代码签名或真实设备安装，不能当成 Release 签名产物。历史 `49de15f`
+报告仍可追溯功能行为，但正式人工验收不得使用旧包。
 
 当前候选的 Rust / 前端 / E2E / Lint / production build / 发布清单与 updater 验签均已通过；
-macOS 原生完整套件为 **321 步通过 / 0 失败 / 11 条待人工**。AI 总开关本地 / 模板链路也已
-通过真实 UI 冒烟，但真实模型质量和正式签名仍等待外部条件。
+历史 `49de15f` 的 macOS 原生完整套件为 **321 步通过 / 0 失败 / 11 条待人工**；
+当前 `d385f9f` 只完成自动门禁、启动冒烟和三平台产物结构校验，原生完整套件必须在统一
+人工验收阶段用当前包重跑。AI 总开关本地 / 模板链路也已通过真实 UI 冒烟，但真实模型质量
+和正式签名仍等待外部条件。
 
 人工测试开始前，再次核对本机文件哈希；任何不一致都必须停止并按新候选版本重新开始。
 
