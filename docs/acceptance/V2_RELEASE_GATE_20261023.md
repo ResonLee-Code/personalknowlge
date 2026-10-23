@@ -32,6 +32,12 @@ Windows NSIS 与便携 ZIP 内嵌的应用 PE 哈希一致。Linux deb / rpm 内
 构建逐字节一致；AppImage 仅额外设置可移植 RUNPATH `$ORIGIN/../lib`，Build ID 与 release
 构建一致。
 
+Linux 本次是手工复封装候选：Tauri 已完成当前 release 二进制编译，但容器内
+linuxdeploy 在 WebKitGTK 依赖目录持续 I/O 无进展，因此 deb / rpm 从已验包骨架替换当前
+ELF，AppImage 从上一组已验证的 Ubuntu 22.04 完整运行库中替换当前 ELF 后重新压包。
+三种格式均重新做了 Build ID、依赖、归档和启动校验。它们用于当前人工候选，不替代正式
+Release workflow 从零生成的资产。
+
 ## 自动化与脚本
 
 | 检查 | 结果 |
