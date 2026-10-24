@@ -704,7 +704,11 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   // 本地模型（D5）：默认不启用（空地址 + 两个开关关闭），浏览器预览不调用本地模型
   await page.getByTestId('ai-tab-models').click();
   await expect(page.getByTestId('ai-tab-models')).toHaveAttribute('aria-selected', 'true');
-  await page.screenshot({ path: path.join(SHOTS, '39b-ai-settings-models.png') });
+  // 分区按钮有短促的颜色过渡；截图要等到视觉状态稳定，否则会拍到上一个 Tab 的残影。
+  await page.screenshot({
+    path: path.join(SHOTS, '39b-ai-settings-models.png'),
+    animations: 'disabled',
+  });
   await expect(page.getByTestId('ai-local-endpoint')).toHaveValue('');
   await expect(page.getByTestId('ai-local-compose')).not.toBeChecked();
   await expect(page.getByTestId('ai-local-score')).not.toBeChecked();
