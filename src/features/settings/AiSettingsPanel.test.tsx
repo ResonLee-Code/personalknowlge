@@ -127,6 +127,47 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     expect(screen.getByTestId('ai-tab-models')).toHaveTextContent('模型连接');
     await userEvent.click(within(overview).getByRole('button', { name: /来源打分/ }));
     expect(screen.getByTestId('ai-tab-models')).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(screen.getByTestId('ai-remote-score')).toHaveFocus());
+  });
+
+  it('待处理项跳到对应分区并把焦点交给具体控件', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      remoteModelBaseUrl: 'https://api.deepseek.com',
+      remoteModelName: 'deepseek-flash',
+      remoteModelKeySet: true,
+      remoteModelCompose: true,
+      remoteModelScore: false,
+      remoteModelAuthorizedAt: '2026-10-23T00:47:00+08:00',
+    });
+    render(<AiSettingsPanel />);
+
+    await userEvent.click(
+      await screen.findByRole('button', {
+        name: '处理：如需模型判断来源，打开“用在线模型打分”',
+      }),
+    );
+
+    expect(screen.getByTestId('ai-tab-models')).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(screen.getByTestId('ai-remote-score')).toHaveFocus());
+  });
+
+  it('分区标签支持方向键、Home 和 End 键盘导航', async () => {
+    render(<AiSettingsPanel />);
+
+    const overviewTab = await screen.findByTestId('ai-tab-overview');
+    overviewTab.focus();
+    await userEvent.keyboard('{ArrowRight}');
+    expect(screen.getByTestId('ai-tab-models')).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(screen.getByTestId('ai-tab-models')).toHaveFocus());
+
+    await userEvent.keyboard('{End}');
+    expect(screen.getByTestId('ai-tab-advanced')).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(screen.getByTestId('ai-tab-advanced')).toHaveFocus());
+    await userEvent.keyboard('{Home}');
+    expect(screen.getByTestId('ai-tab-overview')).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(screen.getByTestId('ai-tab-overview')).toHaveFocus());
   });
 
   it('打开总开关会调用后端策略更新', async () => {
@@ -365,6 +406,31 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     );
     expect(await screen.findByTestId('ai-remote-compose')).toBeChecked();
     expect(screen.getByTestId('ai-remote-authorized')).toHaveTextContent('已授权外发');
+  });
+
+  it('已填写连接但未授权时提供独立授权入口，不强制打开用途开关', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      remoteModelBaseUrl: 'https://api.deepseek.com',
+      remoteModelName: 'deepseek-flash',
+      remoteModelKeySet: true,
+    });
+    const setPolicy = vi.spyOn(aiService, 'setPolicy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      remoteModelBaseUrl: 'https://api.deepseek.com',
+      remoteModelName: 'deepseek-flash',
+      remoteModelKeySet: true,
+      remoteModelAuthorizedAt: '2026-10-23T00:47:00+08:00',
+    });
+    render(<AiSettingsPanel />);
+
+    await userEvent.click(await screen.findByTestId('ai-remote-authorize'));
+    expect(await screen.findByTestId('ai-remote-confirm')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('ai-remote-confirm-ok'));
+
+    await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ confirmRemoteModel: true }));
   });
 
   it('取消授权对话框时保持关闭，一个字段都不提交', async () => {

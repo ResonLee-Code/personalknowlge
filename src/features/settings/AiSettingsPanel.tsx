@@ -1,4 +1,4 @@
-import { Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { ChevronRight, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -31,6 +31,13 @@ const TIER_LABEL: Record<AiDiagnosis['tier'], string> = {
 };
 
 type AiSettingsTab = 'overview' | 'models' | 'retrieval' | 'advanced';
+
+const AI_SETTINGS_TABS: Array<{ id: AiSettingsTab; label: string }> = [
+  { id: 'overview', label: '概览' },
+  { id: 'models', label: '模型连接' },
+  { id: 'retrieval', label: '联网与增强' },
+  { id: 'advanced', label: '决策与高级' },
+];
 
 /**
  * 「设置 → AI」区块（V1.2.1 阶段 D1 / AI_ARCHITECTURE_PLAN §6、§9.7）。
@@ -282,11 +289,13 @@ export function AiSettingsPanel() {
     window.requestAnimationFrame(() => {
       const target = document.getElementById(targetId);
       target?.scrollIntoView?.({ block: 'center' });
-      target?.focus({ preventScroll: true });
+      if (target instanceof HTMLElement) target.focus({ preventScroll: true });
     });
   };
   const nextSteps: Array<{ text: string; tab: AiSettingsTab; targetId?: string }> = [];
-  if (!policy.enabled) nextSteps.push({ text: '打开 AI 能力总开关', tab: 'overview' });
+  if (!policy.enabled) {
+    nextSteps.push({ text: '打开 AI 能力总开关', tab: 'overview', targetId: 'ai-enabled' });
+  }
   if ((policy.remoteModelCompose || policy.remoteModelScore) && !remoteConfigured) {
     nextSteps.push({
       text: '补齐在线模型地址、模型名与 API Key',
@@ -298,7 +307,11 @@ export function AiSettingsPanel() {
     !policy.remoteModelAuthorizedAt &&
     (policy.remoteModelCompose || policy.remoteModelScore)
   ) {
-    nextSteps.push({ text: '确认在线模型外发授权', tab: 'models' });
+    nextSteps.push({
+      text: '确认在线模型外发授权',
+      tab: 'models',
+      targetId: 'ai-remote-authorize',
+    });
   }
   if (remoteAuthorized && !policy.remoteModelScore) {
     nextSteps.push({
@@ -337,8 +350,8 @@ export function AiSettingsPanel() {
       >
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h3 className="text-[13px] font-medium text-[var(--ink)]">当前生效链路</h3>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--ink-subtle)]">
+            <h3 className="text-sm font-medium text-[var(--ink)]">当前生效链路</h3>
+            <p className="mt-0.5 text-xs leading-relaxed text-[var(--ink-subtle)]">
               “已配置”不等于“会调用”；总开关、配置、授权和用途开关分别生效。
             </p>
           </div>
@@ -376,26 +389,29 @@ export function AiSettingsPanel() {
           />
         </div>
         {nextSteps.length > 0 ? (
-          <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-900 dark:text-amber-200">
+          <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-900 dark:text-amber-200">
             <p className="font-medium">还需要你确认</p>
-            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            <ul className="mt-1 space-y-0.5">
               {nextSteps.map((step) => (
                 <li key={step.text}>
-                  {step.text}
                   <button
                     type="button"
                     aria-label={`处理：${step.text}`}
-                    className="ml-1 underline underline-offset-2"
+                    className="group flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-2 py-1 text-left transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
                     onClick={() => openTab(step.tab, step.targetId)}
                   >
-                    去处理
+                    <span>{step.text}</span>
+                    <span className="flex shrink-0 items-center gap-0.5 underline underline-offset-2">
+                      去处理
+                      <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                    </span>
                   </button>
                 </li>
               ))}
             </ul>
           </div>
         ) : (
-          <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-[11px] text-emerald-700 dark:text-emerald-300">
+          <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-xs text-emerald-700 dark:text-emerald-300">
             当前已开启的能力都满足生效条件。
           </p>
         )}
@@ -403,25 +419,42 @@ export function AiSettingsPanel() {
 
       <div className="sticky top-0 z-20 border-y border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2 shadow-sm">
         <nav role="tablist" aria-label="AI 设置分区" className="flex flex-wrap gap-1.5">
-          {[
-            ['overview', '概览'],
-            ['models', '模型连接'],
-            ['retrieval', '联网与增强'],
-            ['advanced', '决策与高级'],
-          ].map(([id, label]) => (
+          {AI_SETTINGS_TABS.map(({ id, label }, index) => (
             <button
               key={id}
               id={`ai-tab-${id}`}
               type="button"
               role="tab"
               aria-selected={activeTab === id}
+              aria-controls={`ai-tabpanel-${id}`}
+              tabIndex={activeTab === id ? 0 : -1}
               data-testid={`ai-tab-${id}`}
-              onClick={() => setActiveTab(id as AiSettingsTab)}
+              onClick={() => setActiveTab(id)}
+              onKeyDown={(event) => {
+                const nextIndex =
+                  event.key === 'ArrowRight'
+                    ? (index + 1) % AI_SETTINGS_TABS.length
+                    : event.key === 'ArrowLeft'
+                      ? (index - 1 + AI_SETTINGS_TABS.length) % AI_SETTINGS_TABS.length
+                      : event.key === 'Home'
+                        ? 0
+                        : event.key === 'End'
+                          ? AI_SETTINGS_TABS.length - 1
+                          : null;
+                if (nextIndex === null) return;
+                const next = AI_SETTINGS_TABS[nextIndex];
+                if (!next) return;
+                event.preventDefault();
+                setActiveTab(next.id);
+                window.requestAnimationFrame(() =>
+                  document.getElementById(`ai-tab-${next.id}`)?.focus(),
+                );
+              }}
               className={cn(
-                'rounded-full border px-2.5 py-1 text-[11px]',
+                'min-h-9 rounded-full border px-3 py-1.5 text-xs transition-[color,background-color,border-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]',
                 activeTab === id
-                  ? 'border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand)]'
-                  : 'border-[var(--border-subtle)] bg-[var(--surface)] text-[var(--ink-muted)] hover:text-[var(--ink)]',
+                  ? 'border-[var(--brand)] bg-[var(--brand-soft)] font-medium text-[var(--brand)] shadow-sm'
+                  : 'border-[var(--border-subtle)] bg-[var(--surface)] text-[var(--ink-muted)] hover:border-[var(--border-strong)] hover:text-[var(--ink)]',
               )}
             >
               {label}
@@ -431,6 +464,7 @@ export function AiSettingsPanel() {
       </div>
 
       <div
+        id="ai-tabpanel-overview"
         role="tabpanel"
         aria-labelledby="ai-tab-overview"
         data-testid="ai-tabpanel-overview"
@@ -443,6 +477,7 @@ export function AiSettingsPanel() {
         />
         <Row label="AI 能力总开关" hint="默认关闭；关闭时所有 AI 命令都会被后端拒绝">
           <Switch
+            id="ai-enabled"
             data-testid="ai-enabled"
             checked={policy.enabled}
             onCheckedChange={(checked) =>
@@ -493,6 +528,7 @@ export function AiSettingsPanel() {
       </div>
 
       <div
+        id="ai-tabpanel-retrieval"
         role="tabpanel"
         aria-labelledby="ai-tab-retrieval"
         data-testid="ai-tabpanel-retrieval"
@@ -669,6 +705,7 @@ export function AiSettingsPanel() {
       </div>
 
       <div
+        id="ai-tabpanel-models"
         role="tabpanel"
         aria-labelledby="ai-tab-models"
         data-testid="ai-tabpanel-models"
@@ -896,8 +933,24 @@ export function AiSettingsPanel() {
           <p data-testid="ai-remote-authorized" className="text-[11px] text-[var(--ink-subtle)]">
             {policy.remoteModelAuthorizedAt
               ? `已授权外发（${formatDateTime(policy.remoteModelAuthorizedAt)}）；换地址或模型名后需要重新确认。`
-              : '尚未授权：这一档不会向任何地址发送内容。'}
+              : remoteConfigured
+                ? '地址、模型名与 Key 已填写，但尚未授权；当前不会向该地址发送内容。'
+                : '尚未授权：这一档不会向任何地址发送内容。'}
           </p>
+          {remoteConfigured && !policy.remoteModelAuthorizedAt ? (
+            <Button
+              id="ai-remote-authorize"
+              size="sm"
+              variant="secondary"
+              data-testid="ai-remote-authorize"
+              onClick={() => {
+                setPendingRemoteSwitch(null);
+                setRemoteConfirmOpen(true);
+              }}
+            >
+              授权在线模型外发
+            </Button>
+          ) : null}
           <p className="text-[11px] text-[var(--ink-subtle)]">
             给「本机跑不动本地模型」的机器留的一档：地址只接受 https 的公网域名（本机可写
             localhost），裸 IP 与非加密地址会被拒绝。Key 存在本机应用数据目录（不进工作区、
@@ -907,6 +960,7 @@ export function AiSettingsPanel() {
       </div>
 
       <div
+        id="ai-tabpanel-advanced"
         role="tabpanel"
         aria-labelledby="ai-tab-advanced"
         data-testid="ai-tabpanel-advanced"
@@ -1464,7 +1518,7 @@ function Row({
       <div className="min-w-0">
         <p className="text-[13px] leading-tight text-[var(--ink)]">{label}</p>
         {hint ? (
-          <p className="mt-0.5 text-[11px] leading-tight text-[var(--ink-subtle)]">{hint}</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-[var(--ink-subtle)]">{hint}</p>
         ) : null}
       </div>
       <div className="shrink-0">{children}</div>
@@ -1502,16 +1556,16 @@ function StatusCard({
       type="button"
       aria-label={`${label}：${value}`}
       onClick={onClick}
-      className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] px-2.5 py-2 text-left transition-colors hover:border-[var(--brand)]"
+      className="group min-h-14 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-left transition-[border-color,background-color,box-shadow] hover:border-[var(--brand)] hover:bg-[var(--surface-muted)]/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] text-[var(--ink-subtle)]">{label}</p>
-        <span className="text-[10px] text-[var(--ink-subtle)]">›</span>
+        <p className="text-[11px] font-medium text-[var(--ink-subtle)]">{label}</p>
+        <ChevronRight className="h-3.5 w-3.5 text-[var(--ink-subtle)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--brand)]" />
       </div>
       <div className="mt-1 flex items-center gap-1.5">
         <span
           className={cn(
-            'h-1.5 w-1.5 shrink-0 rounded-full',
+            'h-2 w-2 shrink-0 rounded-full',
             tone === 'ok'
               ? 'bg-emerald-500'
               : tone === 'warn'
@@ -1519,7 +1573,7 @@ function StatusCard({
                 : 'bg-[var(--ink-subtle)]',
           )}
         />
-        <p className="truncate text-[11px] font-medium text-[var(--ink)]" title={value}>
+        <p className="truncate text-xs font-medium text-[var(--ink)]" title={value}>
           {value}
         </p>
       </div>
@@ -1537,9 +1591,9 @@ function SectionHeading({
   description: string;
 }) {
   return (
-    <div id={id} className="scroll-mt-4 px-3 pb-1 pt-3">
-      <h3 className="text-[13px] font-semibold text-[var(--ink)]">{title}</h3>
-      <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--ink-subtle)]">{description}</p>
+    <div id={id} className="scroll-mt-16 px-3 pb-1 pt-3">
+      <h3 className="text-sm font-semibold text-[var(--ink)]">{title}</h3>
+      <p className="mt-0.5 text-xs leading-relaxed text-[var(--ink-subtle)]">{description}</p>
     </div>
   );
 }
