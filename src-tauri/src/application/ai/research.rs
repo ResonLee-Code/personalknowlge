@@ -28,8 +28,8 @@ use crate::application::ai::system_one::SystemOneDecisionModel;
 use crate::application::ai::template_provider::TemplateGenerativeModel;
 use crate::application::ai::tools::AiTools;
 use crate::application::ai::traits::{
-    DecisionCandidate, DecisionKind, DecisionModel, DecisionState, GenerationRequest,
-    GenerativeModel, RetrievalOrigin, RetrievedChunk,
+    DecisionCandidate, DecisionChoice, DecisionKind, DecisionModel, DecisionState,
+    GenerationRequest, GenerativeModel, RetrievalOrigin, RetrievedChunk,
 };
 use crate::application::context::WorkspaceContext;
 use crate::application::note_service::NoteService;
@@ -65,6 +65,9 @@ const REVIEW_PERIOD_DAYS: i64 = 180;
 const MAX_CONCLUSIONS: usize = 5;
 /// 关键事实最多几条。
 const MAX_KEY_FACTS: usize = 8;
+/// Decision Model 只过滤“明显不相关”的网页候选；阈值保持保守，避免一次模型波动
+/// 把整个外部来源集合清空。规则档不会触发这一过滤。
+const MIN_WEB_RELEVANCE_SCORE: f32 = 0.25;
 
 /// 子问题的「意图标记」：用于把检索命中的材料**按规则**归属到子问题。
 ///
@@ -486,11 +489,11 @@ impl ResearchService {
     fn score_sources(
         &self,
         topic: &str,
-        sources: &mut [ResearchSource],
+        sources: &mut Vec<ResearchSource>,
         confirm_outbound: bool,
-    ) -> (String, Option<String>, Option<DecisionTrace>) {
+    ) -> (String, Option<String>, Option<DecisionTrace>, Vec<DroppedSource>) {
         if sources.is_empty() {
-            return (self.decision.id().to_string(), None, None);
+            return (self.decision.id().to_string(), None, None, Vec::new());
         }
         let key_of = |source: &ResearchSource| -> String {
             source
@@ -559,7 +562,45 @@ impl ResearchService {
             });
             source.credibility = blended_credibility(model_score, source.reliability);
         }
-        (provider, fallback_note, trace)
+        let low_relevance: HashSet<String> = if provider == "rule" {
+            HashSet::new()
+        } else {
+            scores
+                .as_ref()
+                .into_iter()
+                .flatten()
+                .filter(|result| {
+                    result.choice == DecisionChoice::Drop
+                        && result.score < MIN_WEB_RELEVANCE_SCORE
+                })
+                .map(|result| result.note_id.clone())
+                .collect()
+        };
+        let filtered = sources
+            .iter()
+            .filter(|source| source.origin == SourceOrigin::Web)
+            .filter_map(|source| {
+                let key = key_of(source);
+                low_relevance.contains(&key).then(|| DroppedSource {
+                    url: source.url.clone().unwrap_or_default(),
+                    host: source
+                        .url
+                        .as_deref()
+                        .and_then(source_grade::host_of)
+                        .unwrap_or_default(),
+                    reason: "decisionLowRelevance".to_string(),
+                })
+            })
+            .collect::<Vec<_>>();
+        if !filtered.is_empty() {
+            sources.retain(|source| {
+                source.origin != SourceOrigin::Web || !low_relevance.contains(&key_of(source))
+            });
+            for (index, source) in sources.iter_mut().enumerate() {
+                source.reference = index + 1;
+            }
+        }
+        (provider, fallback_note, trace, filtered)
     }
 
     // ---------------------------------------------------------------- ① 立项
@@ -656,20 +697,20 @@ impl ResearchService {
         };
         let scoring_note = if decision_ready {
             format!(
-                "来源评分：优先使用 System One 决策模型 `{decision_model_name}`；失败自动降级到后续可用的在线 / 本地 / 规则档。"
+                "来源评分：优先使用 System One 决策模型 `{decision_model_name}` 筛选并评分网页候选，明显低相关的候选会被筛除；失败自动降级到后续可用的在线 / 本地 / 规则档。"
             )
         } else if system_one_selected {
             "来源评分：已选择 System One，但端点、Key 或授权不完整；本次会降级到后续可用的在线 / 本地 / 规则档。"
                 .to_string()
         } else if policy.remote_model_score && remote_ready {
             format!(
-                "来源评分：收集时优先调用在线模型 `{remote_model_name}`；失败自动降级到本地 / 规则档。"
+                "来源评分：收集时优先调用在线模型 `{remote_model_name}` 筛选并评分网页候选，明显低相关的候选会被筛除；失败自动降级到本地 / 规则档。"
             )
         } else if policy.remote_model_score {
             "来源评分：已勾选在线模型，但地址、模型名、Key 或授权不完整；本次会降级到本地 / 规则档。"
                 .to_string()
         } else if policy.local_model_score && local_ready {
-            "来源评分：使用本地 Ollama；失败自动降级到规则档。".to_string()
+            "来源评分：使用本地 Ollama 筛选并评分网页候选，明显低相关的候选会被筛除；失败自动降级到规则档。".to_string()
         } else {
             "来源评分：当前使用规则档；如需模型判断，请在「设置 → AI → 在线模型」开启“用在线模型打分”。"
                 .to_string()
@@ -1439,9 +1480,23 @@ impl ResearchService {
             }
         }
 
+        // 决策层打分（§9.6）：模型档还会过滤明显低相关的网页候选；规则档只打分，
+        // 不据此删除结果，避免离线兜底误伤召回。
+        let (decision_provider, score_fallback, decision_trace, decision_filtered) =
+            self.score_sources(&plan.topic, &mut sources, confirmed);
+        if !decision_filtered.is_empty() {
+            web_note.push_str(&format!(
+                "；Decision Model `{decision_provider}` 判定并筛除明显低相关的网页候选 {} 个",
+                decision_filtered.len()
+            ));
+            session.dropped_sources.extend(decision_filtered);
+        }
         if let Some(plan_mut) = session.plan.as_mut() {
-            for (index, question) in plan_mut.sub_questions.iter_mut().enumerate() {
-                question.local_hits = per_question.get(index).copied().unwrap_or(0);
+            for question in plan_mut.sub_questions.iter_mut() {
+                question.local_hits = sources
+                    .iter()
+                    .filter(|source| source.sub_question_id == question.id)
+                    .count();
             }
         }
         let local_total = sources
@@ -1452,9 +1507,6 @@ impl ResearchService {
             .iter()
             .filter(|source| source.origin == SourceOrigin::Web)
             .count();
-        // 决策层打分（§9.6）：规则档默认；开了本地模型就由它打分、失败自动降级
-        let (decision_provider, score_fallback, decision_trace) =
-            self.score_sources(&plan.topic, &mut sources, confirmed);
         let score_remote_attempted = decision_trace.as_ref().is_some_and(|trace| {
             trace
                 .attempts
@@ -2939,14 +2991,18 @@ fn collect_warnings(
         .sources
         .iter()
         .any(|source| source.origin == SourceOrigin::Web);
-    if !session.dropped_sources.is_empty() {
+    let domain_dropped = session
+        .dropped_sources
+        .iter()
+        .filter(|item| item.reason == "denylist" || item.reason == "notAllowed")
+        .collect::<Vec<_>>();
+    if !domain_dropped.is_empty() {
         let blacklisted = session
             .dropped_sources
             .iter()
             .filter(|item| item.reason == "denylist")
             .count();
-        let hosts: Vec<String> = session
-            .dropped_sources
+        let hosts: Vec<String> = domain_dropped
             .iter()
             .map(|item| item.host.clone())
             .take(3)
@@ -2955,9 +3011,30 @@ fn collect_warnings(
             kind: WarningKind::DroppedSources,
             message: format!(
                 "有 {} 条检索结果被域名策略丢弃（黑名单 {} 条 / 不在白名单 {} 条）：{}——它们没有进入来源列表，也不会进入结论。",
-                session.dropped_sources.len(),
+                domain_dropped.len(),
                 blacklisted,
-                session.dropped_sources.len() - blacklisted,
+                domain_dropped.len() - blacklisted,
+                hosts.join("、")
+            ),
+            references: Vec::new(),
+        });
+    }
+    let decision_dropped = session
+        .dropped_sources
+        .iter()
+        .filter(|item| item.reason == "decisionLowRelevance")
+        .collect::<Vec<_>>();
+    if !decision_dropped.is_empty() {
+        let hosts = decision_dropped
+            .iter()
+            .map(|item| item.host.clone())
+            .take(3)
+            .collect::<Vec<_>>();
+        warnings.push(ResearchWarning {
+            kind: WarningKind::DecisionFiltered,
+            message: format!(
+                "Decision Model 判定 {} 条网页候选明显与课题低相关，已从最终来源列表筛除：{}。",
+                decision_dropped.len(),
                 hosts.join("、")
             ),
             references: Vec::new(),

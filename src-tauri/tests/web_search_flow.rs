@@ -16,6 +16,9 @@ use std::thread;
 use personal_knowledge_os_lib::application::ai::policy::AiPolicyService;
 use personal_knowledge_os_lib::application::ai::research::ResearchService;
 use personal_knowledge_os_lib::application::ai::tools::AiTools;
+use personal_knowledge_os_lib::application::ai::traits::{
+    DecisionChoice, DecisionKind, DecisionModel, DecisionResult, DecisionState,
+};
 use personal_knowledge_os_lib::application::note_service::NoteService;
 use personal_knowledge_os_lib::application::workspace_service::WorkspaceService;
 use personal_knowledge_os_lib::core::events::NoopEventSink;
@@ -24,8 +27,9 @@ use personal_knowledge_os_lib::domain::note::{
     CreateNoteInput, NoteListQuery, SetSourceInput,
 };
 use personal_knowledge_os_lib::domain::research::{
-    ResearchRequest, SourceLevel, SourceOrigin, WarningKind,
+    ResearchRequest, ResearchStatus, SourceLevel, SourceOrigin, WarningKind,
 };
+use personal_knowledge_os_lib::infrastructure::credential_store;
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -33,6 +37,37 @@ struct Fixture {
     _data: TempDir,
     _workspace: TempDir,
     app: Arc<AppInner>,
+}
+
+struct DropWebCandidates;
+
+impl DecisionModel for DropWebCandidates {
+    fn id(&self) -> &'static str {
+        "test.drop-web"
+    }
+
+    fn is_local(&self) -> bool {
+        true
+    }
+
+    fn decide(
+        &self,
+        kind: DecisionKind,
+        state: &DecisionState,
+    ) -> personal_knowledge_os_lib::core::error::Result<Vec<DecisionResult>> {
+        Ok(state
+            .candidates
+            .iter()
+            .map(|candidate| DecisionResult {
+                note_id: candidate.note_id.clone(),
+                choice: DecisionChoice::Drop,
+                score: 0.05,
+                confidence: 0.95,
+                reason: "测试模型判定明显无关".to_string(),
+                kind,
+            })
+            .collect())
+    }
 }
 
 impl Fixture {
@@ -216,6 +251,71 @@ fn allowed_network_collects_graded_web_sources_and_drops_suspected_injection() {
             .iter()
             .any(|entry| entry.capability == "web_search" && entry.outbound),
         "真的发出请求后必须有 outbound=true 的审计"
+    );
+}
+
+#[test]
+fn decision_model_filters_clearly_irrelevant_web_candidates_and_reports_it() {
+    let fixture = Fixture::new();
+    let (host, _) = spawn_once_server(
+        r#"{"results":[
+            {"title":"完全无关的周末活动","url":"https://irrelevant.example/weekend","content":"爬山和聚餐"},
+            {"title":"无关的购物清单","url":"https://irrelevant.example/shop","content":"牛奶和面包"}
+        ]}"#
+        .to_string(),
+    );
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            search_endpoint: Some(format!("http://{host}/search?q={{query}}&limit={{limit}}")),
+            ..Default::default()
+        })
+        .expect("打开联网档位");
+
+    let research = ResearchService::with_decision_model(
+        fixture.context(),
+        Arc::new(DropWebCandidates),
+    );
+    let session = research
+        .start(request("Rust 异步调度方案"))
+        .expect("立项");
+    let collected = research
+        .collect(&session.id, true)
+        .expect("收集并执行 Decision 筛选");
+
+    assert_eq!(
+        collected.decision_provider.as_deref(),
+        Some("test.drop-web"),
+        "报告应记录实际筛选档位"
+    );
+    assert!(
+        collected.sources.is_empty(),
+        "模型明确判低的网页不应进入最终来源列表：{:?}",
+        collected.sources
+    );
+    assert!(
+        collected
+            .dropped_sources
+            .iter()
+            .any(|item| item.reason == "decisionLowRelevance"),
+        "Decision 筛除必须在会话里留痕：{:?}",
+        collected.dropped_sources
+    );
+
+    let verified = research.verify(&session.id, false).expect("验证");
+    assert_eq!(verified.status, ResearchStatus::Verified);
+    let composed = research.compose(&session.id, false).expect("汇总");
+    let report = composed.report.as_ref().expect("报告");
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.kind == WarningKind::DecisionFiltered),
+        "报告必须说明 Decision Model 筛除了低相关候选：{:?}",
+        report.warnings
     );
 }
 
@@ -691,4 +791,68 @@ fn live_local_searxng_returns_real_external_sources() {
     for hit in hits {
         println!("PKOS_LIVE_SEARXNG_SOURCE host={} title={}", hit.host, hit.title);
     }
+}
+
+/// 真机联调：SearXNG 找网页，Perplexity Decisions 筛选并评分。
+///
+/// ```bash
+/// PKOS_LIVE_SEARXNG_ENDPOINT='http://127.0.0.1:8080/search?q={query}&format=json&count={limit}&language=zh-CN' \
+/// PKOS_LIVE_DECISION_KEY='...' \
+/// cargo test --offline --test web_search_flow live_searxng_with_decision -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "真机联调：需要本机 SearXNG 与有效 Perplexity Decisions Key"]
+fn live_searxng_with_decision_filters_through_system_one() {
+    let endpoint = std::env::var("PKOS_LIVE_SEARXNG_ENDPOINT")
+        .expect("设置 PKOS_LIVE_SEARXNG_ENDPOINT");
+    let key = std::env::var("PKOS_LIVE_DECISION_KEY").expect("设置 PKOS_LIVE_DECISION_KEY");
+    let base = std::env::var("PKOS_LIVE_DECISION_BASE")
+        .unwrap_or_else(|_| "https://api.perplexity.ai".to_string());
+    let model = std::env::var("PKOS_LIVE_DECISION_MODEL")
+        .unwrap_or_else(|_| "pplx-decider-v1.1-27b".to_string());
+
+    let fixture = Fixture::new();
+    credential_store::set_decision_key(&fixture.context().data_dir, Some(&key))
+        .expect("保存临时决策 Key");
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            search_endpoint: Some(endpoint),
+            decision_provider: Some("system_one".to_string()),
+            decision_base_url: Some(base),
+            decision_model: Some(model),
+            confirm_decision: Some(true),
+            ..Default::default()
+        })
+        .expect("配置真实联网与决策模型");
+
+    let research = fixture.research();
+    let session = research
+        .start(request("Rust 异步调度策略"))
+        .expect("立项");
+    let collected = research
+        .collect(&session.id, true)
+        .expect("SearXNG + Perplexity 收集");
+
+    let provider = collected.decision_provider.as_deref().unwrap_or_default();
+    assert!(
+        provider.starts_with("system_one"),
+        "真实决策模型应生效，实际 provider={provider}"
+    );
+    let web_sources = collected
+        .sources
+        .iter()
+        .filter(|source| source.origin == SourceOrigin::Web)
+        .count();
+    let decision_filtered = collected
+        .dropped_sources
+        .iter()
+        .filter(|item| item.reason == "decisionLowRelevance")
+        .count();
+    println!(
+        "PKOS_LIVE_SEARXNG_DECISION provider={provider} web_sources={web_sources} decision_filtered={decision_filtered}"
+    );
 }

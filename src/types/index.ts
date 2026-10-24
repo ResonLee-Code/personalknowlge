@@ -972,6 +972,8 @@ export type ResearchWarningKind =
   | 'modelGenerated'
   /** 有检索结果被域名策略（黑名单 / 白名单）丢弃，未进入来源列表 */
   | 'droppedSources'
+  /** Decision Model 判定明显低相关并筛除的网页候选 */
+  | 'decisionFiltered'
   /** 证据不足（D5/N9）：材料撑不起结论，报告如实说「不够」，不硬答 */
   | 'insufficientEvidence';
 

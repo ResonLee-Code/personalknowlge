@@ -255,7 +255,7 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     renderPage();
 
     const hint = await screen.findByTestId('research-score-system-one');
-    expect(hint).toHaveTextContent('System One 决策模型负责');
+    expect(hint).toHaveTextContent('System One 决策模型当前负责筛选和评分网页候选');
     expect(hint).toHaveTextContent('与 Perplexity Decisions 模型相互独立');
     expect(screen.queryByTestId('research-score-rule-hint')).not.toBeInTheDocument();
   });

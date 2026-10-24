@@ -554,8 +554,10 @@ export function ResearchPage() {
           data-testid="research-score-system-one"
           className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-800 dark:text-sky-200"
         >
-          来源可信度和冲突判定当前由 System One 决策模型负责。“用在线模型打分”控制的是 OpenAI
-          兼容在线模型（如 DeepSeek）的备用打分通道，与 Perplexity Decisions 模型相互独立。
+          System One
+          决策模型当前负责筛选和评分网页候选，并参与来源可信度与冲突判定。“用在线模型打分”控制的是
+          OpenAI 兼容在线模型（如 DeepSeek）的备用筛选与打分通道，与 Perplexity Decisions
+          模型相互独立。
         </div>
       ) : null}
 

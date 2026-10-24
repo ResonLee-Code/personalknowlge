@@ -635,7 +635,7 @@ AES-256-GCM 加密，密钥由 Argon2id 从用户口令派生。口令不落盘�
 | `research_compare` | `{ previousId, currentId }` | `ResearchComparison` | 新增 / 消失来源与结论变化 |
 | `research_template_save` | `{ sessionId, name }` | `ResearchPlanTemplate` | 保存计划模板 |
 | `research_template_list` | — | `ResearchPlanTemplate[]` | 列出计划模板 |
-| `research_collect` | `{ sessionId, confirmed }` | `ResearchSession` | 收集材料：本地 FTS5 +（D3）外部检索；`confirmed` 表示本次联网已获用户确认 |
+| `research_collect` | `{ sessionId, confirmed }` | `ResearchSession` | 收集材料：本地 FTS5 +（D3）外部检索；Decision 模型档会筛除明显低相关网页并写入 `droppedSources`，规则档只打分；`confirmed` 表示本次联网已获用户确认 |
 | `research_verify` | `{ sessionId, confirmOutbound? }` | `ResearchSession` | 按子问题汇总，≥2 个独立来源才算交叉验证；冲突判定见 C5（模型档优先，回退规则档） |
 | `research_compose` | `{ sessionId, confirmOutbound? }` | `ResearchSession` | 渲染固定六段报告（顶部「资料截至 YYYY-MM-DD」）；`confirmOutbound` 见 C2 闸门 |
 | `research_outbound_preview` | `{ sessionId }` | `ResearchOutboundPreview` | 逐次外发确认的预览（将要发送的片段 + 目标主机）；**只读**，不发请求 |
