@@ -507,7 +507,7 @@ export function SettingsPage() {
         ) : null}
 
         {section === 'ai' || query ? (
-        <Section title="AI（第二代预留）" icon={Sparkles} testId="settings-ai-section"
+        <Section title="AI 能力与模型连接" icon={Sparkles} testId="settings-ai-section"
           searchText="AI 总开关 模型自检 联网检索 抓取正文 域名白名单 黑名单 检索源 研究预算 本地模型 在线模型 向量检索 决策模型 出站代理 最近行为"
         >
           <AiSettingsPanel />

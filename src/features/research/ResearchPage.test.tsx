@@ -57,12 +57,20 @@ function planned(): ResearchSession {
       sourceTypes: ['local', 'official', 'docs'],
       budget: enabledPolicy.budget,
       subQuestions: [
-        { id: 'q1', question: '「Rust 异步运行时调度」的核心概念与定义是什么？', keywords: ['Rust'], localHits: 0 },
-        { id: 'q2', question: '「Rust 异步运行时调度」有哪些主流方案或做法？', keywords: ['Rust'], localHits: 0 },
+        {
+          id: 'q1',
+          question: '「Rust 异步运行时调度」的核心概念与定义是什么？',
+          keywords: ['Rust'],
+          localHits: 0,
+        },
+        {
+          id: 'q2',
+          question: '「Rust 异步运行时调度」有哪些主流方案或做法？',
+          keywords: ['Rust'],
+          localHits: 0,
+        },
       ],
-      localBaseline: [
-        { noteId: 'note_1', title: 'Rust 异步调度实现要点', snippet: '实现要点…' },
-      ],
+      localBaseline: [{ noteId: 'note_1', title: 'Rust 异步调度实现要点', snippet: '实现要点…' }],
       notes: ['本次只用本地知识库材料（外部检索属于阶段 D3）。'],
     },
     sources: [],
@@ -121,7 +129,8 @@ function composed(): ResearchSession {
         gaps: [
           {
             kind: 'partialCoverage',
-            message: '5 个子问题里有 4 个**一条材料都没有**：这部分不是「查过没有」，而是「没查」。',
+            message:
+              '5 个子问题里有 4 个**一条材料都没有**：这部分不是「查过没有」，而是「没查」。',
             subQuestionIds: ['q2', 'q3', 'q4', 'q5'],
             references: [],
           },
@@ -140,11 +149,16 @@ function composed(): ResearchSession {
       speculation: ['（模板草稿·未接模型）以下是按材料顺序罗列的待确认方向。'],
       warnings: [
         { kind: 'singleSource', message: '有 1 条来源是单一来源、没有交叉验证。', references: [2] },
-        { kind: 'templateGenerated', message: '本报告由模板实现生成（未接入模型）。', references: [] },
+        {
+          kind: 'templateGenerated',
+          message: '本报告由模板实现生成（未接入模型）。',
+          references: [],
+        },
       ],
       sourceReliability: 2,
       validUntil: '2027-04-09',
-      markdown: '# 调研报告：Rust 异步运行时调度\n\n> **资料截至 2026-10-11** · 生成方式 `template.draft`',
+      markdown:
+        '# 调研报告：Rust 异步运行时调度\n\n> **资料截至 2026-10-11** · 生成方式 `template.draft`',
     },
   };
 }
@@ -165,7 +179,11 @@ function proposed(): ResearchSession {
       body: '# 调研报告：Rust 异步运行时调度\n\n> **资料截至 2026-10-11**',
       diffPreview: '+# 调研报告：Rust 异步运行时调度\n+> **资料截至 2026-10-11**',
       duplicates: [
-        { noteId: 'note_9', title: '调研报告：Rust 异步运行时调度', updatedAt: '2026-10-08T10:00:00+08:00' },
+        {
+          noteId: 'note_9',
+          title: '调研报告：Rust 异步运行时调度',
+          updatedAt: '2026-10-08T10:00:00+08:00',
+        },
       ],
       suggestSourceNote: false,
     },
@@ -200,6 +218,36 @@ describe('ResearchPage（V1.2.1 D2）', () => {
       'href',
       '/settings',
     );
+  });
+
+  it('在线模型已配置但打分关闭时明确说明来源仍由规则档处理', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...enabledPolicy,
+      remoteModelBaseUrl: 'https://api.deepseek.com',
+      remoteModelName: 'deepseek-flash',
+      remoteModelKeySet: true,
+      remoteModelAuthorizedAt: '2026-10-23T00:47:00+08:00',
+      remoteModelCompose: true,
+    });
+    renderPage();
+
+    const hint = await screen.findByTestId('research-score-rule-hint');
+    expect(hint).toHaveTextContent('“用在线模型打分”未开启');
+    expect(hint).toHaveTextContent('报告汇总当前已启用在线模型');
+    expect(within(hint).getByRole('link', { name: '去设置' })).toHaveAttribute('href', '/settings');
+  });
+
+  it('联网源已配置时页头不再声称只检索本地', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...enabledPolicy,
+      network: 'allowNetwork',
+      networkConfirmedAt: '2026-10-16T22:12:12+08:00',
+      searchEndpoint: 'https://search.example.test/?q={query}&limit={limit}',
+    });
+    renderPage();
+
+    expect(await screen.findByText(/联网检索已启用；每次收集前仍需确认/)).toBeInTheDocument();
+    expect(screen.queryByText(/当前只检索本地知识库/)).not.toBeInTheDocument();
   });
 
   it('可在收集前编辑子问题、时间窗、语言与来源类型', async () => {
@@ -346,7 +394,11 @@ describe('ResearchPage（V1.2.1 D2）', () => {
 
     await waitFor(() =>
       expect(write).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'research_1', mode: 'create', includeSpeculation: false }),
+        expect.objectContaining({
+          sessionId: 'research_1',
+          mode: 'create',
+          includeSpeculation: false,
+        }),
       ),
     );
     expect(await screen.findByTestId('research-written')).toHaveTextContent('已写入知识库');
@@ -468,7 +520,7 @@ describe('ResearchPage（V1.2.1 D2）', () => {
 
     // 报告头显示打分来源；关键事实表带置信度列
     const report = screen.getByTestId('research-report');
-    expect(report).toHaveTextContent('打分 rule');
+    expect(report).toHaveTextContent('打分 rule（规则档）');
     // 平均置信度由后端分数汇总得到（0.85 → 高）
     expect(screen.getByTestId('research-avg-confidence')).toHaveTextContent('平均置信度 高 0.85');
   });
@@ -667,9 +719,7 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     const outboundPreview = vi.spyOn(researchService, 'outboundPreview').mockResolvedValue({
       willSend: true,
       host: 'api.example.com',
-      snippets: [
-        { title: 'Rust 异步调度实现要点', snippet: '实现要点在于任务唤醒与批量窃取。' },
-      ],
+      snippets: [{ title: 'Rust 异步调度实现要点', snippet: '实现要点在于任务唤醒与批量窃取。' }],
       reason: '本次会把下列片段交给在线模型（已开启逐次确认：要点确认才会发送）。',
     });
     const compose = vi.spyOn(researchService, 'compose').mockResolvedValue(composed());

@@ -280,14 +280,7 @@ export function ResearchPage() {
     setPlanLanguage(session.plan.language ?? 'zh-CN');
     setPlanSourceTypes(
       (
-        session.plan.sourceTypes ?? [
-          'local',
-          'official',
-          'docs',
-          'paper',
-          'blog',
-          'community',
-        ]
+        session.plan.sourceTypes ?? ['local', 'official', 'docs', 'paper', 'blog', 'community']
       ).join(', '),
     );
     setEditingPlan(true);
@@ -323,10 +316,7 @@ export function ResearchPage() {
     setError(null);
     try {
       const template = await researchService.saveTemplate(session.id, templateName);
-      setTemplates((current) => [
-        template,
-        ...current.filter((item) => item.id !== template.id),
-      ]);
+      setTemplates((current) => [template, ...current.filter((item) => item.id !== template.id)]);
       setTemplateName('');
       toast.success('研究计划已保存为模板');
     } catch (caught) {
@@ -485,6 +475,12 @@ export function ResearchPage() {
   };
 
   const aiDisabled = policy !== null && !policy.enabled;
+  const remoteConfigured =
+    policy?.remoteModelKeySet === true &&
+    Boolean(policy.remoteModelBaseUrl?.trim()) &&
+    Boolean(policy.remoteModelName?.trim());
+  const remoteAuthorized = remoteConfigured && Boolean(policy?.remoteModelAuthorizedAt);
+  const remoteScoreOff = remoteConfigured && !policy?.remoteModelScore;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-6">
@@ -498,7 +494,11 @@ export function ResearchPage() {
             用五步把「一个课题」做成可复核的调研报告：立项 → 收集 → 验证 → 汇总 → 写入提案。
             <span className="text-[var(--ink-subtle)]">
               {' '}
-              当前只检索本地知识库（外部检索属阶段 D3，接入前不会发起任何网络请求）。
+              {policy?.network === 'allowNetwork'
+                ? policy.searchEndpoint
+                  ? '联网检索已启用；每次收集前仍需确认，外部来源会按域名策略过滤。'
+                  : '联网模式已开启，但检索源地址尚未配置，收集阶段只会读取本地知识库。'
+                : '当前为「仅本地」口径，不会发起外部检索。'}
             </span>
           </p>
         </div>
@@ -523,6 +523,28 @@ export function ResearchPage() {
             </Link>{' '}
             打开总开关，并保持「仅本地」即可使用本地调研。
           </div>
+        </div>
+      ) : null}
+
+      {remoteScoreOff ? (
+        <div
+          data-testid="research-score-rule-hint"
+          className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
+        >
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            在线模型已配置，但“用在线模型打分”未开启；来源可信度和冲突判定仍由规则档处理。
+            报告汇总当前
+            {policy?.remoteModelCompose && remoteAuthorized
+              ? '已启用在线模型'
+              : policy?.remoteModelCompose
+                ? '尚未完成在线模型授权'
+                : '使用本地 / 模板档'}
+            。{' '}
+            <Link className="underline" to={ROUTES.settings}>
+              去设置
+            </Link>
+          </span>
         </div>
       ) : null}
 
@@ -679,11 +701,7 @@ export function ResearchPage() {
                   </Button>
                 ) : null}
                 {session.status === 'aborted' ? (
-                  <Button
-                    size="sm"
-                    disabled={busy !== null}
-                    onClick={() => void resume()}
-                  >
+                  <Button size="sm" disabled={busy !== null} onClick={() => void resume()}>
                     恢复并继续
                   </Button>
                 ) : null}
@@ -706,9 +724,7 @@ export function ResearchPage() {
                       }
                     }}
                   >
-                    {busy === nextAction.key ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : null}
+                    {busy === nextAction.key ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                     {nextAction.label}
                   </Button>
                 ) : null}
@@ -774,9 +790,8 @@ export function ResearchPage() {
                     <h2 className="text-sm font-medium text-[var(--ink)]">研究计划</h2>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-[var(--ink-subtle)]">
-                        时间窗 {session.plan.timeWindowDays} 天 ·{' '}
-                        {session.plan.language ?? 'zh-CN'} ·{' '}
-                        {formatDateTime(session.createdAt)}
+                        时间窗 {session.plan.timeWindowDays} 天 · {session.plan.language ?? 'zh-CN'}{' '}
+                        · {formatDateTime(session.createdAt)}
                       </span>
                       {session.status === 'planned' && !editingPlan ? (
                         <Button variant="outline" size="sm" onClick={openPlanEditor}>
@@ -911,7 +926,10 @@ export function ResearchPage() {
                         结论变化 {comparison.changedClaims.length}
                       </p>
                       {comparison.changedClaims.map((claim) => (
-                        <p key={claim.subQuestionId} className="mt-1 text-xs text-[var(--ink-muted)]">
+                        <p
+                          key={claim.subQuestionId}
+                          className="mt-1 text-xs text-[var(--ink-muted)]"
+                        >
                           {claim.subQuestionId} · 上次 {claim.previous.length} 条 → 本次{' '}
                           {claim.current.length} 条
                         </p>
@@ -956,9 +974,9 @@ export function ResearchPage() {
                           )}
                           <span className="block text-xs text-[var(--ink-subtle)]">
                             {source.gradeReason}
-                          {source.applicableVersion
-                            ? ` · 适用版本 ${source.applicableVersion}`
-                            : ''}
+                            {source.applicableVersion
+                              ? ` · 适用版本 ${source.applicableVersion}`
+                              : ''}
                             {source.stale ? ' · 可能已过时' : ''}
                             {typeof source.credibility === 'number'
                               ? ` · 可信度 ${Math.round(source.credibility * 100)}%`
@@ -990,10 +1008,17 @@ export function ResearchPage() {
                     <span className="text-xs text-[var(--ink-subtle)]">
                       生成方式 {report.composer}
                       {/* 只有真的走模板时才标注「未接入模型」：模型写的报告不能顶着模板的名头 */}
-                      {report.composer === 'template.draft' ? '（未接入模型）' : '（模型生成，未经核对）'}
+                      {report.composer === 'template.draft'
+                        ? '（未接入模型）'
+                        : '（模型生成，未经核对）'}
                     </span>
                     <span className="text-xs text-[var(--ink-subtle)]">
-                      打分 {report.decisionProvider ?? 'rule'}（规则档；Jev 接入后同口径替换）
+                      打分 {report.decisionProvider ?? 'rule'}
+                      {report.decisionProvider?.startsWith('remote.')
+                        ? '（在线模型）'
+                        : report.decisionProvider?.startsWith('local.')
+                          ? '（本地模型）'
+                          : '（规则档）'}
                     </span>
                     <span
                       data-testid="research-conflict-provider"
@@ -1077,7 +1102,9 @@ export function ResearchPage() {
                   */}
                   {report.conclusions.length > 0 || report.keyFacts.length > 0 ? (
                     <div className="mt-4" data-testid="research-citations">
-                      <h3 className="text-xs font-medium text-[var(--ink)]">结论与引用（可点开）</h3>
+                      <h3 className="text-xs font-medium text-[var(--ink)]">
+                        结论与引用（可点开）
+                      </h3>
                       <ul className="mt-2 flex flex-col gap-1.5 text-sm">
                         {[...report.conclusions, ...report.keyFacts].map((claim, index) => (
                           <li
@@ -1165,7 +1192,8 @@ export function ResearchPage() {
                   </p>
                   {proposal.duplicates.length > 0 ? (
                     <p className="mt-2 rounded-md bg-amber-500/10 p-2 text-xs text-amber-900 dark:text-amber-200">
-                      已有 {proposal.duplicates.length} 篇同标题笔记（默认不覆盖）：可改用「追加」或改名新建。
+                      已有 {proposal.duplicates.length}{' '}
+                      篇同标题笔记（默认不覆盖）：可改用「追加」或改名新建。
                     </p>
                   ) : null}
                   <Button
@@ -1378,6 +1406,5 @@ export function ResearchPage() {
         </div>
       ) : null}
     </div>
-
   );
 }

@@ -172,6 +172,71 @@ fn request(topic: &str) -> ResearchRequest {
 }
 
 #[test]
+fn plan_explains_local_network_and_model_switches_instead_of_hardcoding_local_only() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+
+    let local = fixture
+        .research()
+        .start(request("Rust 异步调度"))
+        .expect("本地研究立项");
+    assert!(local
+        .plan
+        .as_ref()
+        .expect("计划")
+        .notes
+        .iter()
+        .any(|note| note.contains("当前联网档位为「仅本地」")));
+
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            search_endpoint: Some(
+                "https://search.example.test/?q={query}&limit={limit}".to_string(),
+            ),
+            ..Default::default()
+        })
+        .expect("启用联网检索");
+    let online_search = fixture
+        .research()
+        .start(request("Rust 异步调度"))
+        .expect("联网研究立项");
+    let notes = &online_search.plan.as_ref().expect("计划").notes;
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("联网检索已启用（检索源 search.example.test）")),
+        "应显示真实联网状态：{notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .all(|note| !note.contains("本次只用本地知识库材料")),
+        "联网已启用时不能再写死本地口径：{notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("来源评分：当前使用规则档")),
+        "未打开在线打分时要明确说明规则档：{notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("报告汇总：当前使用模板实现")),
+        "未打开在线汇总时要明确说明模板档：{notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .all(|note| !note.contains("等模型接入")),
+        "模型已可选，不应保留“等模型接入”的旧文案：{notes:?}"
+    );
+}
+
+#[test]
 fn research_needs_the_ai_gate_and_a_specific_topic() {
     let fixture = Fixture::new();
     seed(&fixture);

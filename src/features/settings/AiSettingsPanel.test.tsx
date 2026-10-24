@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -101,6 +101,32 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     expect(screen.getByTestId('ai-fetch-body')).not.toBeChecked();
     expect(screen.getByTestId('ai-allowlist')).toHaveValue('');
     expect(screen.getByTestId('ai-budget-pages')).toHaveValue(12);
+  });
+
+  it('顶部概览直接显示真实生效链路和仍需确认的操作', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      network: 'allowNetwork',
+      networkConfirmedAt: '2026-10-16T22:12:12+08:00',
+      searchEndpoint: 'https://search.example.test/?q={query}&limit={limit}',
+      remoteModelBaseUrl: 'https://api.deepseek.com',
+      remoteModelName: 'deepseek-flash',
+      remoteModelKeySet: true,
+      remoteModelCompose: true,
+      remoteModelScore: false,
+      remoteModelAuthorizedAt: '2026-10-23T00:47:00+08:00',
+    });
+    render(<AiSettingsPanel />);
+
+    const overview = await screen.findByTestId('ai-status-overview');
+    expect(within(overview).getByText('联网源已配置')).toBeInTheDocument();
+    expect(within(overview).getByText('规则档')).toBeInTheDocument();
+    expect(within(overview).getByText('在线模型 deepseek-flash')).toBeInTheDocument();
+    expect(overview).toHaveTextContent('如需模型判断来源，打开“用在线模型打分”');
+    expect(screen.getByTestId('ai-tab-models')).toHaveTextContent('模型连接');
+    await userEvent.click(within(overview).getByRole('button', { name: /来源打分/ }));
+    expect(screen.getByTestId('ai-tab-models')).toHaveAttribute('aria-selected', 'true');
   });
 
   it('打开总开关会调用后端策略更新', async () => {

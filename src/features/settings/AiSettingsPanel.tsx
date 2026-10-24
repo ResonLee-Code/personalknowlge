@@ -15,6 +15,7 @@ import { Input, Label } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { reportFailure } from '@/lib/actionFeedback';
 import { errorMessage, formatDateTime } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { aiService } from '@/services/aiService';
 import type { AiAuditEntry, AiDiagnosis, AiPolicy, LocalModelPreset } from '@/types';
 import type { VectorIndexPreview, VectorIndexStatus } from '@/types';
@@ -28,6 +29,8 @@ const TIER_LABEL: Record<AiDiagnosis['tier'], string> = {
   local: '本地模型',
   template: '模板实现',
 };
+
+type AiSettingsTab = 'overview' | 'models' | 'retrieval' | 'advanced';
 
 /**
  * 「设置 → AI」区块（V1.2.1 阶段 D1 / AI_ARCHITECTURE_PLAN §6、§9.7）。
@@ -74,6 +77,7 @@ export function AiSettingsPanel() {
   const [probing, setProbing] = useState(false);
   const [proxyDraft, setProxyDraft] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<AiSettingsTab>('overview');
 
   /** 读取策略；失败要**说清楚**（原来会一直显示「正在读取…」，看起来像卡住） */
   const load = useCallback(async () => {
@@ -239,728 +243,1012 @@ export function AiSettingsPanel() {
     );
   }
 
+  const remoteConfigured =
+    policy.remoteModelKeySet &&
+    Boolean(policy.remoteModelBaseUrl?.trim()) &&
+    Boolean(policy.remoteModelName?.trim());
+  const remoteAuthorized = remoteConfigured && Boolean(policy.remoteModelAuthorizedAt);
+  const localConfigured =
+    Boolean(policy.localModelEndpoint?.trim()) && Boolean(policy.localModelName?.trim());
+  const systemOneConfigured =
+    policy.decisionProvider === 'system_one' &&
+    Boolean(policy.decisionBaseUrl?.trim()) &&
+    Boolean(policy.decisionModel?.trim()) &&
+    policy.decisionKeySet &&
+    Boolean(policy.decisionAuthorizedAt);
+  const systemOneNeedsAttention = policy.decisionProvider === 'system_one' && !systemOneConfigured;
+  const scoringTier = systemOneConfigured
+    ? 'System One'
+    : policy.remoteModelScore && remoteAuthorized
+      ? `在线模型 ${policy.remoteModelName}`
+      : policy.localModelScore && localConfigured
+        ? `本地模型 ${policy.localModelName}`
+        : '规则档';
+  const composeTier =
+    policy.remoteModelCompose && remoteAuthorized
+      ? `在线模型 ${policy.remoteModelName}`
+      : policy.localModelCompose && localConfigured
+        ? `本地模型 ${policy.localModelName}`
+        : '模板档';
+  const networkStatus =
+    policy.network === 'localOnly'
+      ? '仅本地'
+      : policy.searchEndpoint
+        ? '联网源已配置'
+        : '待配置检索源';
+  const openTab = (tab: AiSettingsTab, targetId?: string) => {
+    setActiveTab(tab);
+    if (!targetId) return;
+    window.requestAnimationFrame(() => {
+      const target = document.getElementById(targetId);
+      target?.scrollIntoView?.({ block: 'center' });
+      target?.focus({ preventScroll: true });
+    });
+  };
+  const nextSteps: Array<{ text: string; tab: AiSettingsTab; targetId?: string }> = [];
+  if (!policy.enabled) nextSteps.push({ text: '打开 AI 能力总开关', tab: 'overview' });
+  if ((policy.remoteModelCompose || policy.remoteModelScore) && !remoteConfigured) {
+    nextSteps.push({
+      text: '补齐在线模型地址、模型名与 API Key',
+      tab: 'models',
+      targetId: 'ai-remote-endpoint',
+    });
+  } else if (
+    remoteConfigured &&
+    !policy.remoteModelAuthorizedAt &&
+    (policy.remoteModelCompose || policy.remoteModelScore)
+  ) {
+    nextSteps.push({ text: '确认在线模型外发授权', tab: 'models' });
+  }
+  if (remoteAuthorized && !policy.remoteModelScore) {
+    nextSteps.push({
+      text: '如需模型判断来源，打开“用在线模型打分”',
+      tab: 'models',
+      targetId: 'ai-remote-score',
+    });
+  }
+  if (policy.network === 'allowNetwork' && !policy.searchEndpoint) {
+    nextSteps.push({
+      text: '如需外部网页来源，配置检索源地址',
+      tab: 'retrieval',
+      targetId: 'ai-search-endpoint',
+    });
+  }
+  if (systemOneNeedsAttention) {
+    nextSteps.push({
+      text: '完成 System One 配置与授权，或切回规则档',
+      tab: 'advanced',
+      targetId: 'ai-decision-provider',
+    });
+  }
+  if (policy.vectorEnabled && (!policy.remoteEmbeddingModel || !policy.vectorAuthorizedAt)) {
+    nextSteps.push({
+      text: '补齐嵌入模型并授权向量检索',
+      tab: 'retrieval',
+      targetId: 'ai-embedding-model',
+    });
+  }
+
   return (
     <div className="divide-y divide-[var(--border-subtle)]">
-      <Row label="AI 能力总开关" hint="默认关闭；关闭时所有 AI 命令都会被后端拒绝">
-        <Switch
-          data-testid="ai-enabled"
-          checked={policy.enabled}
-          onCheckedChange={(checked) =>
-            void apply(
-              { enabled: checked },
-              checked ? '已开启 AI 能力（仍不会自动联网）' : '已关闭 AI 能力',
-            )
-          }
-        />
-      </Row>
-
-      <Row label="模型自检" hint="一键看「写报告」现在用哪一档，以及为什么（只读，不联系在线端点）">
-        <Button
-          size="sm"
-          variant="secondary"
-          data-testid="ai-diagnose"
-          disabled={diagnosing}
-          onClick={() => void runDiagnose()}
-        >
-          {diagnosing ? '检测中…' : '开始自检'}
-        </Button>
-      </Row>
-      {diagnosis ? (
-        <div className="space-y-1 px-3 pb-2 text-xs" data-testid="ai-diagnosis">
-          <p className="text-[var(--ink)]">
-            当前档位：
-            <span data-testid="ai-diagnosis-tier" className="font-medium">
-              {TIER_LABEL[diagnosis.tier]}
-            </span>
-            <span className="text-[var(--ink-subtle)]">（{diagnosis.providerId}）</span>
-          </p>
-          <p data-testid="ai-diagnosis-reason" className="text-[var(--ink-subtle)]">
-            {diagnosis.reason}
-          </p>
-          <ul className="space-y-0.5">
-            {diagnosis.checks.map((check) => (
-              <li key={check.tier} className="text-[var(--ink-subtle)]">
-                {check.available ? '✓' : '—'} {check.label}：{check.detail}
-              </li>
-            ))}
-          </ul>
-          {diagnosis.note ? <p className="text-[var(--ink-subtle)]">{diagnosis.note}</p> : null}
+      <section
+        data-testid="ai-status-overview"
+        className="space-y-3 bg-[var(--surface-muted)]/45 px-3 py-3"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-[13px] font-medium text-[var(--ink)]">当前生效链路</h3>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--ink-subtle)]">
+              “已配置”不等于“会调用”；总开关、配置、授权和用途开关分别生效。
+            </p>
+          </div>
+          <StatusPill
+            tone={policy.enabled ? 'ok' : 'muted'}
+            label={policy.enabled ? 'AI 已开启' : 'AI 已关闭'}
+          />
         </div>
-      ) : null}
-
-      <Row label="联网检索" hint="仅本地：只用本地模型与本地检索；允许联网后仍需每次确认">
-        <select
-          aria-label="联网档位"
-          data-testid="ai-network"
-          value={policy.network}
-          onChange={(event) => {
-            const next = event.target.value as AiPolicy['network'];
-            if (next === 'allowNetwork') {
-              setConfirmOpen(true);
-              return;
+        <div className="grid gap-2 sm:grid-cols-2">
+          <StatusCard
+            label="联网检索"
+            value={networkStatus}
+            tone={policy.network === 'allowNetwork' && policy.searchEndpoint ? 'ok' : 'muted'}
+            onClick={() => openTab('retrieval', 'ai-search-endpoint')}
+          />
+          <StatusCard
+            label="来源打分"
+            value={scoringTier}
+            tone={scoringTier === '规则档' ? 'muted' : 'ok'}
+            onClick={() => openTab('models', 'ai-remote-score')}
+          />
+          <StatusCard
+            label="报告汇总"
+            value={composeTier}
+            tone={composeTier === '模板档' ? 'muted' : 'ok'}
+            onClick={() => openTab('models', 'ai-remote-compose')}
+          />
+          <StatusCard
+            label="向量检索"
+            value={
+              policy.vectorEnabled ? (policy.vectorAuthorizedAt ? '已启用' : '待授权') : '关闭'
             }
-            void apply({ network: 'localOnly' }, '已切回「仅本地」');
-          }}
-          className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs"
-        >
-          <option value="localOnly">仅本地</option>
-          <option value="allowNetwork">允许联网检索</option>
-        </select>
-      </Row>
-
-      <Row label="抓取网页正文" hint="默认关闭（可只用搜索摘要）；开启后按域名策略抓公开页面">
-        <Switch
-          data-testid="ai-fetch-body"
-          checked={policy.allowFetchBody}
-          onCheckedChange={(checked) => void apply({ allowFetchBody: checked })}
-        />
-      </Row>
-
-      <div className="space-y-1.5 px-3 py-2">
-        <div className="space-y-1">
-          <Label htmlFor="ai-search-endpoint">检索源地址（联网检索用，必须含 {'{query}'}）</Label>
-          <Input
-            id="ai-search-endpoint"
-            data-testid="ai-search-endpoint"
-            defaultValue={policy.searchEndpoint ?? ''}
-            placeholder="https://your-searx.example/search?q={query}&format=json&count={limit}"
-            onBlur={(event) => void apply({ searchEndpoint: event.target.value }, '已保存检索源')}
+            tone={policy.vectorEnabled && policy.vectorAuthorizedAt ? 'ok' : 'muted'}
+            onClick={() => openTab('retrieval', 'ai-embedding-model')}
           />
-          <p className="text-[11px] text-[var(--ink-subtle)]">
-            应用不预置任何第三方检索服务：这里填你自己可用的检索接口（返回 JSON， 支持 SearxNG 的{' '}
-            {'{ "results": [ … ] }'} 形状）。留空表示不联网检索； 地址不合法或缺少 {'{query}'}{' '}
-            会被清空。
+        </div>
+        {nextSteps.length > 0 ? (
+          <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-900 dark:text-amber-200">
+            <p className="font-medium">还需要你确认</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {nextSteps.map((step) => (
+                <li key={step.text}>
+                  {step.text}
+                  <button
+                    type="button"
+                    aria-label={`处理：${step.text}`}
+                    className="ml-1 underline underline-offset-2"
+                    onClick={() => openTab(step.tab, step.targetId)}
+                  >
+                    去处理
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-[11px] text-emerald-700 dark:text-emerald-300">
+            当前已开启的能力都满足生效条件。
           </p>
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ai-allowlist">域名白名单（一行一个，留空 = 不预置白名单）</Label>
-          <textarea
-            id="ai-allowlist"
-            data-testid="ai-allowlist"
-            value={allowlistDraft}
-            rows={2}
-            placeholder={'docs.example.com\nblog.example.com'}
-            onChange={(event) => setAllowlistDraft(event.target.value)}
-            onBlur={() =>
-              void apply({ domainAllowlist: parseLines(allowlistDraft) }, '已保存白名单')
-            }
-            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--ink)]"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ai-denylist">域名黑名单（强制丢弃，优先级高于白名单）</Label>
-          <textarea
-            id="ai-denylist"
-            data-testid="ai-denylist"
-            value={denylistDraft}
-            rows={2}
-            placeholder={'ads.example.com'}
-            onChange={(event) => setDenylistDraft(event.target.value)}
-            onBlur={() => void apply({ domainDenylist: parseLines(denylistDraft) }, '已保存黑名单')}
-            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--ink)]"
-          />
-        </div>
+        )}
+      </section>
+
+      <div className="sticky top-0 z-20 border-y border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2 shadow-sm">
+        <nav role="tablist" aria-label="AI 设置分区" className="flex flex-wrap gap-1.5">
+          {[
+            ['overview', '概览'],
+            ['models', '模型连接'],
+            ['retrieval', '联网与增强'],
+            ['advanced', '决策与高级'],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              id={`ai-tab-${id}`}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === id}
+              data-testid={`ai-tab-${id}`}
+              onClick={() => setActiveTab(id as AiSettingsTab)}
+              className={cn(
+                'rounded-full border px-2.5 py-1 text-[11px]',
+                activeTab === id
+                  ? 'border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--surface)] text-[var(--ink-muted)] hover:text-[var(--ink)]',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
       </div>
 
-      {/* 向量检索（D3/N7）：可选增强，永远只是"多一路召回" —— 不可用也不影响检索 */}
-      <div className="space-y-1.5 px-3 py-2">
-        <div className="flex items-center justify-between">
-          <Label>向量检索（可选增强，默认关闭）</Label>
-          <Switch
-            data-testid="ai-vector-enabled"
-            checked={policy.vectorEnabled}
-            onCheckedChange={(checked) => {
-              if (checked && !policy.vectorAuthorizedAt) {
-                // 开启=查询词会发给嵌入端点：先让它填模型名再谈授权
-                void apply({ vectorEnabled: true }, '已开启向量检索（还需填嵌入模型名并确认一次）');
-                return;
-              }
-              void apply({ vectorEnabled: checked });
-            }}
-          />
-        </div>
-        <Input
-          aria-label="嵌入模型名"
-          data-testid="ai-embedding-model"
-          value={embeddingDraft}
-          onChange={(event) => setEmbeddingDraft(event.target.value)}
-          onBlur={() => {
-            if (embeddingDraft.trim() !== (policy.remoteEmbeddingModel ?? '')) {
-              void apply({ remoteEmbeddingModel: embeddingDraft }, '已保存嵌入模型名');
-            }
-          }}
-          placeholder="例如 text-embedding-3-small（嵌入模型名，与聊天模型不同）"
+      <div
+        role="tabpanel"
+        aria-labelledby="ai-tab-overview"
+        data-testid="ai-tabpanel-overview"
+        className={activeTab === 'overview' ? 'contents' : 'hidden'}
+      >
+        <SectionHeading
+          id="ai-core"
+          title="核心能力"
+          description="先打开总开关，再按需要启用联网、模型或决策能力。"
         />
-        <p data-testid="ai-vector-status" className="text-[11px] text-[var(--ink-subtle)]">
-          {vectorStatus?.note ?? '正在读取向量索引状态…'}
-          {policy.vectorAuthorizedAt
-            ? `；已授权（${formatDateTime(policy.vectorAuthorizedAt)}）`
-            : '；尚未授权（查询词会发给嵌入端点，需确认一次）'}
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            data-testid="ai-vector-authorize"
-            disabled={!policy.vectorEnabled || policy.vectorAuthorizedAt !== null}
-            onClick={() =>
+        <Row label="AI 能力总开关" hint="默认关闭；关闭时所有 AI 命令都会被后端拒绝">
+          <Switch
+            data-testid="ai-enabled"
+            checked={policy.enabled}
+            onCheckedChange={(checked) =>
               void apply(
-                { confirmVector: true },
-                '已授权：查询词会发给嵌入端点（换地址/换模型后需重新确认）',
+                { enabled: checked },
+                checked ? '已开启 AI 能力（仍不会自动联网）' : '已关闭 AI 能力',
               )
             }
-          >
-            授权向量检索
-          </Button>
+          />
+        </Row>
+
+        <Row
+          label="模型自检"
+          hint="一键看「写报告」现在用哪一档，以及为什么（只读，不联系在线端点）"
+        >
           <Button
             size="sm"
             variant="secondary"
-            data-testid="ai-vector-build"
-            disabled={vectorBusy || !policy.vectorEnabled}
-            onClick={() => void startVectorBuild()}
+            data-testid="ai-diagnose"
+            disabled={diagnosing}
+            onClick={() => void runDiagnose()}
           >
-            {vectorBusy ? '处理中…' : '构建向量索引'}
+            {diagnosing ? '检测中…' : '开始自检'}
           </Button>
-          {vectorProgress ? (
-            <span data-testid="ai-vector-progress" className="text-[11px] text-[var(--ink-subtle)]">
-              已嵌 {vectorProgress.done} / {vectorProgress.total}
-            </span>
-          ) : null}
-        </div>
-        <p className="text-[11px] text-[var(--ink-subtle)]">
-          只能增强召回，「不能」决定检索是否可用：向量档不可用时自动只用关键词检索。
-          构建是增量且需确认的一次性动作（只有内容变过的片段才会重发）。
-        </p>
-      </div>
-
-      <div className="space-y-1.5 px-3 py-2">
-        <Label>本地模型（Ollama HTTP，可选；默认关闭）</Label>
-        <div className="space-y-1">
-          <Input
-            aria-label="本地模型地址"
-            data-testid="ai-local-endpoint"
-            defaultValue={policy.localModelEndpoint ?? ''}
-            placeholder="http://127.0.0.1:11434"
-            onBlur={(event) =>
-              void apply({ localModelEndpoint: event.target.value }, '已保存本地模型地址')
-            }
-          />
-          <Input
-            aria-label="本地模型名称"
-            data-testid="ai-local-model"
-            value={localNameDraft}
-            onChange={(event) => setLocalNameDraft(event.target.value)}
-            onBlur={() => {
-              if (localNameDraft.trim() !== (policy.localModelName ?? '')) {
-                void apply({ localModelName: localNameDraft }, '已保存模型名');
-              }
-            }}
-            placeholder="qwen2.5:7b（模型名，需先 ollama pull）"
-          />
-        </div>
-        {presets.length > 0 ? (
-          <div className="space-y-1" data-testid="ai-local-presets">
-            <p className="text-[11px] text-[var(--ink-subtle)]">
-              不确定选哪个？用预设一键填入。体积为「近似」下载体积，以 Ollama 实际下载为准：
+        </Row>
+        {diagnosis ? (
+          <div className="space-y-1 px-3 pb-2 text-xs" data-testid="ai-diagnosis">
+            <p className="text-[var(--ink)]">
+              当前档位：
+              <span data-testid="ai-diagnosis-tier" className="font-medium">
+                {TIER_LABEL[diagnosis.tier]}
+              </span>
+              <span className="text-[var(--ink-subtle)]">（{diagnosis.providerId}）</span>
             </p>
-            {presets.map((preset) => (
-              <div key={preset.name} className="flex items-start justify-between gap-2">
-                <div className="space-y-0.5">
-                  <p className="text-[11px] text-[var(--ink)]">
-                    {preset.label} · {preset.approxSize}
-                  </p>
-                  <p className="text-[11px] text-[var(--ink-subtle)]">
-                    {preset.memoryHint}；{preset.note}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  data-testid={`ai-local-preset-${preset.name}`}
-                  disabled={busy || policy.localModelName === preset.name}
-                  onClick={() => {
-                    setLocalNameDraft(preset.name);
-                    void apply({ localModelName: preset.name }, `已填入 ${preset.name}`);
-                  }}
-                >
-                  {policy.localModelName === preset.name ? '已选用' : `填入 ${preset.name}`}
-                </Button>
-              </div>
-            ))}
+            <p data-testid="ai-diagnosis-reason" className="text-[var(--ink-subtle)]">
+              {diagnosis.reason}
+            </p>
+            <ul className="space-y-0.5">
+              {diagnosis.checks.map((check) => (
+                <li key={check.tier} className="text-[var(--ink-subtle)]">
+                  {check.available ? '✓' : '—'} {check.label}：{check.detail}
+                </li>
+              ))}
+            </ul>
+            {diagnosis.note ? <p className="text-[var(--ink-subtle)]">{diagnosis.note}</p> : null}
           </div>
         ) : null}
-        <Row label="用本地模型写报告" hint="只影响「模型推测」段的文字；失败自动退回模板实现">
-          <Switch
-            data-testid="ai-local-compose"
-            checked={policy.localModelCompose}
-            onCheckedChange={(checked) => void apply({ localModelCompose: checked })}
-          />
-        </Row>
-        <Row
-          label="用本地模型打分"
-          hint="与规则档 A/B 用；模型分未校准，级别折算仍占一半（不是 Jev）"
-        >
-          <Switch
-            data-testid="ai-local-score"
-            checked={policy.localModelScore}
-            onCheckedChange={(checked) => void apply({ localModelScore: checked })}
-          />
-        </Row>
-        <p className="text-[11px] text-[var(--ink-subtle)]">
-          只连本机地址（localhost / 127.0.0.1 / ::1）；两项开关都关闭时一个请求都不会发；
-          浏览器预览模式不会真的调用本地模型。装不上模型时用下面的「在线模型」。
-        </p>
       </div>
 
-      {/* 在线模型：给「跑不动本地模型」的机器留的一档（本地软件、跨平台部署是常态） */}
-      <div className="space-y-1.5 px-3 py-2">
-        <div className="flex items-center justify-between">
-          <Label>在线模型（OpenAI 兼容端点，可选；默认关闭）</Label>
-          <span
-            data-testid="ai-remote-key-badge"
-            className={
-              policy.remoteModelKeySet
-                ? 'rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-600'
-                : 'rounded-full bg-[var(--surface-sunken)] px-2 py-0.5 text-[11px] text-[var(--ink-subtle)]'
-            }
+      <div
+        role="tabpanel"
+        aria-labelledby="ai-tab-retrieval"
+        data-testid="ai-tabpanel-retrieval"
+        className={activeTab === 'retrieval' ? 'contents' : 'hidden'}
+      >
+        <SectionHeading
+          id="ai-network-section"
+          title="联网检索与来源"
+          description="联网检索、在线模型、向量索引是三个独立权限；任一开启都不代表另外两个开启。"
+        />
+        <Row label="联网检索" hint="允许联网后，每次研究收集仍需单次确认">
+          <select
+            aria-label="联网档位"
+            data-testid="ai-network"
+            value={policy.network}
+            onChange={(event) => {
+              const next = event.target.value as AiPolicy['network'];
+              if (next === 'allowNetwork') {
+                setConfirmOpen(true);
+                return;
+              }
+              void apply({ network: 'localOnly' }, '已切回「仅本地」');
+            }}
+            className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs"
           >
-            {policy.remoteModelKeySet ? '已配置 Key' : '未配置 Key'}
-          </span>
-        </div>
-        <div className="space-y-1">
-          <Input
-            aria-label="在线模型地址"
-            data-testid="ai-remote-endpoint"
-            defaultValue={policy.remoteModelBaseUrl ?? ''}
-            placeholder="https://api.example.com/v1（必须是 https 的公网域名）"
-            onBlur={(event) =>
-              void apply({ remoteModelBaseUrl: event.target.value }, '已保存在线模型地址')
-            }
+            <option value="localOnly">仅本地</option>
+            <option value="allowNetwork">允许联网检索</option>
+          </select>
+        </Row>
+
+        <Row label="抓取网页正文" hint="默认关闭（可只用搜索摘要）；开启后按域名策略抓公开页面">
+          <Switch
+            data-testid="ai-fetch-body"
+            checked={policy.allowFetchBody}
+            onCheckedChange={(checked) => void apply({ allowFetchBody: checked })}
           />
-          <Input
-            aria-label="在线模型名称"
-            data-testid="ai-remote-model"
-            defaultValue={policy.remoteModelName ?? ''}
-            placeholder="deepseek-chat（服务商提供的模型名）"
-            onBlur={(event) => void apply({ remoteModelName: event.target.value }, '已保存模型名')}
-          />
-          <div className="flex items-center gap-2">
+        </Row>
+
+        <SectionHeading
+          id="ai-search-policy"
+          title="检索源与域名策略"
+          description="应用不预置第三方搜索服务；白名单为空表示按内置来源分级规则处理。"
+        />
+        <div className="space-y-1.5 px-3 py-2">
+          <div className="space-y-1">
+            <Label htmlFor="ai-search-endpoint">检索源地址（联网检索用，必须含 {'{query}'}）</Label>
             <Input
-              aria-label="在线模型 API Key"
-              data-testid="ai-remote-key"
-              type="password"
-              autoComplete="off"
-              value={remoteKeyDraft}
-              placeholder="API Key（只写不读，保存后无法再查看）"
-              onChange={(event) => setRemoteKeyDraft(event.target.value)}
+              id="ai-search-endpoint"
+              data-testid="ai-search-endpoint"
+              defaultValue={policy.searchEndpoint ?? ''}
+              placeholder="https://your-searx.example/search?q={query}&format=json&count={limit}"
+              onBlur={(event) => void apply({ searchEndpoint: event.target.value }, '已保存检索源')}
             />
+            <p className="text-[11px] text-[var(--ink-subtle)]">
+              应用不预置任何第三方检索服务：这里填你自己可用的检索接口（返回 JSON， 支持 SearxNG 的{' '}
+              {'{ "results": [ … ] }'} 形状）。留空表示不联网检索； 地址不合法或缺少 {'{query}'}{' '}
+              会被清空。
+            </p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="ai-allowlist">域名白名单（一行一个，留空 = 不预置白名单）</Label>
+            <textarea
+              id="ai-allowlist"
+              data-testid="ai-allowlist"
+              value={allowlistDraft}
+              rows={2}
+              placeholder={'docs.example.com\nblog.example.com'}
+              onChange={(event) => setAllowlistDraft(event.target.value)}
+              onBlur={() =>
+                void apply({ domainAllowlist: parseLines(allowlistDraft) }, '已保存白名单')
+              }
+              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--ink)]"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="ai-denylist">域名黑名单（强制丢弃，优先级高于白名单）</Label>
+            <textarea
+              id="ai-denylist"
+              data-testid="ai-denylist"
+              value={denylistDraft}
+              rows={2}
+              placeholder={'ads.example.com'}
+              onChange={(event) => setDenylistDraft(event.target.value)}
+              onBlur={() =>
+                void apply({ domainDenylist: parseLines(denylistDraft) }, '已保存黑名单')
+              }
+              className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--ink)]"
+            />
+          </div>
+        </div>
+
+        <SectionHeading
+          id="ai-vector"
+          title="向量检索"
+          description="可选的召回增强；关闭或不可用时自动回退关键词检索。"
+        />
+        {/* 向量检索（D3/N7）：可选增强，永远只是"多一路召回" —— 不可用也不影响检索 */}
+        <div className="space-y-1.5 px-3 py-2">
+          <div className="flex items-center justify-between">
+            <Label>向量检索（可选增强，默认关闭）</Label>
+            <Switch
+              data-testid="ai-vector-enabled"
+              checked={policy.vectorEnabled}
+              onCheckedChange={(checked) => {
+                if (checked && !policy.vectorAuthorizedAt) {
+                  // 开启=查询词会发给嵌入端点：先让它填模型名再谈授权
+                  void apply(
+                    { vectorEnabled: true },
+                    '已开启向量检索（还需填嵌入模型名并确认一次）',
+                  );
+                  return;
+                }
+                void apply({ vectorEnabled: checked });
+              }}
+            />
+          </div>
+          <Input
+            id="ai-embedding-model"
+            aria-label="嵌入模型名"
+            data-testid="ai-embedding-model"
+            value={embeddingDraft}
+            onChange={(event) => setEmbeddingDraft(event.target.value)}
+            onBlur={() => {
+              if (embeddingDraft.trim() !== (policy.remoteEmbeddingModel ?? '')) {
+                void apply({ remoteEmbeddingModel: embeddingDraft }, '已保存嵌入模型名');
+              }
+            }}
+            placeholder="例如 text-embedding-3-small（嵌入模型名，与聊天模型不同）"
+          />
+          <p data-testid="ai-vector-status" className="text-[11px] text-[var(--ink-subtle)]">
+            {vectorStatus?.note ?? '正在读取向量索引状态…'}
+            {policy.vectorAuthorizedAt
+              ? `；已授权（${formatDateTime(policy.vectorAuthorizedAt)}）`
+              : '；尚未授权（查询词会发给嵌入端点，需确认一次）'}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               variant="secondary"
-              data-testid="ai-remote-key-save"
-              disabled={busy || remoteKeyDraft.trim().length === 0}
-              onClick={() => {
-                const key = remoteKeyDraft;
+              data-testid="ai-vector-authorize"
+              disabled={!policy.vectorEnabled || policy.vectorAuthorizedAt !== null}
+              onClick={() =>
                 void apply(
-                  { remoteModelApiKey: key },
-                  '已保存 API Key（存储在本机应用数据目录）',
-                ).then((saved) => {
-                  // 只写不读：成功落盘后才清空，失败时保留用户唯一副本。
-                  if (saved) setRemoteKeyDraft('');
-                });
-              }}
+                  { confirmVector: true },
+                  '已授权：查询词会发给嵌入端点（换地址/换模型后需重新确认）',
+                )
+              }
             >
-              保存
+              授权向量检索
             </Button>
             <Button
               size="sm"
-              variant="ghost"
-              data-testid="ai-remote-key-clear"
-              disabled={busy || !policy.remoteModelKeySet}
-              onClick={() => {
-                setRemoteKeyDraft('');
-                void apply({ remoteModelApiKey: '' }, '已清除 API Key');
-              }}
+              variant="secondary"
+              data-testid="ai-vector-build"
+              disabled={vectorBusy || !policy.vectorEnabled}
+              onClick={() => void startVectorBuild()}
             >
-              清除
+              {vectorBusy ? '处理中…' : '构建向量索引'}
             </Button>
+            {vectorProgress ? (
+              <span
+                data-testid="ai-vector-progress"
+                className="text-[11px] text-[var(--ink-subtle)]"
+              >
+                已嵌 {vectorProgress.done} / {vectorProgress.total}
+              </span>
+            ) : null}
           </div>
+          <p className="text-[11px] text-[var(--ink-subtle)]">
+            只能增强召回，「不能」决定检索是否可用：向量档不可用时自动只用关键词检索。
+            构建是增量且需确认的一次性动作（只有内容变过的片段才会重发）。
+          </p>
         </div>
-        <Row label="用在线模型写报告" hint="材料片段会离开本机；失败自动降级到本地模型或模板实现">
-          <Switch
-            data-testid="ai-remote-compose"
-            checked={policy.remoteModelCompose}
-            onCheckedChange={(checked) => {
-              if (checked && !policy.remoteModelAuthorizedAt) {
-                setPendingRemoteSwitch('compose');
-                setRemoteConfirmOpen(true);
-                return;
-              }
-              void apply({ remoteModelCompose: checked });
-            }}
-          />
-        </Row>
-        <Row label="用在线模型打分" hint="与规则档 A/B 用；同样只在授权后外发">
-          <Switch
-            data-testid="ai-remote-score"
-            checked={policy.remoteModelScore}
-            onCheckedChange={(checked) => {
-              if (checked && !policy.remoteModelAuthorizedAt) {
-                setPendingRemoteSwitch('score');
-                setRemoteConfirmOpen(true);
-                return;
-              }
-              void apply({ remoteModelScore: checked });
-            }}
-          />
-        </Row>
-        <Row
-          label="每次外发前确认"
-          hint="开启后：每一次把内容交给在线模型都要单独确认（未确认时一个字节都不发）"
-        >
-          <Switch
-            data-testid="ai-confirm-each-outbound"
-            checked={policy.confirmEachOutbound}
-            onCheckedChange={(checked) =>
-              void apply(
-                { confirmEachOutbound: checked },
-                checked ? '已开启逐次外发确认' : '已关闭逐次外发确认',
-              )
-            }
-          />
-        </Row>
-        <p data-testid="ai-remote-authorized" className="text-[11px] text-[var(--ink-subtle)]">
-          {policy.remoteModelAuthorizedAt
-            ? `已授权外发（${formatDateTime(policy.remoteModelAuthorizedAt)}）；换地址或模型名后需要重新确认。`
-            : '尚未授权：这一档不会向任何地址发送内容。'}
-        </p>
-        <p className="text-[11px] text-[var(--ink-subtle)]">
-          给「本机跑不动本地模型」的机器留的一档：地址只接受 https 的公网域名（本机可写
-          localhost），裸 IP 与非加密地址会被拒绝。Key 存在本机应用数据目录（不进工作区、
-          不进备份）；本节的外发由独立授权控制，与上面的「联网检索」档位互不影响。
-        </p>
       </div>
 
-      {/* 决策模型（D4）：规则档（默认，离线）/ System One（Jev 或 Perplexity Decisions，同协议） */}
-      <div className="space-y-1.5 px-3 py-2">
-        <Label>决策模型（打分 / 判断用哪一档）</Label>
-        <select
-          aria-label="决策模型档位"
-          data-testid="ai-decision-provider"
-          value={policy.decisionProvider ?? 'rule'}
-          onChange={(event) => {
-            const next = event.target.value as 'rule' | 'system_one';
-            void apply(
-              { decisionProvider: next },
-              next === 'rule'
-                ? '已切回规则档'
-                : '已选择 System One（还需填端点、模型与 Key 并授权）',
-            );
-          }}
-          className="h-8 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs"
-        >
-          <option value="rule">规则档（默认，离线、不联网）</option>
-          <option value="system_one">System One（TypeSafe Jev / Perplexity Decisions）</option>
-        </select>
-        {policy.decisionProvider === 'system_one' ? (
-          <>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                data-testid="ai-decision-preset-perplexity"
-                onClick={() =>
-                  void apply(
-                    {
-                      decisionBaseUrl: 'https://api.perplexity.ai',
-                      decisionModel: 'pplx-decider-v1.1-27b',
-                    },
-                    '已填入 Perplexity 预设（还需填 Key 并授权）',
-                  )
+      <div
+        role="tabpanel"
+        aria-labelledby="ai-tab-models"
+        data-testid="ai-tabpanel-models"
+        className={activeTab === 'models' ? 'contents' : 'hidden'}
+      >
+        <SectionHeading
+          id="ai-local-section"
+          title="本地模型"
+          description="只连接本机 Ollama；打分与写报告是两个独立用途。"
+        />
+        <div className="space-y-1.5 px-3 py-2">
+          <div className="space-y-1">
+            <Label htmlFor="ai-local-endpoint">Ollama 地址</Label>
+            <Input
+              id="ai-local-endpoint"
+              aria-label="本地模型地址"
+              data-testid="ai-local-endpoint"
+              defaultValue={policy.localModelEndpoint ?? ''}
+              placeholder="http://127.0.0.1:11434"
+              onBlur={(event) =>
+                void apply({ localModelEndpoint: event.target.value }, '已保存本地模型地址')
+              }
+            />
+            <Label htmlFor="ai-local-model-name">模型名</Label>
+            <Input
+              id="ai-local-model-name"
+              aria-label="本地模型名称"
+              data-testid="ai-local-model"
+              value={localNameDraft}
+              onChange={(event) => setLocalNameDraft(event.target.value)}
+              onBlur={() => {
+                if (localNameDraft.trim() !== (policy.localModelName ?? '')) {
+                  void apply({ localModelName: localNameDraft }, '已保存模型名');
                 }
-              >
-                用 Perplexity 预设
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                data-testid="ai-decision-preset-jev"
-                onClick={() =>
-                  void apply(
-                    { decisionBaseUrl: 'https://api.typesafe.ai', decisionModel: 'jev-latest' },
-                    '已填入 Jev 预设（还需填 Key 并授权）',
-                  )
-                }
-              >
-                用 Jev 预设
-              </Button>
+              }}
+              placeholder="qwen2.5:7b（模型名，需先 ollama pull）"
+            />
+          </div>
+          {presets.length > 0 ? (
+            <div className="space-y-1" data-testid="ai-local-presets">
+              <p className="text-[11px] text-[var(--ink-subtle)]">
+                不确定选哪个？用预设一键填入。体积为「近似」下载体积，以 Ollama 实际下载为准：
+              </p>
+              {presets.map((preset) => (
+                <div key={preset.name} className="flex items-start justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <p className="text-[11px] text-[var(--ink)]">
+                      {preset.label} · {preset.approxSize}
+                    </p>
+                    <p className="text-[11px] text-[var(--ink-subtle)]">
+                      {preset.memoryHint}；{preset.note}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    data-testid={`ai-local-preset-${preset.name}`}
+                    disabled={busy || policy.localModelName === preset.name}
+                    onClick={() => {
+                      setLocalNameDraft(preset.name);
+                      void apply({ localModelName: preset.name }, `已填入 ${preset.name}`);
+                    }}
+                  >
+                    {policy.localModelName === preset.name ? '已选用' : `填入 ${preset.name}`}
+                  </Button>
+                </div>
+              ))}
             </div>
-            <Input
-              aria-label="决策模型基地址"
-              data-testid="ai-decision-base"
-              value={decisionBaseDraft}
-              onChange={(event) => setDecisionBaseDraft(event.target.value)}
-              onBlur={() => {
-                if (decisionBaseDraft.trim() !== (policy.decisionBaseUrl ?? '')) {
-                  void apply({ decisionBaseUrl: decisionBaseDraft }, '已保存决策模型地址');
-                }
-              }}
-              placeholder="https://api.perplexity.ai（只接受 https 公网域名）"
+          ) : null}
+          <Row label="用本地模型写报告" hint="只影响「模型推测」段的文字；失败自动退回模板实现">
+            <Switch
+              data-testid="ai-local-compose"
+              checked={policy.localModelCompose}
+              onCheckedChange={(checked) => void apply({ localModelCompose: checked })}
             />
-            <Input
-              aria-label="决策模型名"
-              data-testid="ai-decision-model"
-              value={decisionModelDraft}
-              onChange={(event) => setDecisionModelDraft(event.target.value)}
-              onBlur={() => {
-                if (decisionModelDraft.trim() !== (policy.decisionModel ?? '')) {
-                  void apply({ decisionModel: decisionModelDraft }, '已保存决策模型名');
-                }
-              }}
-              placeholder="pplx-decider-v1.1-27b / jev-latest"
+          </Row>
+          <Row
+            label="用本地模型打分"
+            hint="与规则档 A/B 用；模型分未校准，级别折算仍占一半（不是 Jev）"
+          >
+            <Switch
+              data-testid="ai-local-score"
+              checked={policy.localModelScore}
+              onCheckedChange={(checked) => void apply({ localModelScore: checked })}
             />
-            <div className="flex flex-wrap items-center gap-2">
+          </Row>
+          <p className="text-[11px] text-[var(--ink-subtle)]">
+            只连本机地址（localhost / 127.0.0.1 / ::1）；两项开关都关闭时一个请求都不会发；
+            浏览器预览模式不会真的调用本地模型。装不上模型时用下面的「在线模型」。
+          </p>
+        </div>
+
+        {/* 在线模型：给「跑不动本地模型」的机器留的一档（本地软件、跨平台部署是常态） */}
+        <SectionHeading
+          id="ai-online-model"
+          title="在线模型"
+          description="地址、模型名、Key 和授权是生效前提；“打分”与“写报告”按需分别开启。"
+        />
+        <div className="space-y-1.5 px-3 py-2">
+          <div className="flex items-center justify-between">
+            <Label>OpenAI 兼容连接</Label>
+            <span
+              data-testid="ai-remote-key-badge"
+              className={
+                policy.remoteModelKeySet
+                  ? 'rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-600'
+                  : 'rounded-full bg-[var(--surface-sunken)] px-2 py-0.5 text-[11px] text-[var(--ink-subtle)]'
+              }
+            >
+              {policy.remoteModelKeySet ? '已配置 Key' : '未配置 Key'}
+            </span>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="ai-remote-endpoint">模型基地址</Label>
+            <Input
+              id="ai-remote-endpoint"
+              aria-label="在线模型地址"
+              data-testid="ai-remote-endpoint"
+              defaultValue={policy.remoteModelBaseUrl ?? ''}
+              placeholder="https://api.example.com/v1（必须是 https 的公网域名）"
+              onBlur={(event) =>
+                void apply({ remoteModelBaseUrl: event.target.value }, '已保存在线模型地址')
+              }
+            />
+            <Label htmlFor="ai-remote-model">模型名</Label>
+            <Input
+              id="ai-remote-model"
+              aria-label="在线模型名称"
+              data-testid="ai-remote-model"
+              defaultValue={policy.remoteModelName ?? ''}
+              placeholder="deepseek-chat（服务商提供的模型名）"
+              onBlur={(event) =>
+                void apply({ remoteModelName: event.target.value }, '已保存模型名')
+              }
+            />
+            <Label htmlFor="ai-remote-key">API Key（只写不读）</Label>
+            <div className="flex items-center gap-2">
               <Input
-                aria-label="决策模型 API Key"
-                data-testid="ai-decision-key"
+                id="ai-remote-key"
+                aria-label="在线模型 API Key"
+                data-testid="ai-remote-key"
                 type="password"
-                value={decisionKeyDraft}
-                onChange={(event) => setDecisionKeyDraft(event.target.value)}
-                placeholder={
-                  policy.decisionKeySet ? '已配置（只写不读，重填可覆盖）' : 'API Key（只写不读）'
-                }
+                autoComplete="off"
+                value={remoteKeyDraft}
+                placeholder="API Key（只写不读，保存后无法再查看）"
+                onChange={(event) => setRemoteKeyDraft(event.target.value)}
               />
               <Button
                 size="sm"
                 variant="secondary"
-                data-testid="ai-decision-key-save"
+                data-testid="ai-remote-key-save"
+                disabled={busy || remoteKeyDraft.trim().length === 0}
                 onClick={() => {
-                  void apply({ decisionApiKey: decisionKeyDraft }, '已保存决策模型 Key').then(
-                    (saved) => {
-                      // 与在线 Key 同一纪律：保存失败不能把输入框里的唯一副本清掉。
-                      if (saved) setDecisionKeyDraft('');
-                    },
-                  );
+                  const key = remoteKeyDraft;
+                  void apply(
+                    { remoteModelApiKey: key },
+                    '已保存 API Key（存储在本机应用数据目录）',
+                  ).then((saved) => {
+                    // 只写不读：成功落盘后才清空，失败时保留用户唯一副本。
+                    if (saved) setRemoteKeyDraft('');
+                  });
                 }}
               >
-                保存 Key
+                保存
               </Button>
               <Button
                 size="sm"
                 variant="ghost"
-                data-testid="ai-decision-key-clear"
-                onClick={() => void apply({ decisionApiKey: '' }, '已清除决策模型 Key')}
+                data-testid="ai-remote-key-clear"
+                disabled={busy || !policy.remoteModelKeySet}
+                onClick={() => {
+                  setRemoteKeyDraft('');
+                  void apply({ remoteModelApiKey: '' }, '已清除 API Key');
+                }}
               >
                 清除
               </Button>
             </div>
-            <p
-              data-testid="ai-decision-authorized"
-              className="text-[11px] text-[var(--ink-subtle)]"
-            >
-              {policy.decisionAuthorizedAt
-                ? `已授权外发（${formatDateTime(policy.decisionAuthorizedAt)}）；换地址或模型名后需要重新确认。`
-                : '尚未授权：这一档不会向任何地址发送内容。'}
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                data-testid="ai-decision-authorize"
-                disabled={policy.decisionAuthorizedAt !== null}
-                onClick={() => setDecisionAskOpen(true)}
-              >
-                授权决策模型
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                data-testid="ai-decision-probe"
-                disabled={probing || policy.decisionAuthorizedAt === null}
-                onClick={() => void runDecisionProbe()}
-              >
-                {probing ? '探针运行中…' : '运行契约探针'}
-              </Button>
-            </div>
-            {probe ? (
-              <div
-                data-testid="ai-decision-probe-report"
-                className="space-y-1 rounded-lg border border-[var(--border-subtle)] p-2 text-[11px] text-[var(--ink-muted)]"
-              >
-                <p>
-                  模型 {probe.model}（{probe.host}）：准确率{' '}
-                  {probe.accuracy === null || probe.accuracy === undefined
-                    ? '—'
-                    : `${Math.round(probe.accuracy * 100)}%（${probe.scoredItems} 题）`}
-                  ，自洽性 {probe.coherence?.toFixed(3) ?? '—'}，两次一致{' '}
-                  {probe.deterministic ? '是' : '否'}，耗时 {probe.latencyMs} ms，输入{' '}
-                  {probe.inputTokens} token（≈${probe.estimatedUsd.toFixed(6)}）
-                </p>
-                <p>
-                  矛盾判别：真矛盾 {probe.conflictPairYes?.toFixed(3) ?? '—'} / 不矛盾{' '}
-                  {probe.nonConflictPairYes?.toFixed(3) ?? '—'}
-                </p>
-                <p data-testid="ai-decision-calibration">
-                  ECE {probe.calibration.ece.toFixed(4)}（线 0.05）· Brier{' '}
-                  {probe.calibration.brier.toFixed(4)} · 折外{' '}
-                  {probe.outOfSampleEce === null || probe.outOfSampleEce === undefined
-                    ? '—'
-                    : probe.outOfSampleEce.toFixed(4)}
-                </p>
-                <p data-testid="ai-decision-calibration-families">
-                  确定性题 ECE {probe.calibrationDeterminable.ece.toFixed(4)}（
-                  {probe.calibrationDeterminable.samples} 题）· 材料外题 ECE{' '}
-                  {probe.calibrationUnderdetermined.ece.toFixed(4)}（
-                  {probe.calibrationUnderdetermined.samples} 题），平均说{' '}
-                  {probe.meanStatedUnderdetermined === null ||
-                  probe.meanStatedUnderdetermined === undefined
-                    ? '—'
-                    : probe.meanStatedUnderdetermined.toFixed(3)}
-                  （理想 ≈0.5）
-                </p>
-                {probe.calibration.bins.length > 0 ? (
-                  <ul className="space-y-0.5">
-                    {probe.calibration.bins.map((bin) => (
-                      <li key={bin.range}>
-                        {bin.range}：说 {bin.meanStated.toFixed(3)} → 实际{' '}
-                        {bin.actualShare.toFixed(3)}（{bin.count} 条）
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <p data-testid="ai-decision-ab">
-                  A/B（{probe.ab.cases} 条打分，相关/不相关各半）：规则档 {probe.ab.rule.correct}/
-                  {probe.ab.rule.total}（区分度 {probe.ab.rule.separation.toFixed(3)}）· 决策档{' '}
-                  {probe.ab.decision.correct}/{probe.ab.decision.total}（区分度{' '}
-                  {probe.ab.decision.separation.toFixed(3)}）→{' '}
-                  {probe.ab.decisionBetter ? '决策档更好' : '规则档不落下风'}
-                </p>
-                <p>{probe.note}</p>
-              </div>
-            ) : null}
-          </>
-        ) : null}
-      </div>
-
-      {/* 出站代理（D4-④）：默认跟随系统代理；"只有浏览器能上外网"时在这里兜底 */}
-      <div className="space-y-1.5 px-3 py-2">
-        <Label>出站代理（留空 = 跟随系统代理）</Label>
-        <Input
-          aria-label="出站代理"
-          data-testid="ai-outbound-proxy"
-          value={proxyDraft}
-          onChange={(event) => setProxyDraft(event.target.value)}
-          onBlur={() => {
-            if (proxyDraft.trim() !== (policy.outboundProxy ?? '')) {
-              void apply({ outboundProxy: proxyDraft }, '已保存出站代理');
-            }
-          }}
-          placeholder="http://127.0.0.1:8118 或 socks5h://127.0.0.1:8119"
-        />
-        <p className="text-[11px] text-[var(--ink-subtle)]">
-          按「显式设置 → 环境变量 → macOS 系统代理」的顺序生效；本机地址永远不会走代理
-          （本地模型不受影响）。
-        </p>
-      </div>
-
-      <div className="space-y-1.5 px-3 py-2">
-        <Label>研究预算（超出即停并汇报进度）</Label>
-        <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--ink-muted)]">
-          <label className="flex items-center gap-1.5">
-            子问题
-            <Input
-              data-testid="ai-budget-subquestions"
-              type="number"
-              min={1}
-              max={10}
-              value={policy.budget.maxSubquestions}
-              onChange={(event) =>
-                void apply({
-                  budget: { ...policy.budget, maxSubquestions: Number(event.target.value) },
-                })
-              }
-              className="h-7 w-16 text-xs"
+          </div>
+          <Row label="用在线模型写报告" hint="材料片段会离开本机；失败自动降级到本地模型或模板实现">
+            <Switch
+              id="ai-remote-compose"
+              data-testid="ai-remote-compose"
+              checked={policy.remoteModelCompose}
+              onCheckedChange={(checked) => {
+                if (checked && !policy.remoteModelAuthorizedAt) {
+                  setPendingRemoteSwitch('compose');
+                  setRemoteConfirmOpen(true);
+                  return;
+                }
+                void apply({ remoteModelCompose: checked });
+              }}
             />
-          </label>
-          <label className="flex items-center gap-1.5">
-            抓取页
-            <Input
-              data-testid="ai-budget-pages"
-              type="number"
-              min={1}
-              max={50}
-              value={policy.budget.maxPages}
-              onChange={(event) =>
-                void apply({ budget: { ...policy.budget, maxPages: Number(event.target.value) } })
-              }
-              className="h-7 w-16 text-xs"
+          </Row>
+          <Row label="用在线模型打分" hint="与规则档 A/B 用；同样只在授权后外发">
+            <Switch
+              id="ai-remote-score"
+              data-testid="ai-remote-score"
+              checked={policy.remoteModelScore}
+              onCheckedChange={(checked) => {
+                if (checked && !policy.remoteModelAuthorizedAt) {
+                  setPendingRemoteSwitch('score');
+                  setRemoteConfirmOpen(true);
+                  return;
+                }
+                void apply({ remoteModelScore: checked });
+              }}
             />
-          </label>
-          <label className="flex items-center gap-1.5">
-            时长（秒）
-            <Input
-              data-testid="ai-budget-seconds"
-              type="number"
-              min={30}
-              max={1800}
-              value={policy.budget.maxDurationSecs}
-              onChange={(event) =>
-                void apply({
-                  budget: { ...policy.budget, maxDurationSecs: Number(event.target.value) },
-                })
-              }
-              className="h-7 w-20 text-xs"
-            />
-          </label>
-        </div>
-      </div>
-
-      <div className="space-y-1.5 px-3 py-2">
-        <div className="flex items-center justify-between">
-          <Label>最近行为（审计不含正文）</Label>
-          <Button
-            size="sm"
-            variant="ghost"
-            data-testid="ai-audit-refresh"
-            onClick={() =>
-              void aiService
-                .auditTail(5)
-                .then(setAudit)
-                .catch((error) => reportFailure('读取审计日志失败', errorMessage(error)))
-            }
+          </Row>
+          <Row
+            label="每次外发前确认"
+            hint="开启后：每一次把内容交给在线模型都要单独确认（未确认时一个字节都不发）"
           >
-            <RefreshCw className="h-3 w-3" />
-            刷新
-          </Button>
-        </div>
-        {auditError ? (
-          <p data-testid="ai-audit-error" className="text-[11px] text-amber-600">
-            读取审计失败：{auditError}
+            <Switch
+              data-testid="ai-confirm-each-outbound"
+              checked={policy.confirmEachOutbound}
+              onCheckedChange={(checked) =>
+                void apply(
+                  { confirmEachOutbound: checked },
+                  checked ? '已开启逐次外发确认' : '已关闭逐次外发确认',
+                )
+              }
+            />
+          </Row>
+          <p data-testid="ai-remote-authorized" className="text-[11px] text-[var(--ink-subtle)]">
+            {policy.remoteModelAuthorizedAt
+              ? `已授权外发（${formatDateTime(policy.remoteModelAuthorizedAt)}）；换地址或模型名后需要重新确认。`
+              : '尚未授权：这一档不会向任何地址发送内容。'}
           </p>
-        ) : audit.length === 0 ? (
-          <p className="text-[11px] text-[var(--ink-subtle)]">还没有 AI 行为记录。</p>
-        ) : (
-          <ul
-            data-testid="ai-audit-list"
-            className="space-y-0.5 text-[11px] text-[var(--ink-muted)]"
+          <p className="text-[11px] text-[var(--ink-subtle)]">
+            给「本机跑不动本地模型」的机器留的一档：地址只接受 https 的公网域名（本机可写
+            localhost），裸 IP 与非加密地址会被拒绝。Key 存在本机应用数据目录（不进工作区、
+            不进备份）；本节的外发由独立授权控制，与上面的「联网检索」档位互不影响。
+          </p>
+        </div>
+      </div>
+
+      <div
+        role="tabpanel"
+        aria-labelledby="ai-tab-advanced"
+        data-testid="ai-tabpanel-advanced"
+        className={activeTab === 'advanced' ? 'contents' : 'hidden'}
+      >
+        {/* 决策模型（D4）：规则档（默认，离线）/ System One（Jev 或 Perplexity Decisions，同协议） */}
+        <SectionHeading
+          id="ai-decision-model"
+          title="决策模型"
+          description="用于来源相关性、冲突与校准判断；规则档始终离线可用。"
+        />
+        <div className="space-y-1.5 px-3 py-2">
+          <Label htmlFor="ai-decision-provider">打分 / 判断档位</Label>
+          <select
+            id="ai-decision-provider"
+            aria-label="决策模型档位"
+            data-testid="ai-decision-provider"
+            value={policy.decisionProvider ?? 'rule'}
+            onChange={(event) => {
+              const next = event.target.value as 'rule' | 'system_one';
+              void apply(
+                { decisionProvider: next },
+                next === 'rule'
+                  ? '已切回规则档'
+                  : '已选择 System One（还需填端点、模型与 Key 并授权）',
+              );
+            }}
+            className="h-8 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 text-xs"
           >
-            {audit.map((entry, index) => (
-              <li key={`${entry.at}-${index}`} className="flex items-center gap-2">
-                <span className="w-28 shrink-0 tabular-nums text-[var(--ink-subtle)]">
-                  {formatDateTime(entry.at)}
-                </span>
-                <span className="w-24 shrink-0">{entry.capability}</span>
-                <span className={entry.outcome === 'ok' ? 'text-emerald-600' : 'text-amber-600'}>
-                  {entry.outcome === 'ok' ? '成功' : entry.outcome === 'denied' ? '被拒绝' : '失败'}
-                </span>
-                <span className="truncate text-[var(--ink-subtle)]">
-                  {entry.outbound ? '（已外发）' : '（本地）'}
-                  {entry.note ? ` ${entry.note}` : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+            <option value="rule">规则档（默认，离线、不联网）</option>
+            <option value="system_one">System One（TypeSafe Jev / Perplexity Decisions）</option>
+          </select>
+          {policy.decisionProvider === 'system_one' ? (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  data-testid="ai-decision-preset-perplexity"
+                  onClick={() =>
+                    void apply(
+                      {
+                        decisionBaseUrl: 'https://api.perplexity.ai',
+                        decisionModel: 'pplx-decider-v1.1-27b',
+                      },
+                      '已填入 Perplexity 预设（还需填 Key 并授权）',
+                    )
+                  }
+                >
+                  用 Perplexity 预设
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  data-testid="ai-decision-preset-jev"
+                  onClick={() =>
+                    void apply(
+                      { decisionBaseUrl: 'https://api.typesafe.ai', decisionModel: 'jev-latest' },
+                      '已填入 Jev 预设（还需填 Key 并授权）',
+                    )
+                  }
+                >
+                  用 Jev 预设
+                </Button>
+              </div>
+              <Input
+                aria-label="决策模型基地址"
+                data-testid="ai-decision-base"
+                value={decisionBaseDraft}
+                onChange={(event) => setDecisionBaseDraft(event.target.value)}
+                onBlur={() => {
+                  if (decisionBaseDraft.trim() !== (policy.decisionBaseUrl ?? '')) {
+                    void apply({ decisionBaseUrl: decisionBaseDraft }, '已保存决策模型地址');
+                  }
+                }}
+                placeholder="https://api.perplexity.ai（只接受 https 公网域名）"
+              />
+              <Input
+                aria-label="决策模型名"
+                data-testid="ai-decision-model"
+                value={decisionModelDraft}
+                onChange={(event) => setDecisionModelDraft(event.target.value)}
+                onBlur={() => {
+                  if (decisionModelDraft.trim() !== (policy.decisionModel ?? '')) {
+                    void apply({ decisionModel: decisionModelDraft }, '已保存决策模型名');
+                  }
+                }}
+                placeholder="pplx-decider-v1.1-27b / jev-latest"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  aria-label="决策模型 API Key"
+                  data-testid="ai-decision-key"
+                  type="password"
+                  value={decisionKeyDraft}
+                  onChange={(event) => setDecisionKeyDraft(event.target.value)}
+                  placeholder={
+                    policy.decisionKeySet ? '已配置（只写不读，重填可覆盖）' : 'API Key（只写不读）'
+                  }
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  data-testid="ai-decision-key-save"
+                  onClick={() => {
+                    void apply({ decisionApiKey: decisionKeyDraft }, '已保存决策模型 Key').then(
+                      (saved) => {
+                        // 与在线 Key 同一纪律：保存失败不能把输入框里的唯一副本清掉。
+                        if (saved) setDecisionKeyDraft('');
+                      },
+                    );
+                  }}
+                >
+                  保存 Key
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  data-testid="ai-decision-key-clear"
+                  onClick={() => void apply({ decisionApiKey: '' }, '已清除决策模型 Key')}
+                >
+                  清除
+                </Button>
+              </div>
+              <p
+                data-testid="ai-decision-authorized"
+                className="text-[11px] text-[var(--ink-subtle)]"
+              >
+                {policy.decisionAuthorizedAt
+                  ? `已授权外发（${formatDateTime(policy.decisionAuthorizedAt)}）；换地址或模型名后需要重新确认。`
+                  : '尚未授权：这一档不会向任何地址发送内容。'}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  data-testid="ai-decision-authorize"
+                  disabled={policy.decisionAuthorizedAt !== null}
+                  onClick={() => setDecisionAskOpen(true)}
+                >
+                  授权决策模型
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  data-testid="ai-decision-probe"
+                  disabled={probing || policy.decisionAuthorizedAt === null}
+                  onClick={() => void runDecisionProbe()}
+                >
+                  {probing ? '探针运行中…' : '运行契约探针'}
+                </Button>
+              </div>
+              {probe ? (
+                <div
+                  data-testid="ai-decision-probe-report"
+                  className="space-y-1 rounded-lg border border-[var(--border-subtle)] p-2 text-[11px] text-[var(--ink-muted)]"
+                >
+                  <p>
+                    模型 {probe.model}（{probe.host}）：准确率{' '}
+                    {probe.accuracy === null || probe.accuracy === undefined
+                      ? '—'
+                      : `${Math.round(probe.accuracy * 100)}%（${probe.scoredItems} 题）`}
+                    ，自洽性 {probe.coherence?.toFixed(3) ?? '—'}，两次一致{' '}
+                    {probe.deterministic ? '是' : '否'}，耗时 {probe.latencyMs} ms，输入{' '}
+                    {probe.inputTokens} token（≈${probe.estimatedUsd.toFixed(6)}）
+                  </p>
+                  <p>
+                    矛盾判别：真矛盾 {probe.conflictPairYes?.toFixed(3) ?? '—'} / 不矛盾{' '}
+                    {probe.nonConflictPairYes?.toFixed(3) ?? '—'}
+                  </p>
+                  <p data-testid="ai-decision-calibration">
+                    ECE {probe.calibration.ece.toFixed(4)}（线 0.05）· Brier{' '}
+                    {probe.calibration.brier.toFixed(4)} · 折外{' '}
+                    {probe.outOfSampleEce === null || probe.outOfSampleEce === undefined
+                      ? '—'
+                      : probe.outOfSampleEce.toFixed(4)}
+                  </p>
+                  <p data-testid="ai-decision-calibration-families">
+                    确定性题 ECE {probe.calibrationDeterminable.ece.toFixed(4)}（
+                    {probe.calibrationDeterminable.samples} 题）· 材料外题 ECE{' '}
+                    {probe.calibrationUnderdetermined.ece.toFixed(4)}（
+                    {probe.calibrationUnderdetermined.samples} 题），平均说{' '}
+                    {probe.meanStatedUnderdetermined === null ||
+                    probe.meanStatedUnderdetermined === undefined
+                      ? '—'
+                      : probe.meanStatedUnderdetermined.toFixed(3)}
+                    （理想 ≈0.5）
+                  </p>
+                  {probe.calibration.bins.length > 0 ? (
+                    <ul className="space-y-0.5">
+                      {probe.calibration.bins.map((bin) => (
+                        <li key={bin.range}>
+                          {bin.range}：说 {bin.meanStated.toFixed(3)} → 实际{' '}
+                          {bin.actualShare.toFixed(3)}（{bin.count} 条）
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <p data-testid="ai-decision-ab">
+                    A/B（{probe.ab.cases} 条打分，相关/不相关各半）：规则档 {probe.ab.rule.correct}/
+                    {probe.ab.rule.total}（区分度 {probe.ab.rule.separation.toFixed(3)}）· 决策档{' '}
+                    {probe.ab.decision.correct}/{probe.ab.decision.total}（区分度{' '}
+                    {probe.ab.decision.separation.toFixed(3)}）→{' '}
+                    {probe.ab.decisionBetter ? '决策档更好' : '规则档不落下风'}
+                  </p>
+                  <p>{probe.note}</p>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+
+        {/* 出站代理（D4-④）：默认跟随系统代理；"只有浏览器能上外网"时在这里兜底 */}
+        <SectionHeading
+          id="ai-advanced"
+          title="连接与预算"
+          description="代理和研究预算只影响外部请求的组织方式。"
+        />
+        <div className="space-y-1.5 px-3 py-2">
+          <Label htmlFor="ai-outbound-proxy">出站代理（留空 = 跟随系统代理）</Label>
+          <Input
+            id="ai-outbound-proxy"
+            aria-label="出站代理"
+            data-testid="ai-outbound-proxy"
+            value={proxyDraft}
+            onChange={(event) => setProxyDraft(event.target.value)}
+            onBlur={() => {
+              if (proxyDraft.trim() !== (policy.outboundProxy ?? '')) {
+                void apply({ outboundProxy: proxyDraft }, '已保存出站代理');
+              }
+            }}
+            placeholder="http://127.0.0.1:8118 或 socks5h://127.0.0.1:8119"
+          />
+          <p className="text-[11px] text-[var(--ink-subtle)]">
+            按「显式设置 → 环境变量 → macOS 系统代理」的顺序生效；本机地址永远不会走代理
+            （本地模型不受影响）。
+          </p>
+        </div>
+
+        <div id="ai-audit" className="scroll-mt-4 space-y-1.5 px-3 py-2">
+          <Label>研究预算（超出即停并汇报进度）</Label>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--ink-muted)]">
+            <label className="flex items-center gap-1.5">
+              子问题
+              <Input
+                data-testid="ai-budget-subquestions"
+                type="number"
+                min={1}
+                max={10}
+                value={policy.budget.maxSubquestions}
+                onChange={(event) =>
+                  void apply({
+                    budget: { ...policy.budget, maxSubquestions: Number(event.target.value) },
+                  })
+                }
+                className="h-7 w-16 text-xs"
+              />
+            </label>
+            <label className="flex items-center gap-1.5">
+              抓取页
+              <Input
+                data-testid="ai-budget-pages"
+                type="number"
+                min={1}
+                max={50}
+                value={policy.budget.maxPages}
+                onChange={(event) =>
+                  void apply({ budget: { ...policy.budget, maxPages: Number(event.target.value) } })
+                }
+                className="h-7 w-16 text-xs"
+              />
+            </label>
+            <label className="flex items-center gap-1.5">
+              时长（秒）
+              <Input
+                data-testid="ai-budget-seconds"
+                type="number"
+                min={30}
+                max={1800}
+                value={policy.budget.maxDurationSecs}
+                onChange={(event) =>
+                  void apply({
+                    budget: { ...policy.budget, maxDurationSecs: Number(event.target.value) },
+                  })
+                }
+                className="h-7 w-20 text-xs"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="space-y-1.5 px-3 py-2">
+          <div className="flex items-center justify-between">
+            <Label>最近行为（审计不含正文）</Label>
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="ai-audit-refresh"
+              onClick={() =>
+                void aiService
+                  .auditTail(5)
+                  .then(setAudit)
+                  .catch((error) => reportFailure('读取审计日志失败', errorMessage(error)))
+              }
+            >
+              <RefreshCw className="h-3 w-3" />
+              刷新
+            </Button>
+          </div>
+          {auditError ? (
+            <p data-testid="ai-audit-error" className="text-[11px] text-amber-600">
+              读取审计失败：{auditError}
+            </p>
+          ) : audit.length === 0 ? (
+            <p className="text-[11px] text-[var(--ink-subtle)]">还没有 AI 行为记录。</p>
+          ) : (
+            <ul
+              data-testid="ai-audit-list"
+              className="space-y-0.5 text-[11px] text-[var(--ink-muted)]"
+            >
+              {audit.map((entry, index) => (
+                <li key={`${entry.at}-${index}`} className="flex items-center gap-2">
+                  <span className="w-28 shrink-0 tabular-nums text-[var(--ink-subtle)]">
+                    {formatDateTime(entry.at)}
+                  </span>
+                  <span className="w-24 shrink-0">{entry.capability}</span>
+                  <span className={entry.outcome === 'ok' ? 'text-emerald-600' : 'text-amber-600'}>
+                    {entry.outcome === 'ok'
+                      ? '成功'
+                      : entry.outcome === 'denied'
+                        ? '被拒绝'
+                        : '失败'}
+                  </span>
+                  <span className="truncate text-[var(--ink-subtle)]">
+                    {entry.outbound ? '（已外发）' : '（本地）'}
+                    {entry.note ? ` ${entry.note}` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       {/* 决策模型授权确认（D4）：与在线模型同一套口径——说清"内容会离开本机、发给谁" */}
@@ -1180,6 +1468,78 @@ function Row({
         ) : null}
       </div>
       <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+type StatusTone = 'ok' | 'muted' | 'warn';
+
+function StatusPill({ tone, label }: { tone: StatusTone; label: string }) {
+  const toneClass =
+    tone === 'ok'
+      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+      : tone === 'warn'
+        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+        : 'bg-[var(--surface-sunken)] text-[var(--ink-subtle)]';
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${toneClass}`}>{label}</span>
+  );
+}
+
+function StatusCard({
+  label,
+  value,
+  tone,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  tone: StatusTone;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`${label}：${value}`}
+      onClick={onClick}
+      className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] px-2.5 py-2 text-left transition-colors hover:border-[var(--brand)]"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] text-[var(--ink-subtle)]">{label}</p>
+        <span className="text-[10px] text-[var(--ink-subtle)]">›</span>
+      </div>
+      <div className="mt-1 flex items-center gap-1.5">
+        <span
+          className={cn(
+            'h-1.5 w-1.5 shrink-0 rounded-full',
+            tone === 'ok'
+              ? 'bg-emerald-500'
+              : tone === 'warn'
+                ? 'bg-amber-500'
+                : 'bg-[var(--ink-subtle)]',
+          )}
+        />
+        <p className="truncate text-[11px] font-medium text-[var(--ink)]" title={value}>
+          {value}
+        </p>
+      </div>
+    </button>
+  );
+}
+
+function SectionHeading({
+  id,
+  title,
+  description,
+}: {
+  id: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div id={id} className="scroll-mt-4 px-3 pb-1 pt-3">
+      <h3 className="text-[13px] font-semibold text-[var(--ink)]">{title}</h3>
+      <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--ink-subtle)]">{description}</p>
     </div>
   );
 }

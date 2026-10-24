@@ -98,7 +98,11 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.getByTestId('note-list-item').filter({ hasText: '欢迎使用' }).first().click();
   await expect(page.locator('.cm-content')).toContainText('欢迎使用');
   // 切回来：刚才那行字必须还在（说明切换前已经落盘）
-  await page.getByTestId('note-list-item').filter({ hasText: 'SQLite 全文搜索学习笔记' }).first().click();
+  await page
+    .getByTestId('note-list-item')
+    .filter({ hasText: 'SQLite 全文搜索学习笔记' })
+    .first()
+    .click();
   await expect(page.locator('.cm-content')).toContainText('切走前的这行字必须落盘');
 
   // 还原自动保存延迟，避免影响后续步骤的等待逻辑
@@ -418,7 +422,10 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await dragSource().dragTo(nestTarget(), {
     targetPosition: { x: nestBox.width / 2, y: nestBox.height / 2 },
   });
-  await expect(nestTarget().getByTestId('note-tree-toggle')).toHaveAttribute('aria-expanded', 'true');
+  await expect(nestTarget().getByTestId('note-tree-toggle')).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
   await expect(dragSource()).toHaveAttribute('data-depth', '1');
   await page.screenshot({ path: path.join(SHOTS, '25-drag-nest.png') });
 
@@ -430,7 +437,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   if (!firstBox) throw new Error('未找到第一个条目');
   await dragSource().dragTo(firstRow, { targetPosition: { x: firstBox.width / 2, y: 2 } });
   await expect
-    .poll(async () => (await page.getByTestId('note-list-item').first().innerText()))
+    .poll(async () => await page.getByTestId('note-list-item').first().innerText())
     .toContain('索引策略');
   await page.screenshot({ path: path.join(SHOTS, '26-drag-reorder.png') });
 
@@ -472,7 +479,9 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect
     .poll(async () => (await page.getByTestId('note-list-item').allInnerTexts())[0])
     .toContain('欢迎使用');
-  await expect(page.getByTestId('note-list-item').first().getByTestId('note-pinned-marker')).toBeVisible();
+  await expect(
+    page.getByTestId('note-list-item').first().getByTestId('note-pinned-marker'),
+  ).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '29-pin.png') });
 
   await page.getByTestId('note-list-item').first().click({ button: 'right' });
@@ -516,12 +525,17 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect
     .poll(async () => page.getByTestId('note-list-item').count())
     .toBe(rowsBeforeSingleCopy + 1);
-  await expect(page.getByTestId('note-list-item').filter({ hasText: '副本' }).first()).toBeVisible();
+  await expect(
+    page.getByTestId('note-list-item').filter({ hasText: '副本' }).first(),
+  ).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '30b-single-copy.png') });
 
   // 27. 大纲「栏位切换 / 右侧常驻 / mini 态」与「另存为模板」入口（V1.2.1；V1.3.0 起可在两处位置间挪）
   await page.goto('/#/notes');
-  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await page
+    .getByRole('button', { name: /SQLite 全文搜索学习笔记/ })
+    .first()
+    .click();
   await expect(page.locator('.cm-content')).toBeVisible();
   // 默认在「笔记列表那一栏」，不占正文宽度
   await expect(page.getByTestId('note-list-panel')).toBeVisible();
@@ -563,7 +577,10 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
 
   // 28. 历史版本：留档 → 对比 → 还原（V1.2.1 P2）
   await page.goto('/#/notes');
-  await page.getByRole('button', { name: /SQLite 全文搜索学习笔记/ }).first().click();
+  await page
+    .getByRole('button', { name: /SQLite 全文搜索学习笔记/ })
+    .first()
+    .click();
   await expect(page.locator('.cm-content')).toBeVisible();
   await page.locator('.cm-content').click();
   await page.keyboard.press('End');
@@ -629,9 +646,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   const managedRows = () => page.getByTestId('manage-row');
   const rowsBefore = await managedRows().count();
   await page.getByTestId('manage-root-only').check();
-  await expect
-    .poll(async () => managedRows().count())
-    .toBeLessThan(rowsBefore);
+  await expect.poll(async () => managedRows().count()).toBeLessThan(rowsBefore);
   await page.getByTestId('manage-root-only').uncheck();
 
   // 批量：全选后打开移动对话框，取消退出
@@ -654,7 +669,9 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
 
   // 剪藏后直接打开新笔记：标题、正文抬头与来源标签都在
   await expect(page.locator('input[placeholder="笔记标题"]')).toHaveValue(/剪藏示例/);
-  await expect(page.locator('.cm-content')).toContainText('> 来源：https://example.com/articles/fts5');
+  await expect(page.locator('.cm-content')).toContainText(
+    '> 来源：https://example.com/articles/fts5',
+  );
   await expect(page.getByText('网页剪藏')).toBeVisible();
   await page.screenshot({ path: path.join(SHOTS, '38-web-clip-note.png') });
 
@@ -663,11 +680,13 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   // 设置页现在是分节显示（2026-10-16）：AI 相关行在「AI 能力」这一节里
   await page.getByTestId('settings-nav-ai').click();
   await expect(page.getByTestId('settings-ai-section')).toBeVisible();
-  await expect(page.getByTestId('ai-network')).toHaveValue('localOnly');
+  await expect(page.getByTestId('ai-status-overview')).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, '39a-ai-settings-overview.png') });
   await expect(page.getByTestId('ai-enabled')).not.toBeChecked();
-
   await page.getByTestId('ai-enabled').click();
   await expect(page.getByTestId('ai-enabled')).toBeChecked();
+  await page.getByTestId('ai-tab-retrieval').click();
+  await expect(page.getByTestId('ai-network')).toHaveValue('localOnly');
   await page.getByTestId('ai-network').selectOption('allowNetwork');
   await expect(page.getByTestId('ai-network-confirm')).toBeVisible();
   await expect(page.getByTestId('ai-network-confirm')).toContainText('不会上传整篇知识库');
@@ -677,10 +696,15 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.getByTestId('ai-fetch-body').click();
   await expect(page.getByTestId('ai-fetch-body')).toBeChecked();
   // 检索源地址（D3）：应用不预置第三方服务，这里填一个返回 JSON 的地址模板
-  await page.getByTestId('ai-search-endpoint').fill('https://searx.example/search?q={query}&format=json');
+  await page
+    .getByTestId('ai-search-endpoint')
+    .fill('https://searx.example/search?q={query}&format=json');
   await page.getByTestId('ai-search-endpoint').blur();
   await expect(page.getByTestId('ai-search-endpoint')).toHaveValue(/searx\.example/);
   // 本地模型（D5）：默认不启用（空地址 + 两个开关关闭），浏览器预览不调用本地模型
+  await page.getByTestId('ai-tab-models').click();
+  await expect(page.getByTestId('ai-tab-models')).toHaveAttribute('aria-selected', 'true');
+  await page.screenshot({ path: path.join(SHOTS, '39b-ai-settings-models.png') });
   await expect(page.getByTestId('ai-local-endpoint')).toHaveValue('');
   await expect(page.getByTestId('ai-local-compose')).not.toBeChecked();
   await expect(page.getByTestId('ai-local-score')).not.toBeChecked();
@@ -848,7 +872,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   const synced = await topbar.getByText('已同步').boundingBox();
   const searchBox = await topbar.getByRole('button', { name: /搜索笔记内容/ }).boundingBox();
   if (!synced || !searchBox) throw new Error('未找到顶栏的搜索框或已同步');
-  expect(Math.abs(synced.y - searchBox.y)).toBeLessThan(12);   // 同一行
+  expect(Math.abs(synced.y - searchBox.y)).toBeLessThan(12); // 同一行
   expect(synced.x).toBeGreaterThan(searchBox.x + searchBox.width - 4); // 已同步在搜索栏右侧
   // 文本格式条并进同一行（第二行不再存在）
   await expect(page.getByTestId('format-bar')).toHaveCount(1);
@@ -946,7 +970,9 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   );
   await page.getByRole('button', { name: '预览' }).click();
   await expect(page.locator('[data-testid="mermaid-diagram"]').first()).toBeVisible();
-  await expect(page.locator('[data-testid="mermaid-diagram"]').first().locator('svg')).toBeVisible();
+  await expect(
+    page.locator('[data-testid="mermaid-diagram"]').first().locator('svg'),
+  ).toBeVisible();
   await expect(page.locator('[data-testid="mermaid-diagram"]').first()).toContainText('判断');
   await expect(page.locator('[data-testid="mermaid-error"]')).toHaveCount(0);
   await page.screenshot({ path: path.join(SHOTS, '50-mermaid.png') });
@@ -961,9 +987,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await page.getByTestId('insert-menu').click();
   await page.getByRole('menuitem', { name: '流程图' }).click();
   await expect(page.locator('.cm-content')).toContainText('flowchart LR');
-  await expect(
-    page.locator('[data-testid="mermaid-diagram"]').last().locator('svg'),
-  ).toBeVisible();
+  await expect(page.locator('[data-testid="mermaid-diagram"]').last().locator('svg')).toBeVisible();
   void editorToolbar;
 
   /**

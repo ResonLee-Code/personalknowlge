@@ -240,6 +240,19 @@ fn authorized_remote_model_scores_and_writes_the_report() {
 
     let research = ResearchService::new(fixture.context());
     let session = research.start(request("Rust 异步调度")).expect("立项");
+    let plan_notes = &session.plan.as_ref().expect("计划").notes;
+    assert!(
+        plan_notes
+            .iter()
+            .any(|note| note.contains("来源评分：收集时优先调用在线模型 `stub-model`")),
+        "计划应说明在线打分会生效：{plan_notes:?}"
+    );
+    assert!(
+        plan_notes
+            .iter()
+            .any(|note| note.contains("报告汇总：优先调用在线模型 `stub-model`")),
+        "计划应说明在线汇总会生效：{plan_notes:?}"
+    );
     let collected = research.collect(&session.id, false).expect("收集");
     assert_eq!(
         collected.decision_provider.as_deref(),
@@ -273,6 +286,19 @@ fn authorized_remote_model_scores_and_writes_the_report() {
             .iter()
             .any(|warning| warning.kind == WarningKind::ModelGenerated),
         "必须给出「模型生成、未经核对」警告"
+    );
+    let audit = fixture.policy().audit_tail(100).expect("审计");
+    assert!(
+        audit
+            .iter()
+            .any(|entry| entry.capability == "research_collect" && entry.outbound),
+        "在线打分成功后审计必须标记真实外发"
+    );
+    assert!(
+        audit
+            .iter()
+            .any(|entry| entry.capability == "research_compose" && entry.outbound),
+        "在线汇总成功后审计必须标记真实外发"
     );
 }
 

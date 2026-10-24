@@ -2,12 +2,12 @@
 //!
 //! 五步固定流程（每步可单独调用、可中断、可审计）：
 //! ① `start`   立项：把课题拆成 3–5 个子问题，先查本地知识库作为「已知基线」
-//! ② `collect` 收集：本地优先（FTS5）；外部检索在 D3 接入前**如实告知未接入**，不伪造材料
+//! ② `collect` 收集：本地优先（FTS5）；外部检索与模型调用各自受独立策略闸门控制
 //! ③ `verify`  验证：按子问题汇总，≥2 个**独立**来源才算交叉验证；单一来源只进「待验证清单」
 //! ④ `compose` 汇总：固定六段报告（结论先行 / 关键事实 / 争议 / 与本库关系 / 待验证 / 参考来源）
 //! ⑤ `proposal` 写入提案：默认落 Inbox、同标题不覆盖、写前 diff；**落库要用户确认**（D2 的 write）
 //!
-//! 降级路径（§9.6）：没有 Jev 用规则表（`source_grade`），没有 LLM 用模板实现
+//! 降级路径（§9.6）：没有可用的决策模型用规则表（`source_grade`），没有生成模型用模板实现
 //! （`TemplateGenerativeModel`）——推测段永远标注「未接模型」，不冒充模型结论。
 
 use std::collections::{HashMap, HashSet};
@@ -567,7 +567,8 @@ impl ResearchService {
     /// 立项：校验课题 → 拆子问题 → 查本地基线 → 落盘。
     pub fn start(&self, request: ResearchRequest) -> Result<ResearchSession> {
         let started = Instant::now();
-        let policy = self.policy().ensure_enabled("research_start")?;
+        let policy_service = self.policy();
+        let policy = policy_service.ensure_enabled("research_start")?;
         let topic = validate_topic(&request.topic)?;
         let budget = policy.budget.clamped();
         let plan_template = request.plan_template_id.as_deref().and_then(|id| {
@@ -624,10 +625,58 @@ impl ResearchService {
         );
         let queries: Vec<String> = expanded.iter().map(|item| item.text.clone()).collect();
 
-        let mut notes = vec![
-            "本次只用本地知识库材料（外部检索属于阶段 D3，接入前不会发起任何请求）。".to_string(),
+        let remote_ready = policy.remote_model_authorized_at.is_some()
+            && policy_service.remote_model().is_some();
+        let remote_model_name = policy
+            .remote_model()
+            .map(|(_, model)| model.to_string())
+            .unwrap_or_else(|| "在线模型".to_string());
+        let local_ready = policy_service.local_model().is_some();
+        let network_note = if policy.network != NetworkMode::AllowNetwork {
+            "当前联网档位为「仅本地」：收集阶段只读取本地知识库，不会发起外部检索。".to_string()
+        } else if let Some(host) = policy.search_endpoint.as_deref().and_then(host_of) {
             format!(
-                "子问题 {max} 个 · 时间窗 {days} 天 · 抓取页上限 {}（外部检索启用后生效）。",
+                "联网检索已启用（检索源 {host}）：收集时仍需本次确认；{}",
+                if policy.allow_fetch_body {
+                    "会按预算抓取正文。"
+                } else {
+                    "未开启正文抓取，只使用检索摘要。"
+                }
+            )
+        } else {
+            "联网模式已开启，但检索源地址尚未配置：收集阶段只读取本地知识库，不会发起外部检索。"
+                .to_string()
+        };
+        let scoring_note = if policy.remote_model_score && remote_ready {
+            format!(
+                "来源评分：收集时优先调用在线模型 `{remote_model_name}`；失败自动降级到本地 / 规则档。"
+            )
+        } else if policy.remote_model_score {
+            "来源评分：已勾选在线模型，但地址、模型名、Key 或授权不完整；本次会降级到本地 / 规则档。"
+                .to_string()
+        } else if policy.local_model_score && local_ready {
+            "来源评分：使用本地 Ollama；失败自动降级到规则档。".to_string()
+        } else {
+            "来源评分：当前使用规则档；如需模型判断，请在「设置 → AI → 在线模型」开启“用在线模型打分”。"
+                .to_string()
+        };
+        let compose_note = if policy.remote_model_compose && remote_ready {
+            format!(
+                "报告汇总：优先调用在线模型 `{remote_model_name}` 生成推测段；失败自动降级到本地 / 模板。"
+            )
+        } else if policy.remote_model_compose {
+            "报告汇总：已勾选在线模型，但地址、模型名、Key 或授权不完整；本次会降级到本地 / 模板。"
+                .to_string()
+        } else if policy.local_model_compose && local_ready {
+            "报告汇总：使用本地 Ollama；失败自动降级到模板。".to_string()
+        } else {
+            "报告汇总：当前使用模板实现；如需模型生成，请在「设置 → AI → 在线模型」开启“用在线模型写报告”。"
+                .to_string()
+        };
+        let mut notes = vec![
+            network_note,
+            format!(
+                "子问题 {max} 个 · 时间窗 {days} 天 · 抓取页上限 {}（仅在联网检索实际发起时生效）。",
                 budget.max_pages,
                 max = sub_questions.len(),
                 days = time_window_days
@@ -645,7 +694,9 @@ impl ResearchService {
                 "输出语言：{language} · 期望来源类型：{}。",
                 source_types.join(" / ")
             ),
-            "子问题由模板生成；语义化的查询改写要等模型接入（N5/D4）。".to_string(),
+            "子问题由本地规则模板生成；查询扩展同样在本地完成，不会因此调用模型。".to_string(),
+            scoring_note,
+            compose_note,
             "来源按 §9.3 规则分级：域名内置表 → 内容自证（标题/作者/日期）→ 兜底「弱」。"
                 .to_string(),
         ];
@@ -1390,13 +1441,24 @@ impl ResearchService {
         // 决策层打分（§9.6）：规则档默认；开了本地模型就由它打分、失败自动降级
         let (decision_provider, score_fallback, decision_trace) =
             self.score_sources(&plan.topic, &mut sources, confirmed);
+        let score_remote_attempted = decision_trace.as_ref().is_some_and(|trace| {
+            trace
+                .attempts
+                .iter()
+                .any(|attempt| attempt.provider.starts_with("remote."))
+        });
         session.decision_provider = Some(decision_provider.clone());
         // D2/N6：把这次打分的 Trace 留在会话上，verify 时写进报告（可解释）
         session.decision_trace = decision_trace;
         if let Some(note) = score_fallback {
             tracing::debug!(target: "ai", "{note}");
-            self.policy()
-                .audit("research_score", true, "error", 0, Some(&note));
+            self.policy().audit(
+                "research_score",
+                score_remote_attempted,
+                "error",
+                0,
+                Some(&note),
+            );
         }
 
         // 收尾前最后一次确认：**中止优先**——否则这次保存会把用户的中止覆盖回去
@@ -1437,7 +1499,9 @@ impl ResearchService {
         // 只有真的发了外部请求才记 outbound=true
         self.policy().audit(
             "research_collect",
-            web_collected > 0 || web_fetched > 0,
+            (web_enabled && policy.search_endpoint.is_some())
+                || score_remote_attempted
+                || decision_provider.starts_with("remote."),
             "ok",
             started.elapsed().as_millis() as u64,
             Some(if web_enabled {
@@ -1583,6 +1647,9 @@ impl ResearchService {
         } else {
             unique_conflict_providers.join(" / ")
         };
+        let remote_conflict_attempted = unique_conflict_providers
+            .iter()
+            .any(|provider| provider.starts_with("remote."));
         let draft = pending_report(
             &session,
             claims,
@@ -1636,7 +1703,7 @@ impl ResearchService {
         );
         self.policy().audit(
             "research_verify",
-            false,
+            remote_conflict_attempted,
             "ok",
             started.elapsed().as_millis() as u64,
             None,
@@ -1764,6 +1831,7 @@ impl ResearchService {
             && self.policy().remote_model().is_some()
             && !self.policy().outbound_confirmed(confirm_outbound);
         let mut model_fallback: Option<String> = None;
+        let mut remote_attempted = false;
         let mut response = None;
         for (index, (provider_id, model)) in composers.iter().enumerate() {
             // 外发标记只对在线这一档为真：本地模型不需要，模板更不需要
@@ -1774,6 +1842,7 @@ impl ResearchService {
                 max_tokens: Some(512),
                 allow_remote: !model.is_local(),
             };
+            remote_attempted |= !model.is_local();
             // 这一档开始：先发一次空串，保证上一档（若有）的半截内容不会留在界面上
             self.emit_compose_delta(&session.id, provider_id, "", "streaming");
             // 流式生成：累加增量并实时推给界面（不支持的 provider 会退化成"一次性 + 一次回调"）
@@ -1822,10 +1891,10 @@ impl ResearchService {
             tracing::debug!(target: "ai", "{note}");
             self.policy().audit(
                 "research_compose",
-                true,
+                remote_attempted,
                 "error",
                 0,
-                Some("LOCAL_MODEL_FALLBACK"),
+                Some("MODEL_FALLBACK"),
             );
         }
         let speculation = response
@@ -1935,7 +2004,7 @@ impl ResearchService {
         );
         self.policy().audit(
             "research_compose",
-            false,
+            remote_attempted || composer_label.starts_with("remote."),
             "ok",
             started.elapsed().as_millis() as u64,
             Some(&composer_label),
