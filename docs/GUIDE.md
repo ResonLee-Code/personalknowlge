@@ -300,6 +300,24 @@ MyKnowledge/
 - **System One 档**：填地址 + 模型名 + API Key（Perplexity Decisions 与 Jev 同协议，一份适配器覆盖两家），
   Key **只写不读**、独立授权、可随时清除。
 
+Perplexity Decisions 推荐值：
+
+| 字段 | 值 |
+| --- | --- |
+| 模型基地址 | `https://api.perplexity.ai` |
+| 模型名 | `pplx-decider-v1.1-27b` |
+| API Key | 从 [Perplexity API 控制台](https://console.perplexity.ai) 创建的专用 Key |
+
+`https://api.perplexity.ai` 是 API 基地址，直接用浏览器打开通常只会看到错误页或空白页；
+它不是控制台，也不是文档首页。Key 保存后输入框会清空并显示掩码占位，右侧显示
+“已配置 Key”；掩码只是状态提示，不会回显真实凭据。轮换 Key 时直接粘贴新值覆盖。
+
+若探针返回 **HTTP 401 / Invalid API key**，应用通常已正确发送
+`Authorization: Bearer <key>`，应优先检查：Key 是否已撤销、是否完整且未夹带引号/空格、
+是否拿成了其他服务商的 Key，以及当前 Perplexity 账号是否可调用 API。到
+[Perplexity API 控制台](https://console.perplexity.ai) 创建或轮换 Key 后，先点“清除”，
+再保存新 Key 并重跑探针。DeepSeek 的 Key 不能用于 Perplexity Decisions。
+
 配好并授权后，**决策档排在候选链最前**；失败自动降级到规则档，报告里写明实际用的哪一档。
 想先看数据：点「**决策探针**」用**我们自己的中文题**跑出准确率、自洽性、两次一致性、矛盾判别、
 延迟与估算成本；题目含 **100 道可判分题**，给出 ECE / Brier / 分箱与**折外** ECE，

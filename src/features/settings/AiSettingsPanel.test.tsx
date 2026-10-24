@@ -357,11 +357,13 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     );
     expect(keyInput).toHaveValue('');
     expect(await screen.findByTestId('ai-remote-key-badge')).toHaveTextContent('已配置 Key');
+    expect(keyInput).toHaveAttribute('placeholder', expect.stringContaining('••'));
     expect(screen.queryByDisplayValue('sk-secret-value')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('ai-remote-key-clear'));
     await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ remoteModelApiKey: '' }));
     expect(await screen.findByTestId('ai-remote-key-badge')).toHaveTextContent('未配置 Key');
+    expect(keyInput).not.toHaveAttribute('placeholder', expect.stringContaining('••'));
   });
 
   it('Key 保存失败时保留输入内容，不能让用户丢失唯一副本', async () => {
@@ -650,6 +652,70 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
       expect(setPolicy).toHaveBeenCalledWith({ decisionApiKey: 'pplx-failure-keep-me' }),
     );
     expect(keyInput).toHaveValue('pplx-failure-keep-me');
+  });
+
+  it('决策模型 Key 保存后只显示掩码占位，空白时不会误清已有 Key', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      decisionProvider: 'system_one',
+      decisionBaseUrl: 'https://api.perplexity.ai',
+      decisionModel: 'pplx-decider-v1.1-27b',
+    });
+    const setPolicy = vi.spyOn(aiService, 'setPolicy').mockImplementation(async (input) => ({
+      ...conservative,
+      enabled: true,
+      decisionProvider: 'system_one',
+      decisionBaseUrl: 'https://api.perplexity.ai',
+      decisionModel: 'pplx-decider-v1.1-27b',
+      ...input,
+      decisionApiKey: undefined,
+      decisionKeySet: (input.decisionApiKey ?? '').trim().length > 0,
+    }));
+    render(<AiSettingsPanel />);
+
+    const keyInput = await screen.findByTestId('ai-decision-key');
+    const save = screen.getByTestId('ai-decision-key-save');
+    expect(save).toBeDisabled();
+    expect(screen.getByTestId('ai-decision-key-badge')).toHaveTextContent('未配置 Key');
+
+    await userEvent.type(keyInput, 'pplx-new-secret');
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+
+    await waitFor(() =>
+      expect(setPolicy).toHaveBeenCalledWith({ decisionApiKey: 'pplx-new-secret' }),
+    );
+    expect(keyInput).toHaveValue('');
+    expect(keyInput).toHaveAttribute('placeholder', expect.stringContaining('••'));
+    expect(screen.getByTestId('ai-decision-key-badge')).toHaveTextContent('已配置 Key');
+    expect(save).toBeDisabled();
+  });
+
+  it('决策探针 401 在页内给出可执行的 Key 轮换指引', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      decisionProvider: 'system_one',
+      decisionBaseUrl: 'https://api.perplexity.ai',
+      decisionModel: 'pplx-decider-v1.1-27b',
+      decisionKeySet: true,
+      decisionAuthorizedAt: '2026-10-13T10:00:00+08:00',
+    });
+    vi.spyOn(aiService, 'decisionProbe').mockRejectedValue({
+      code: 'INVALID_INPUT',
+      message:
+        '决策模型返回 HTTP 401（主机 api.perplexity.ai，模型 `pplx-decider-v1.1-27b`）：API Key 缺失或无效；服务端说明：Invalid API key provided.',
+    });
+    render(<AiSettingsPanel />);
+
+    await userEvent.click(await screen.findByTestId('ai-decision-probe'));
+
+    const error = await screen.findByTestId('ai-decision-probe-error');
+    expect(error).toHaveAttribute('role', 'alert');
+    expect(error).toHaveTextContent('HTTP 401');
+    expect(error).toHaveTextContent('创建或轮换专用 API Key');
+    expect(error).toHaveTextContent('DeepSeek 的 Key 不能用于 Perplexity');
   });
 
   /** Track D4：探针报告要显示真实指标（准确率 / 自洽性 / 一致性），并如实标注"不是校准"。 */

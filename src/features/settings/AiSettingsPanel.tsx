@@ -1,4 +1,4 @@
-import { ChevronRight, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { ChevronRight, CircleAlert, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -38,6 +38,9 @@ const AI_SETTINGS_TABS: Array<{ id: AiSettingsTab; label: string }> = [
   { id: 'retrieval', label: '联网与增强' },
   { id: 'advanced', label: '决策与高级' },
 ];
+
+/** 只用于输入框占位，绝不能写进 value 或作为真实 Key 回显。 */
+const SAVED_KEY_MASK = '••••••••••••••••••••••••';
 
 /**
  * 「设置 → AI」区块（V1.2.1 阶段 D1 / AI_ARCHITECTURE_PLAN §6、§9.7）。
@@ -81,6 +84,7 @@ export function AiSettingsPanel() {
   const [decisionKeyDraft, setDecisionKeyDraft] = useState('');
   const [decisionAskOpen, setDecisionAskOpen] = useState(false);
   const [probe, setProbe] = useState<DecisionProbeReport | null>(null);
+  const [probeError, setProbeError] = useState<string | null>(null);
   const [probing, setProbing] = useState(false);
   const [proxyDraft, setProxyDraft] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -221,10 +225,13 @@ export function AiSettingsPanel() {
   const runDecisionProbe = async () => {
     setProbing(true);
     setProbe(null);
+    setProbeError(null);
     try {
       setProbe(await aiService.decisionProbe());
     } catch (error) {
-      reportFailure('决策探针失败', errorMessage(error));
+      const message = errorMessage(error);
+      setProbeError(message);
+      reportFailure('决策探针失败', message);
     } finally {
       setProbing(false);
     }
@@ -807,16 +814,7 @@ export function AiSettingsPanel() {
         <div className="space-y-1.5 px-3 py-2">
           <div className="flex items-center justify-between">
             <Label>OpenAI 兼容连接</Label>
-            <span
-              data-testid="ai-remote-key-badge"
-              className={
-                policy.remoteModelKeySet
-                  ? 'rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-600'
-                  : 'rounded-full bg-[var(--surface-sunken)] px-2 py-0.5 text-[11px] text-[var(--ink-subtle)]'
-              }
-            >
-              {policy.remoteModelKeySet ? '已配置 Key' : '未配置 Key'}
-            </span>
+            <KeyStatusBadge configured={policy.remoteModelKeySet} testId="ai-remote-key-badge" />
           </div>
           <div className="space-y-1">
             <Label htmlFor="ai-remote-endpoint">模型基地址</Label>
@@ -849,8 +847,15 @@ export function AiSettingsPanel() {
                 data-testid="ai-remote-key"
                 type="password"
                 autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 value={remoteKeyDraft}
-                placeholder="API Key（只写不读，保存后无法再查看）"
+                placeholder={
+                  policy.remoteModelKeySet
+                    ? `${SAVED_KEY_MASK} 已配置，输入新 Key 可覆盖`
+                    : 'API Key（只写不读，保存后无法再查看）'
+                }
                 onChange={(event) => setRemoteKeyDraft(event.target.value)}
               />
               <Button
@@ -1026,45 +1031,65 @@ export function AiSettingsPanel() {
                   用 Jev 预设
                 </Button>
               </div>
-              <Input
-                aria-label="决策模型基地址"
-                data-testid="ai-decision-base"
-                value={decisionBaseDraft}
-                onChange={(event) => setDecisionBaseDraft(event.target.value)}
-                onBlur={() => {
-                  if (decisionBaseDraft.trim() !== (policy.decisionBaseUrl ?? '')) {
-                    void apply({ decisionBaseUrl: decisionBaseDraft }, '已保存决策模型地址');
-                  }
-                }}
-                placeholder="https://api.perplexity.ai（只接受 https 公网域名）"
-              />
-              <Input
-                aria-label="决策模型名"
-                data-testid="ai-decision-model"
-                value={decisionModelDraft}
-                onChange={(event) => setDecisionModelDraft(event.target.value)}
-                onBlur={() => {
-                  if (decisionModelDraft.trim() !== (policy.decisionModel ?? '')) {
-                    void apply({ decisionModel: decisionModelDraft }, '已保存决策模型名');
-                  }
-                }}
-                placeholder="pplx-decider-v1.1-27b / jev-latest"
-              />
+              <div className="space-y-1">
+                <Label htmlFor="ai-decision-base">模型基地址</Label>
+                <Input
+                  id="ai-decision-base"
+                  aria-label="决策模型基地址"
+                  data-testid="ai-decision-base"
+                  value={decisionBaseDraft}
+                  onChange={(event) => setDecisionBaseDraft(event.target.value)}
+                  onBlur={() => {
+                    if (decisionBaseDraft.trim() !== (policy.decisionBaseUrl ?? '')) {
+                      void apply({ decisionBaseUrl: decisionBaseDraft }, '已保存决策模型地址');
+                    }
+                  }}
+                  placeholder="https://api.perplexity.ai（只接受 https 公网域名）"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="ai-decision-model">模型名</Label>
+                <Input
+                  id="ai-decision-model"
+                  aria-label="决策模型名"
+                  data-testid="ai-decision-model"
+                  value={decisionModelDraft}
+                  onChange={(event) => setDecisionModelDraft(event.target.value)}
+                  onBlur={() => {
+                    if (decisionModelDraft.trim() !== (policy.decisionModel ?? '')) {
+                      void apply({ decisionModel: decisionModelDraft }, '已保存决策模型名');
+                    }
+                  }}
+                  placeholder="pplx-decider-v1.1-27b / jev-latest"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="ai-decision-key">API Key（只写不读）</Label>
+                <KeyStatusBadge configured={policy.decisionKeySet} testId="ai-decision-key-badge" />
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Input
+                  id="ai-decision-key"
                   aria-label="决策模型 API Key"
                   data-testid="ai-decision-key"
                   type="password"
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={decisionKeyDraft}
                   onChange={(event) => setDecisionKeyDraft(event.target.value)}
                   placeholder={
-                    policy.decisionKeySet ? '已配置（只写不读，重填可覆盖）' : 'API Key（只写不读）'
+                    policy.decisionKeySet
+                      ? `${SAVED_KEY_MASK} 已配置，输入新 Key 可覆盖`
+                      : 'API Key（只写不读，保存后无法再查看）'
                   }
                 />
                 <Button
                   size="sm"
                   variant="secondary"
                   data-testid="ai-decision-key-save"
+                  disabled={busy || decisionKeyDraft.trim().length === 0}
                   onClick={() => {
                     void apply({ decisionApiKey: decisionKeyDraft }, '已保存决策模型 Key').then(
                       (saved) => {
@@ -1080,6 +1105,7 @@ export function AiSettingsPanel() {
                   size="sm"
                   variant="ghost"
                   data-testid="ai-decision-key-clear"
+                  disabled={busy || !policy.decisionKeySet}
                   onClick={() => void apply({ decisionApiKey: '' }, '已清除决策模型 Key')}
                 >
                   清除
@@ -1113,6 +1139,26 @@ export function AiSettingsPanel() {
                   {probing ? '探针运行中…' : '运行契约探针'}
                 </Button>
               </div>
+              {probeError ? (
+                <div
+                  role="alert"
+                  data-testid="ai-decision-probe-error"
+                  className="space-y-1 rounded-lg border border-red-500/35 bg-red-500/10 p-2.5 text-xs text-red-700 dark:text-red-200"
+                >
+                  <p className="flex items-center gap-1.5 font-medium">
+                    <CircleAlert className="h-4 w-4 shrink-0" />
+                    探针未通过
+                  </p>
+                  <p className="break-words leading-relaxed">{probeError}</p>
+                  {probeError.includes('HTTP 401') ? (
+                    <p className="leading-relaxed">
+                      401 表示服务端没有接受当前 Key。请到 Perplexity API 控制台创建或轮换专用 API
+                      Key，确认复制的是完整明文而不是掩码/占位符，然后先点“清除”再保存新 Key
+                      并重跑探针。DeepSeek 的 Key 不能用于 Perplexity 决策端点。
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               {probe ? (
                 <div
                   data-testid="ai-decision-probe-report"
@@ -1527,6 +1573,21 @@ function Row({
 }
 
 type StatusTone = 'ok' | 'muted' | 'warn';
+
+function KeyStatusBadge({ configured, testId }: { configured: boolean; testId: string }) {
+  return (
+    <span
+      data-testid={testId}
+      className={
+        configured
+          ? 'rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300'
+          : 'rounded-full bg-[var(--surface-sunken)] px-2 py-0.5 text-[11px] font-medium text-[var(--ink-subtle)]'
+      }
+    >
+      {configured ? '已配置 Key' : '未配置 Key'}
+    </span>
+  );
+}
 
 function StatusPill({ tone, label }: { tone: StatusTone; label: string }) {
   const toneClass =
