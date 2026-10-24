@@ -28,6 +28,7 @@ use personal_knowledge_os_lib::domain::research::{
     ResearchRequest, ResearchSession, ResearchStatus, ResearchWriteInput, SourceLevel, WarningKind,
     WRITE_MODE_ABANDON, WRITE_MODE_APPEND, WRITE_MODE_CREATE,
 };
+use personal_knowledge_os_lib::infrastructure::credential_store;
 use personal_knowledge_os_lib::state::AppInner;
 use tempfile::TempDir;
 
@@ -65,6 +66,26 @@ impl Fixture {
         self.policy()
             .update(UpdateAiPolicyInput { enabled: Some(true), ..Default::default() })
             .expect("打开 AI 总开关");
+    }
+
+    fn enable_system_one(&self) {
+        let context = self.context();
+        credential_store::set_decision_key(&context.data_dir, Some("pplx-test-only"))
+            .expect("保存测试决策 Key");
+        self.policy()
+            .update(UpdateAiPolicyInput {
+                decision_provider: Some("system_one".to_string()),
+                decision_base_url: Some("https://api.perplexity.ai".to_string()),
+                decision_model: Some("pplx-decider-v1.1-27b".to_string()),
+                ..Default::default()
+            })
+            .expect("选择 System One");
+        self.policy()
+            .update(UpdateAiPolicyInput {
+                confirm_decision: Some(true),
+                ..Default::default()
+            })
+            .expect("授权决策模型");
     }
 
     /// 建一篇带来源标注的笔记，返回 id。
@@ -233,6 +254,60 @@ fn plan_explains_local_network_and_model_switches_instead_of_hardcoding_local_on
             .iter()
             .all(|note| !note.contains("等模型接入")),
         "模型已可选，不应保留“等模型接入”的旧文案：{notes:?}"
+    );
+}
+
+#[test]
+fn plan_reports_system_one_as_the_preferred_scoring_model() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    fixture.enable_system_one();
+
+    let session = fixture
+        .research()
+        .start(request("Rust 异步调度"))
+        .expect("系统一研究立项");
+    let notes = &session.plan.as_ref().expect("计划").notes;
+
+    assert!(
+        notes.iter().any(|note| note.contains(
+            "来源评分：优先使用 System One 决策模型 `pplx-decider-v1.1-27b`"
+        )),
+        "计划应反映 System One 是首选打分档：{notes:?}"
+    );
+    assert!(
+        notes.iter().all(|note| !note.contains("来源评分：当前使用规则档")),
+        "System One 已生效时不能再声称当前使用规则档：{notes:?}"
+    );
+}
+
+#[test]
+fn report_says_when_web_permission_has_no_search_endpoint() {
+    let fixture = Fixture::new();
+    fixture.enable_ai();
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            ..Default::default()
+        })
+        .expect("启用联网权限");
+    seed(&fixture);
+
+    let session = run_until(
+        &fixture,
+        request("Rust 异步调度"),
+        &["collect", "verify", "compose"],
+    );
+    let warnings = &session.report.as_ref().expect("报告").warnings;
+    assert!(
+        warnings.iter().any(|warning| {
+            warning.kind == WarningKind::ExternalNotAvailable
+                && warning.message.contains("只开启了联网权限")
+                && warning.message.contains("尚未配置搜索引擎端点")
+        }),
+        "没有检索源时应给出确定原因，而不是三个模糊可能：{warnings:?}"
     );
 }
 

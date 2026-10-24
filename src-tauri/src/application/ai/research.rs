@@ -632,6 +632,13 @@ impl ResearchService {
             .map(|(_, model)| model.to_string())
             .unwrap_or_else(|| "在线模型".to_string());
         let local_ready = policy_service.local_model().is_some();
+        let decision_config = policy_service.decision_config();
+        let decision_ready = decision_config.is_some();
+        let decision_model_name = decision_config
+            .as_ref()
+            .map(|config| config.model.clone())
+            .unwrap_or_else(|| "System One".to_string());
+        let system_one_selected = policy.decision_provider.as_deref() == Some("system_one");
         let network_note = if policy.network != NetworkMode::AllowNetwork {
             "当前联网档位为「仅本地」：收集阶段只读取本地知识库，不会发起外部检索。".to_string()
         } else if let Some(host) = policy.search_endpoint.as_deref().and_then(host_of) {
@@ -647,7 +654,14 @@ impl ResearchService {
             "联网模式已开启，但检索源地址尚未配置：收集阶段只读取本地知识库，不会发起外部检索。"
                 .to_string()
         };
-        let scoring_note = if policy.remote_model_score && remote_ready {
+        let scoring_note = if decision_ready {
+            format!(
+                "来源评分：优先使用 System One 决策模型 `{decision_model_name}`；失败自动降级到后续可用的在线 / 本地 / 规则档。"
+            )
+        } else if system_one_selected {
+            "来源评分：已选择 System One，但端点、Key 或授权不完整；本次会降级到后续可用的在线 / 本地 / 规则档。"
+                .to_string()
+        } else if policy.remote_model_score && remote_ready {
             format!(
                 "来源评分：收集时优先调用在线模型 `{remote_model_name}`；失败自动降级到本地 / 规则档。"
             )
@@ -1911,6 +1925,7 @@ impl ResearchService {
             &session,
             &report,
             policy.network == NetworkMode::AllowNetwork,
+            policy.search_endpoint.is_some(),
             // 「是谁写的」以实际生效的 composer 为准：模板之外（本地或在线模型）都算模型生成
             composer_label != TemplateGenerativeModel::new().id(),
         );
@@ -2848,6 +2863,7 @@ fn collect_warnings(
     session: &ResearchSession,
     report: &ResearchReport,
     network_allowed: bool,
+    search_endpoint_configured: bool,
     model_generated: bool,
 ) -> Vec<ResearchWarning> {
     let mut warnings = Vec::new();
@@ -2948,11 +2964,14 @@ fn collect_warnings(
         });
     }
     if network_allowed && !has_web_source {
+        let message = if search_endpoint_configured {
+            "本次没有外部来源：检索源已经配置，但本次可能未确认联网、检索源调用失败或没有返回结果；请查看收集步骤说明与「设置 → AI」审计。"
+        } else {
+            "本次没有外部来源：只开启了联网权限，但尚未配置搜索引擎端点。模型负责打分或写报告，不会自动发现网页；请在「设置 → AI → 检索源地址」配置返回 JSON 的搜索接口后重新收集。"
+        };
         warnings.push(ResearchWarning {
             kind: WarningKind::ExternalNotAvailable,
-            message:
-                "本次没有外部来源：可能是没有确认联网、没有配置检索源地址，或检索没有结果（可在「设置 → AI」检查）。"
-                    .to_string(),
+            message: message.to_string(),
             references: Vec::new(),
         });
     }

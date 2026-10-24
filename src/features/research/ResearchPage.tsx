@@ -480,7 +480,13 @@ export function ResearchPage() {
     Boolean(policy.remoteModelBaseUrl?.trim()) &&
     Boolean(policy.remoteModelName?.trim());
   const remoteAuthorized = remoteConfigured && Boolean(policy?.remoteModelAuthorizedAt);
-  const remoteScoreOff = remoteConfigured && !policy?.remoteModelScore;
+  const systemOneScoreReady =
+    policy?.decisionProvider === 'system_one' &&
+    policy.decisionKeySet === true &&
+    Boolean(policy.decisionAuthorizedAt);
+  const remoteScoreOff = remoteConfigured && !policy?.remoteModelScore && !systemOneScoreReady;
+  const searchEndpointMissing =
+    policy?.network === 'allowNetwork' && !policy?.searchEndpoint?.trim();
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-6">
@@ -523,6 +529,33 @@ export function ResearchPage() {
             </Link>{' '}
             打开总开关，并保持「仅本地」即可使用本地调研。
           </div>
+        </div>
+      ) : null}
+
+      {searchEndpointMissing ? (
+        <div
+          data-testid="research-search-unconfigured"
+          className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
+        >
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            联网权限已开启，但还没有配置搜索引擎端点。Perplexity 决策模型只对已有候选来源打分，
+            不会替代搜索服务去发现网页。请配置一个返回 JSON
+            的检索地址；否则收集阶段只会读取本地知识库。{' '}
+            <Link className="underline" to={ROUTES.settings}>
+              配置检索源
+            </Link>
+          </span>
+        </div>
+      ) : null}
+
+      {systemOneScoreReady ? (
+        <div
+          data-testid="research-score-system-one"
+          className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-800 dark:text-sky-200"
+        >
+          来源可信度和冲突判定当前由 System One 决策模型负责。“用在线模型打分”控制的是 OpenAI
+          兼容在线模型（如 DeepSeek）的备用打分通道，与 Perplexity Decisions 模型相互独立。
         </div>
       ) : null}
 

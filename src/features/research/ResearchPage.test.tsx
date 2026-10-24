@@ -237,6 +237,46 @@ describe('ResearchPage（V1.2.1 D2）', () => {
     expect(within(hint).getByRole('link', { name: '去设置' })).toHaveAttribute('href', '/settings');
   });
 
+  it('System One 生效时不再误报来源评分仍由规则档处理', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...enabledPolicy,
+      remoteModelBaseUrl: 'https://api.deepseek.com',
+      remoteModelName: 'deepseek-flash',
+      remoteModelKeySet: true,
+      remoteModelAuthorizedAt: '2026-10-23T00:47:00+08:00',
+      remoteModelCompose: true,
+      remoteModelScore: false,
+      decisionProvider: 'system_one',
+      decisionBaseUrl: 'https://api.perplexity.ai',
+      decisionModel: 'pplx-decider-v1.1-27b',
+      decisionKeySet: true,
+      decisionAuthorizedAt: '2026-10-25T01:03:00+08:00',
+    });
+    renderPage();
+
+    const hint = await screen.findByTestId('research-score-system-one');
+    expect(hint).toHaveTextContent('System One 决策模型负责');
+    expect(hint).toHaveTextContent('与 Perplexity Decisions 模型相互独立');
+    expect(screen.queryByTestId('research-score-rule-hint')).not.toBeInTheDocument();
+  });
+
+  it('联网权限已开但没有检索源时说明模型不会自动发现网页', async () => {
+    vi.spyOn(aiService, 'policy').mockResolvedValue({
+      ...enabledPolicy,
+      network: 'allowNetwork',
+      networkConfirmedAt: '2026-10-25T01:03:00+08:00',
+    });
+    renderPage();
+
+    const hint = await screen.findByTestId('research-search-unconfigured');
+    expect(hint).toHaveTextContent('Perplexity 决策模型只对已有候选来源打分');
+    expect(hint).toHaveTextContent('不会替代搜索服务去发现网页');
+    expect(within(hint).getByRole('link', { name: '配置检索源' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+  });
+
   it('联网源已配置时页头不再声称只检索本地', async () => {
     vi.spyOn(aiService, 'policy').mockResolvedValue({
       ...enabledPolicy,
