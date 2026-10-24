@@ -268,6 +268,38 @@ describe('AiSettingsPanel（V1.2.1 D1）', () => {
     );
   });
 
+  it('一键填入本机 SearXNG 并可执行真实检索探测', async () => {
+    const endpoint =
+      'http://127.0.0.1:8080/search?q={query}&format=json&count={limit}&language=zh-CN';
+    const setPolicy = vi.spyOn(aiService, 'setPolicy').mockResolvedValue({
+      ...conservative,
+      enabled: true,
+      network: 'allowNetwork',
+      networkConfirmedAt: '2026-10-25T01:00:00+08:00',
+      searchEndpoint: endpoint,
+    });
+    const webSearch = vi.spyOn(aiService, 'webSearch').mockResolvedValue([
+      {
+        title: 'SearXNG documentation',
+        url: 'https://docs.searxng.org/',
+        snippet: 'Private metasearch engine',
+        publishedAt: '2026-10-24',
+        host: 'docs.searxng.org',
+      },
+    ]);
+    render(<AiSettingsPanel />);
+
+    await userEvent.click(await screen.findByTestId('ai-search-preset-searxng'));
+    await waitFor(() => expect(setPolicy).toHaveBeenCalledWith({ searchEndpoint: endpoint }));
+    expect(await screen.findByTestId('ai-search-endpoint')).toHaveValue(endpoint);
+
+    await userEvent.click(screen.getByTestId('ai-search-test'));
+    await waitFor(() => expect(webSearch).toHaveBeenCalledWith('SearXNG 官方文档', 3, true));
+    expect(await screen.findByTestId('ai-search-test-result')).toHaveTextContent(
+      '返回 1 条候选；首条为「SearXNG documentation」',
+    );
+  });
+
   it('本地模型默认不启用：地址/模型名为空、两个开关都是关的（D5）', async () => {
     render(<AiSettingsPanel />);
 

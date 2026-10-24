@@ -1,0 +1,44 @@
+name: pkos-search
+
+services:
+  core:
+    # Pin the audited image instead of silently moving with `latest`.
+    image: docker.io/searxng/searxng@sha256:7c7cbe509429e82755104b2a95f52085a98633c95d53f44e4e905fa3a59f08c8
+    container_name: pkos-searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SEARXNG_PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      SEARXNG_BASE_URL: http://127.0.0.1:${SEARXNG_PORT:-8080}/
+      SEARXNG_BIND_ADDRESS: 0.0.0.0
+      SEARXNG_PORT: "8080"
+      SEARXNG_LIMITER: "false"
+      SEARXNG_PUBLIC_INSTANCE: "false"
+      SEARXNG_VALKEY_URL: valkey://valkey:6379/0
+      HTTP_PROXY: ${SEARXNG_PROXY_URL:-}
+      HTTPS_PROXY: ${SEARXNG_PROXY_URL:-}
+      NO_PROXY: localhost,127.0.0.1,::1,valkey
+      http_proxy: ${SEARXNG_PROXY_URL:-}
+      https_proxy: ${SEARXNG_PROXY_URL:-}
+      no_proxy: localhost,127.0.0.1,::1,valkey
+    volumes:
+      - ./core-config:/etc/searxng:rw
+      - searxng-cache:/var/cache/searxng
+    depends_on:
+      valkey:
+        condition: service_started
+
+  valkey:
+    image: docker.io/valkey/valkey@sha256:48332870af354a799964c0012ae1194a0bf2bf894eb508f945810596dc2d8d11
+    container_name: pkos-searxng-valkey
+    command: valkey-server --save 300 1 --save 60 1000 --loglevel warning
+    restart: unless-stopped
+    volumes:
+      - valkey-data:/data
+
+volumes:
+  searxng-cache:
+  valkey-data:
+

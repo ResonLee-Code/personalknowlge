@@ -310,6 +310,23 @@ https://your-searx.example/search?q={query}&format=json&count={limit}
 地址必须包含 `{query}`，可选 `{limit}`。配置后再执行一次收集；已经生成的旧报告不会因为事后
 补配置而自动增加外部来源。
 
+项目内已提供本机 SearXNG 配置：
+
+```bash
+bash scripts/searxng/start.sh
+```
+
+启动后，在「设置 → AI → 联网与增强」点击“填入本机 SearXNG”，再点“测试检索”。
+默认地址是：
+
+```text
+http://127.0.0.1:8080/search?q={query}&format=json&count={limit}&language=zh-CN
+```
+
+服务只监听回环地址；Compose 配置锁定镜像摘要，SearXNG 会话密钥保存在本地 `.env`
+且权限为 `0600`。停止命令为 `bash scripts/searxng/stop.sh`。详细说明见
+[infra/searxng/README.md](../infra/searxng/README.md)。
+
 ### 8.2 决策模型档（可选）
 
 「设置 → AI → 决策模型」可在两档之间切换：

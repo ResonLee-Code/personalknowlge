@@ -42,6 +42,9 @@ const AI_SETTINGS_TABS: Array<{ id: AiSettingsTab; label: string }> = [
 /** 只用于输入框占位，绝不能写进 value 或作为真实 Key 回显。 */
 const SAVED_KEY_MASK = '••••••••••••••••••••••••';
 
+const LOCAL_SEARXNG_ENDPOINT =
+  'http://127.0.0.1:8080/search?q={query}&format=json&count={limit}&language=zh-CN';
+
 /**
  * 「设置 → AI」区块（V1.2.1 阶段 D1 / AI_ARCHITECTURE_PLAN §6、§9.7）。
  *
@@ -77,6 +80,12 @@ export function AiSettingsPanel() {
   const [vectorProgress, setVectorProgress] = useState<{ done: number; total: number } | null>(
     null,
   );
+  const [searchTesting, setSearchTesting] = useState(false);
+  const [searchProbe, setSearchProbe] = useState<{
+    count: number;
+    firstTitle?: string;
+    error?: string;
+  } | null>(null);
   const [embeddingDraft, setEmbeddingDraft] = useState('');
   /** 决策模型（D4）：配置草稿 + 探针结果 */
   const [decisionBaseDraft, setDecisionBaseDraft] = useState('');
@@ -234,6 +243,22 @@ export function AiSettingsPanel() {
       reportFailure('决策探针失败', message);
     } finally {
       setProbing(false);
+    }
+  };
+
+  const runSearchProbe = async () => {
+    setSearchTesting(true);
+    setSearchProbe(null);
+    try {
+      const hits = await aiService.webSearch('SearXNG 官方文档', 3, true);
+      setSearchProbe({ count: hits.length, firstTitle: hits[0]?.title });
+      toast.success(`检索源连接成功：返回 ${hits.length} 条候选`);
+    } catch (error) {
+      const message = errorMessage(error);
+      setSearchProbe({ count: 0, error: message });
+      reportFailure('检索源连接测试失败', message);
+    } finally {
+      setSearchTesting(false);
     }
   };
 
@@ -577,22 +602,70 @@ export function AiSettingsPanel() {
         <SectionHeading
           id="ai-search-policy"
           title="检索源与域名策略"
-          description="应用不预置第三方搜索服务；白名单为空表示按内置来源分级规则处理。"
+          description="可使用项目提供的本机 SearXNG 预设，也可填写其他 JSON 检索接口；白名单为空表示按内置来源分级规则处理。"
         />
         <div className="space-y-1.5 px-3 py-2">
           <div className="space-y-1">
             <Label htmlFor="ai-search-endpoint">检索源地址（联网检索用，必须含 {'{query}'}）</Label>
             <Input
+              key={policy.searchEndpoint ?? 'unconfigured-search'}
               id="ai-search-endpoint"
               data-testid="ai-search-endpoint"
               defaultValue={policy.searchEndpoint ?? ''}
               placeholder="https://your-searx.example/search?q={query}&format=json&count={limit}"
               onBlur={(event) => void apply({ searchEndpoint: event.target.value }, '已保存检索源')}
             />
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <Button
+                size="sm"
+                variant="secondary"
+                data-testid="ai-search-preset-searxng"
+                disabled={busy}
+                onClick={() =>
+                  void apply(
+                    { searchEndpoint: LOCAL_SEARXNG_ENDPOINT },
+                    '已填入本机 SearXNG 检索源',
+                  )
+                }
+              >
+                填入本机 SearXNG
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                data-testid="ai-search-test"
+                disabled={searchTesting || !policy.searchEndpoint}
+                onClick={() => void runSearchProbe()}
+              >
+                {searchTesting ? '检索中…' : '测试检索'}
+              </Button>
+              <span className="text-[11px] text-[var(--ink-subtle)]">
+                测试只发送固定关键词，不会发送笔记正文
+              </span>
+            </div>
+            {searchProbe ? (
+              <p
+                data-testid="ai-search-test-result"
+                role={searchProbe.error ? 'alert' : 'status'}
+                className={cn(
+                  'rounded-md border px-2 py-1.5 text-[11px]',
+                  searchProbe.error
+                    ? 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-200'
+                    : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+                )}
+              >
+                {searchProbe.error
+                  ? `连接失败：${searchProbe.error}`
+                  : `连接成功：返回 ${searchProbe.count} 条候选${
+                      searchProbe.firstTitle ? `；首条为「${searchProbe.firstTitle}」` : ''
+                    }`}
+              </p>
+            ) : null}
             <p className="text-[11px] text-[var(--ink-subtle)]">
-              应用不预置任何第三方检索服务：这里填你自己可用的检索接口（返回 JSON， 支持 SearxNG 的{' '}
-              {'{ "results": [ … ] }'} 形状）。留空表示不联网检索； 地址不合法或缺少 {'{query}'}{' '}
-              会被清空。
+              可一键填入项目提供的本机 SearXNG。启动命令：
+              <code className="mx-1">bash scripts/searxng/start.sh</code>
+              ；也可填写其他返回 JSON 的检索接口（支持 SearxNG 的 {'{ "results": [ … ] }'}{' '}
+              形状）。测试前需先把联网档位切到“允许联网检索”。
             </p>
           </div>
           <div className="space-y-1">

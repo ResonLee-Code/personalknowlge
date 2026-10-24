@@ -145,7 +145,7 @@ impl AiTools {
             service.audit("web_search", false, "error", 0, Some("SEARCH_ENDPOINT_MISSING"));
             return Err(AppError::new(
                 ErrorCode::InvalidInput,
-                "还没有配置联网检索源：请在「设置 → AI → 检索源地址」填入一个返回 JSON 的检索地址（含 {query} 占位符）。应用不预置任何第三方检索服务。",
+                "还没有配置联网检索源：请在「设置 → AI → 检索源地址」填入一个返回 JSON 的检索地址（含 {query} 占位符），或先运行项目内的 scripts/searxng/start.sh 并点击“填入本机 SearXNG”。",
             ));
         };
         let result = super::web_search::search_with_proxy(

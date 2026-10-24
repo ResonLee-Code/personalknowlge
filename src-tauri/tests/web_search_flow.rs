@@ -653,3 +653,42 @@ fn missing_search_endpoint_reports_clearly_without_any_request() {
         "未配置检索源时不得有 outbound=true"
     );
 }
+
+/// 真机冒烟：调用本机 SearXNG 的 JSON 接口，验证完整闸门与结果解析。
+///
+/// ```bash
+/// bash scripts/searxng/start.sh
+/// PKOS_LIVE_SEARXNG_ENDPOINT='http://127.0.0.1:8080/search?q={query}&format=json&count={limit}&language=zh-CN' \
+///   cargo test --offline --test web_search_flow live_local_searxng -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "真机冒烟：需要先启动本机 SearXNG"]
+fn live_local_searxng_returns_real_external_sources() {
+    let endpoint = std::env::var("PKOS_LIVE_SEARXNG_ENDPOINT")
+        .expect("设置 PKOS_LIVE_SEARXNG_ENDPOINT");
+    let fixture = Fixture::new();
+    fixture
+        .policy()
+        .update(UpdateAiPolicyInput {
+            enabled: Some(true),
+            network: Some("allowNetwork".to_string()),
+            confirm_network: Some(true),
+            search_endpoint: Some(endpoint),
+            ..Default::default()
+        })
+        .expect("配置本机 SearXNG");
+
+    let hits = fixture
+        .tools()
+        .web_search("SearXNG 官方文档", 3, true)
+        .expect("本机 SearXNG 应返回 JSON");
+    assert!(!hits.is_empty(), "真实 SearXNG 检索不得返回空结果");
+    assert!(
+        hits.iter().all(|hit| hit.url.starts_with("http") && !hit.host.is_empty()),
+        "每条外部来源都应有 URL 与主机：{hits:?}"
+    );
+    println!("PKOS_LIVE_SEARXNG_RESULTS={}", hits.len());
+    for hit in hits {
+        println!("PKOS_LIVE_SEARXNG_SOURCE host={} title={}", hit.host, hit.title);
+    }
+}

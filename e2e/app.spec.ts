@@ -695,12 +695,13 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(page.getByTestId('ai-network')).toHaveValue('allowNetwork');
   await page.getByTestId('ai-fetch-body').click();
   await expect(page.getByTestId('ai-fetch-body')).toBeChecked();
-  // 检索源地址（D3）：应用不预置第三方服务，这里填一个返回 JSON 的地址模板
-  await page
-    .getByTestId('ai-search-endpoint')
-    .fill('https://searx.example/search?q={query}&format=json');
-  await page.getByTestId('ai-search-endpoint').blur();
-  await expect(page.getByTestId('ai-search-endpoint')).toHaveValue(/searx\.example/);
+  // 检索源（D3）：一键填入项目提供的本机 SearXNG JSON 接口并执行连接测试。
+  await page.getByTestId('ai-search-preset-searxng').click();
+  await expect(page.getByTestId('ai-search-endpoint')).toHaveValue(/127\.0\.0\.1:8080/);
+  await expect(page.getByTestId('ai-search-endpoint')).toHaveValue(/format=json/);
+  await page.getByTestId('ai-search-test').click();
+  await expect(page.getByTestId('ai-search-test-result')).toContainText('连接成功');
+  await page.screenshot({ path: path.join(SHOTS, '39c-ai-settings-searxng.png') });
   // 本地模型（D5）：默认不启用（空地址 + 两个开关关闭），浏览器预览不调用本地模型
   await page.getByTestId('ai-tab-models').click();
   await expect(page.getByTestId('ai-tab-models')).toHaveAttribute('aria-selected', 'true');

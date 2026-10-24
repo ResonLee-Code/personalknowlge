@@ -1,0 +1,25 @@
+use_default_settings: true
+
+general:
+  instance_name: "Personal Knowledge OS Search"
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "zh-CN"
+  formats:
+    - html
+    - json
+
+server:
+  limiter: false
+  public_instance: false
+  image_proxy: true
+
+valkey:
+  url: valkey://valkey:6379/0
+
+outgoing:
+  request_timeout: 5.0
+
