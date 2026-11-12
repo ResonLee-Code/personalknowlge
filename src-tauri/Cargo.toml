@@ -60,6 +60,11 @@ zip = { version = "9.0.0", default-features = false, features = ["deflate"] }
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2.14.0"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# tauri-plugin-deep-link 2.6.2 使用 ParseOption 的两个旧字段；0.21.3 新增字段后
+# 在 Linux 目标上会编译失败。精确锁定到兼容版本，升级插件时再移除该约束。
+rust-ini = "=0.21.1"
+
 [dev-dependencies]
 base64 = "0.22.1"
 minisign-verify = "0.3.0"
