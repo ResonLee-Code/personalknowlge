@@ -4,13 +4,14 @@
 SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeScript。
 数据自主：删掉应用，笔记还在；删掉数据库，也能从 Markdown 重建。
 
-**当前版本：V1.3.7**（2026-10-20 发布，四处版本号一致：`package.json` /
+**当前版本：V2.0.0 发版候选**（2026-11-13，四处版本号一致：`package.json` /
 `src-tauri/Cargo.toml` / `Cargo.lock` / `src-tauri/tauri.conf.json`）。
 
-- 📦 **[下载与安装](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.7)**：三平台产物 + `SHA256SUMS-*.txt`
+- 📦 当前稳定下载仍为 **[v1.3.7](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.7)**；
+  V2.0.0 正式 Release 将在签名门禁处理后更新。
 - 📘 **[完全指南（中文）](./docs/GUIDE.md)** · **[Complete Guide (English)](./docs/GUIDE.en.md)**
 - 📗 **[使用说明手册（逐控件）](./docs/MANUAL.md)**：每个按钮 / 输入框 / 菜单项各是干什么的
-- 🧾 变更明细 [docs/CHANGELOG.md](./docs/CHANGELOG.md) · 验收实况 [docs/ACCEPTANCE_V1.3.7.md](./docs/ACCEPTANCE_V1.3.7.md)
+- 🧾 变更明细 [docs/CHANGELOG.md](./docs/CHANGELOG.md) · V2 候选实况 [docs/ACCEPTANCE_V2.0.0.md](./docs/ACCEPTANCE_V2.0.0.md)
 
 本仓库是 [Personal-Knowledge-OS-Engineering-Design-V1.0.md](./Personal-Knowledge-OS-Engineering-Design-V1.0.md)
 工程设计的实现：先把**记录、分类、搜索**做扎实，再在其上长出**研究助手与决策层**——
@@ -37,6 +38,7 @@ SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeSc
 | 版本历史 | 保存前自动留档（60 秒节流、每篇 50 份）、任意两版对比、命名版本、还原正文 |
 | 外部编辑 | 文件监听（原生事件 + 轮询兜底）、自动采纳外部新增/修改、标记缺失、忽略自身写入回声 |
 | 网页剪藏 | 粘贴 URL → 抓取公开网页转 Markdown，写 `source_type: web` 与来源地址（非 UTF-8 页面按 Content-Type / `<meta charset>` / GBK 兜底解码） |
+| 内容发现 | `/discover` 独立收件箱：URL / 分享文本、静态候选链接、勾选深抓、Decision 筛选降级、Markdown 预览、来源更新检查与确认入库；`pkos://capture` 可从系统分享入口唤起 |
 | 统计与复核 | 首页统计明细（字数 / 近 7·30 天更新 / 置顶数 / 近 14 天写作活跃度）+ **待复核卡片**（`valid_until` 已过期或 14 天内到期） |
 | 研究助手 | `/research` 五步：立项 → 收集（本地 FTS5，可选联网检索）→ 验证（≥2 个独立来源才算交叉验证）→ 汇总（固定六段报告 + 置信度）→ 写入提案（默认 Inbox、同标题不覆盖、写前 diff、可回滚） |
 | **证据充分性（N9）** | 收集计划会先做**查询扩展**（课题 → 括号短语 / 连接词切分 / 拉丁词，≤6 条，规则化、离线）；汇总前逐条判定证据够不够（覆盖 / 交叉验证 / 材料厚薄 / 来源强弱 / 时效），**不满足就明说「证据不足、本次不给结论」**，界面与报告三处同步显示 |

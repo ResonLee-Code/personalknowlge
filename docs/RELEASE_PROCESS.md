@@ -151,7 +151,8 @@ GitHub Releases 会把上传资产名中的空格替换为点（例如
 每个平台各自的 `SHA256SUMS-<platform>.txt` 会一并附在 Release 上，另有汇总的
 `SHA256SUMS-all.txt`。验收清单见：
 [V2 P0 人工报告模板](./acceptance/V2_P0_REPORT_TEMPLATE.md) ·
-[当前版本（V1.3.7）](./ACCEPTANCE_V1.3.7.md) ·
+[当前候选（V2.0.0）](./ACCEPTANCE_V2.0.0.md) ·
+[上一版（V1.3.7）](./ACCEPTANCE_V1.3.7.md) ·
 [上一版（V1.3.6）](./ACCEPTANCE_V1.3.6.md) ·
 [上一版（V1.3.5）](./ACCEPTANCE_V1.3.5.md) ·
 [上一版（V1.3.4）](./ACCEPTANCE_V1.3.4.md) ·
