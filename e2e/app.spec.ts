@@ -1070,7 +1070,7 @@ test('V2 P0 入口：选中文字右键 Ask、整理建议与研究助手页面'
 
   const editor = page.locator('.cm-content');
   await editor.click();
-  await page.keyboard.press('Meta+a');
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
   await editor.dispatchEvent('contextmenu', { clientX: 320, clientY: 240, button: 2 });
   const selectionMenu = page.getByTestId('selection-context-menu');
   await expect(selectionMenu).toBeVisible();
