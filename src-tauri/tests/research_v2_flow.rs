@@ -230,7 +230,14 @@ fn rerun_compares_added_removed_sources_and_changed_claims() {
         "Rust 异步调度实现",
         "实现依赖任务唤醒、本地队列和批量窃取。",
     );
-    let removed_id = fixture.note("Rust 异步调度旧版本", "旧版本资料讨论过时实现。");
+    fixture.note(
+        "Rust 异步取消与观测",
+        "生产环境需要关注取消安全、任务泄漏与可观测性。",
+    );
+    let removed_id = fixture.note(
+        "Rust 异步调度旧版本",
+        "旧版本取消策略较弱，生产观测手段有限。",
+    );
     let research = fixture.research();
     let first = research.start(request("Rust 异步调度")).expect("首次立项");
     let custom_questions = vec![
@@ -278,7 +285,10 @@ fn rerun_compares_added_removed_sources_and_changed_claims() {
     let comparison = research.compare(&first.id, &second.id).expect("对比");
     assert!(!comparison.added_sources.is_empty());
     assert!(!comparison.removed_sources.is_empty());
-    assert!(!comparison.changed_claims.is_empty());
+    assert!(
+        !comparison.changed_claims.is_empty(),
+        "来源变化必须反映到结论差异：{comparison:#?}"
+    );
 }
 
 #[test]

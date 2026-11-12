@@ -18,6 +18,10 @@
 本次 GitHub 发布使用 `v2.0.0-unsigned.1` 未签名预发行通道：macOS 为 ad-hoc、
 Windows 未签名，不生成 `latest.json`，不进入正式自动更新；正式稳定版仍为 V1.3.7。
 
+发布审计修复 3 个 RustSec 漏洞：`libsqlite3-sys` 升至 0.40、`rusqlite` 升至 0.42，
+并升级 `pulldown-cmark` 至 0.13.6，消除 SQLite CVE-2026-119375 与两个 WikiLink
+解析 DoS advisory。研究重跑回归补充了可稳定覆盖两个子问题的来源夹具。
+
 ### 内容发现与工作区快速打开（2026-10-25）
 
 - 新增独立“内容发现”入口 `/discover`：提交 URL、分享文本和备注后先生成内容收件箱，

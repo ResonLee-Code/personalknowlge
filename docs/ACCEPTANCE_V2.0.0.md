@@ -40,6 +40,7 @@ DMG 已挂载验证：包含 `Personal Knowledge OS.app` 与 `Applications` 链�
 | `cargo test --offline` | 全部通过，仅保留既定 ignored 真机 / 性能用例 |
 | 内容发现集成测试 | 8 项通过 |
 | `cargo clippy --offline --all-targets` | 0 错误；仓库既有 warning |
+| `cargo audit` | 3 个漏洞已通过依赖升级修复；8 个 allow-warning 保留 |
 | `pnpm test:acceptance` | 7 项通过 |
 | `pnpm test:release-manifest` | 2 项通过 |
 | `pnpm test:release-workflow` | 7 项通过 |
