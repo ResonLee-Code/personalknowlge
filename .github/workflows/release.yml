@@ -5,6 +5,7 @@ name: Release (macOS + Windows + Linux)
 # 触发：
 #   - 手动运行（Actions → Release → Run workflow）：只构建并上传工件，不创建 Release
 #   - 推送 v* 标签：先校验标签与 package.json 版本一致，构建三平台后创建 Release 并附上全部产物
+#   - 推送 v*-unsigned.N 标签：明确发布未签名预发行版，跳过签名门禁，不生成自动更新清单
 #
 # 平台与产物：
 #   - macOS（macos-14 / arm64）：.dmg + .app
@@ -39,7 +40,11 @@ jobs:
           echo "package.json 版本：${VERSION}"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             TAG="${GITHUB_REF#refs/tags/v}"
-            if [ "${TAG}" != "${VERSION}" ]; then
+            BASE_TAG="${TAG}"
+            if [[ "${TAG}" =~ ^(.+)-unsigned\.[0-9]+$ ]]; then
+              BASE_TAG="${BASH_REMATCH[1]}"
+            fi
+            if [ "${BASE_TAG}" != "${VERSION}" ]; then
               echo "::error::标签 v${TAG} 与 package.json 版本 ${VERSION} 不一致，请先统一版本号"
               exit 1
             fi
@@ -72,7 +77,7 @@ jobs:
           NODE
 
       - name: 标签发布必须配置 updater 签名密钥
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-unsigned.')
         env:
           UPDATER_PUBKEY: ${{ secrets.PKOS_UPDATER_PUBKEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -83,7 +88,7 @@ jobs:
           fi
 
       - name: 标签发布必须配置 macOS Developer ID 与公证凭据
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-unsigned.')
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -99,7 +104,7 @@ jobs:
           fi
 
       - name: 标签发布必须配置 Windows 代码签名证书
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-unsigned.')
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -463,6 +468,7 @@ jobs:
           cat dist/SHA256SUMS-all.txt
 
       - name: 生成签名更新清单 latest.json
+        if: ${{ !contains(github.ref_name, '-unsigned.') }}
         env:
           PKOS_RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
           PKOS_RELEASE_TAG: ${{ github.ref_name }}
@@ -476,15 +482,17 @@ jobs:
           name: Personal Knowledge OS ${{ github.ref_name }}
           generate_release_notes: true
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-unsigned.') }}
           body: |
+            发布类型：${{ contains(github.ref_name, '-unsigned.') && '未签名预发行版（不含 latest.json，不进入自动更新）' || '正式签名版' }}
+
             ## 产物
 
             | 平台 | 文件 | 说明 |
             | --- | --- | --- |
-            | macOS（arm64） | `*.dmg` | Developer ID 签名并通过公证；应用内更新包另带 minisign 签名 |
-            | Windows（x64） | `*_x64-setup.exe` / `*_x64-portable.zip` | Authenticode 代码签名；应用内更新包另带 minisign 签名 |
-            | Linux（x64） | `*.deb` / `*.rpm` / `*.AppImage` | 需要 WebKitGTK 4.1；AppImage 需 `chmod +x`；应用内更新使用签名的 `*.AppImage.tar.gz` |
+            | macOS（arm64） | `*.dmg` | 正式版使用 Developer ID 与公证；未签名预发行版为 ad-hoc |
+            | Windows（x64） | `*_x64-setup.exe` / `*_x64-portable.zip` | 正式版使用 Authenticode；未签名预发行版需按 SmartScreen 提示放行 |
+            | Linux（x64） | `*.deb` / `*.rpm` / `*.AppImage` | 需要 WebKitGTK 4.1；AppImage 需 `chmod +x` |
 
             校验值见 `SHA256SUMS-*.txt`。下载后在**同一个目录**里执行
             `shasum -a 256 -c SHA256SUMS-all.txt`（Linux 用 `sha256sum -c`）应全部 OK。

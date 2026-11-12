@@ -2,7 +2,7 @@
 
 日期：2026-11-13
 
-状态：本机 macOS 候选已验证；远端正式 Release 等待签名策略确认
+状态：本机 macOS 候选已验证；远端通过 `v2.0.0-unsigned.1` 发布未签名预发行版
 
 ## 版本身份
 
@@ -56,7 +56,13 @@ DMG 已挂载验证：包含 `Personal Knowledge OS.app` 与 `Applications` 链�
 
 ## 发布边界
 
-本机候选是 ad-hoc 签名。仓库正式 V2 tag 门禁要求 updater、Apple Developer ID / 公证与
-Windows Authenticode Secrets；当前远端 Actions 未配置这些 Secret，因此不能把该候选
-冒充为正式签名 V2 Release。正式发布需先补齐凭据；若明确接受未签名预发行版，则需单独
-调整发布说明和工作流门禁。
+本机候选是 ad-hoc 签名。仓库正式 `v2.0.0` tag 仍要求 updater、Apple Developer ID / 公证与
+Windows Authenticode Secrets；当前远端 Actions 未配置这些 Secret。
+
+本次按用户确认走 `v2.0.0-unsigned.1` 未签名预发行通道：
+
+- GitHub Release 标记为 `prerelease=true`；
+- macOS 使用 ad-hoc 签名、不公证；
+- Windows 使用未签名 NSIS / 便携包；
+- 不生成 `latest.json`，不进入正式自动更新；
+- 正式稳定版本仍为 V1.3.7，后续补齐签名后再发布正式 `v2.0.0`。

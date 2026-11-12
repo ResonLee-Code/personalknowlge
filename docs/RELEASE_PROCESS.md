@@ -9,6 +9,7 @@
 | --- | --- |
 | 手动运行（Actions → **Release (macOS + Windows + Linux)** → Run workflow） | 只构建并上传工件，**不创建 Release**（便于验证） |
 | 推送 `v*` 标签 | 先校验版本一致性，构建三平台，然后创建 Release 并附上全部产物与校验值 |
+| 推送 `v*-unsigned.N` 标签 | 明确创建**未签名 GitHub prerelease**；跳过签名门禁，不生成 `latest.json`，不进入自动更新 |
 
 ## 2. 流水线结构
 
@@ -28,9 +29,9 @@ preflight（ubuntu-22.04）
 
 三个构建 job 互不阻塞（除 preflight 外无依赖），因此总时长约等于最慢平台。
 
-### 2.1 V2 发布签名门槛
+### 2.1 正式 V2 发布签名门槛
 
-推送 `v2.*` 标签前必须在 GitHub Secrets 配置：
+推送正式 `v2.*` 标签前必须在 GitHub Secrets 配置：
 
 | Secret | 用途 |
 | --- | --- |
@@ -44,6 +45,11 @@ preflight（ubuntu-22.04）
 tag 发布 preflight 会拒绝缺失 updater / Apple / Windows 签名凭据的构建；
 手动运行 workflow 在没有凭据时可产出未签名演练包，但**不能当作 V2 发布物**。
 私钥只存 Secret，不能提交仓库；丢失 updater 私钥会导致旧客户端无法验证新版本。
+
+如果用户明确接受未签名预发行版，可使用 `vX.Y.Z-unsigned.N` 标签（例如
+`v2.0.0-unsigned.1`）。工作流会把它映射回 `package.json` 的 `X.Y.Z`、跳过三道签名门禁，
+并创建 `prerelease=true` 的 GitHub Release；该通道**不生成 `latest.json`**，因此不会被
+正式客户端当作稳定更新。`v2.0.0` 本身仍保留为签名正式发布号。
 
 preflight 强制运行 ESLint、production build、验收器自测、Playwright E2E、
 `pnpm test:release-manifest`、`pnpm test:release-workflow` 与

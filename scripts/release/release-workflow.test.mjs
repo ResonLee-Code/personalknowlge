@@ -80,6 +80,36 @@ test('release job directly needs preflight when consuming its version output', (
   assert.match(releaseJob, /needs\.preflight\.outputs\.version/);
 });
 
+test('unsigned prerelease tags bypass signing gates but normal v2 tags still require them', () => {
+  const preflight = workflow.split(/\n  macos:\s*\n/, 2)[0];
+  const exempt = /if: startsWith\(github\.ref, 'refs\/tags\/v'\) && !contains\(github\.ref_name, '-unsigned\.'\)/g;
+  assert.equal(
+    preflight.match(exempt)?.length,
+    3,
+    'updater / Apple / Windows 三道签名门禁都必须明确排除 unsigned 标签',
+  );
+  assert.match(
+    preflight,
+    /BASE_TAG=\"\$\{BASH_REMATCH\[1\]\}\"/,
+    '标签校验必须允许 vX.Y.Z-unsigned.N 映射回 package.json 的 X.Y.Z',
+  );
+});
+
+test('unsigned prereleases do not publish an updater manifest', () => {
+  const releaseJob = workflow.split(/\n  release:\s*\n/, 2)[1];
+  assert.ok(releaseJob, '必须存在 release job');
+  assert.match(
+    releaseJob,
+    /- name: 生成签名更新清单 latest\.json\n\s+if: \$\{\{ !contains\(github\.ref_name, '-unsigned\.'\) \}\}/,
+    'unsigned 发布不能生成会被客户端当作正式更新的 latest.json',
+  );
+  assert.match(
+    releaseJob,
+    /prerelease: \$\{\{ contains\(github\.ref_name, '-unsigned\.'\) \}\}/,
+    'unsigned 标签必须创建 GitHub prerelease',
+  );
+});
+
 test('preflight blocks Rust dependency vulnerabilities with a pinned cargo-audit', () => {
   const preflight = workflow.split(/\n  macos:\s*\n/, 2)[0];
   assert.ok(
