@@ -15,8 +15,10 @@
 显式全量排序 p95 **37.72 ms**，recall@1 / @5 **100% / 100%**；
 3 万篇图谱首屏与全量均为 **949.5 ms**，扫描 **14.90 s**，全部低于发布红线。
 
-本次 GitHub 发布使用 `v2.0.0-unsigned.1` 未签名预发行通道：macOS 为 ad-hoc、
-Windows 未签名，不生成 `latest.json`，不进入正式自动更新；正式稳定版仍为 V1.3.7。
+本次 GitHub 发布使用
+[`v2.0.0-unsigned.4`](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v2.0.0-unsigned.4)
+未签名预发行通道：macOS 为 ad-hoc、Windows 未签名，不生成 `latest.json`，不进入正式自动更新；
+正式稳定版仍为 V1.3.7。6 个安装资产已从 Release 回下载并通过 `SHA256SUMS-all.txt` 校验。
 
 发布审计修复 3 个 RustSec 漏洞：`libsqlite3-sys` 升至 0.40、`rusqlite` 升至 0.42，
 并升级 `pulldown-cmark` 至 0.13.6，消除 SQLite CVE-2026-119375 与两个 WikiLink

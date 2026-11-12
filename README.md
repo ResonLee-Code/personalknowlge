@@ -4,11 +4,11 @@
 SQLite 负责元数据与全文检索，界面基于 Tauri 2 + React 19 + TypeScript。
 数据自主：删掉应用，笔记还在；删掉数据库，也能从 Markdown 重建。
 
-**当前版本：V2.0.0 发版候选**（2026-11-13，四处版本号一致：`package.json` /
+**当前版本：V2.0.0 未签名预发行版**（2026-11-13，四处版本号一致：`package.json` /
 `src-tauri/Cargo.toml` / `Cargo.lock` / `src-tauri/tauri.conf.json`）。
 
 - 📦 当前稳定下载仍为 **[v1.3.7](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.7)**；
-  V2.0.0 正式 Release 将在签名门禁处理后更新。
+  V2 功能预览见 **[v2.0.0-unsigned.4](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v2.0.0-unsigned.4)**（未签名预发行，不进入自动更新）。
 - 📘 **[完全指南（中文）](./docs/GUIDE.md)** · **[Complete Guide (English)](./docs/GUIDE.en.md)**
 - 📗 **[使用说明手册（逐控件）](./docs/MANUAL.md)**：每个按钮 / 输入框 / 菜单项各是干什么的
 - 🧾 变更明细 [docs/CHANGELOG.md](./docs/CHANGELOG.md) · V2 候选实况 [docs/ACCEPTANCE_V2.0.0.md](./docs/ACCEPTANCE_V2.0.0.md)
@@ -112,6 +112,9 @@ cargo build                  # 构建桌面二进制
 
 从 **[v1.3.7 Release](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v1.3.7)** 下载；
 每个平台另附 `SHA256SUMS-<platform>.txt`，在下载目录里直接校验：
+
+> **V2 功能预览**：[v2.0.0-unsigned.4](https://github.com/ResonLee-Code/personalknowlge/releases/tag/v2.0.0-unsigned.4)
+> 是未签名预发行版。macOS 为 ad-hoc、Windows 未签名，不含 `latest.json`，不会进入正式自动更新。
 
 ```bash
 shasum -a 256 -c SHA256SUMS-all.txt     # Linux 用 sha256sum -c

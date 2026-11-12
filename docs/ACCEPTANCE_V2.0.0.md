@@ -2,7 +2,7 @@
 
 日期：2026-11-13
 
-状态：本机 macOS 候选已验证；远端通过 `v2.0.0-unsigned.1` 发布未签名预发行版
+状态：已通过 `v2.0.0-unsigned.4` 发布未签名 GitHub prerelease
 
 ## 版本身份
 
@@ -17,17 +17,23 @@
 
 | 项目 | 值 |
 | --- | --- |
+| Release | <https://github.com/ResonLee-Code/personalknowlge/releases/tag/v2.0.0-unsigned.4> |
 | macOS 架构 | arm64 |
-| `.dmg` | `Personal Knowledge OS_2.0.0_aarch64.dmg` |
-| `.dmg` 大小 | 15,692,285 B |
-| `.dmg` SHA-256 | `daee0515039572007c613947993ec225202fb3167fd36c03ce34dcebb7a7ed6e` |
-| 应用二进制 SHA-256 | `915327c17abcc117d58a903ed4e8843227a9a15717411c40528d488a388d47a9` |
+| `.dmg` | `Personal.Knowledge.OS_2.0.0_aarch64.dmg` |
+| `.dmg` 大小 | 15,690,977 B |
+| `.dmg` SHA-256 | `e7104325093588143491bd173295223477a821cca77ff812628f00e94c253936` |
+| 应用二进制 SHA-256 | `5f6b689e53a208281a91665e54b3f66dd8b75042a6788ac19be70c8945fafeba` |
 | 签名 | ad-hoc；无 Developer ID、无公证 |
-| CDHash | `59438338e9b083c16c7446b9eb8c254773d2f680` |
+| CDHash | `99ff347070a3e9f7b8c1f5a15aeee1bdde4fedd4` |
 
 DMG 已挂载验证：包含 `Personal Knowledge OS.app` 与 `Applications` 链接，应用版本
 `CFBundleShortVersionString=2.0.0`，`codesign --verify --deep --strict` 通过；
 随后从 release `.app` 实际启动，进程稳定运行。
+
+GitHub Release 已回下载全部 6 个安装资产，`shasum -a 256 -c SHA256SUMS-all.txt` 全部 OK。
+Windows NSIS 外壳为预期 32 位 stub；便携 ZIP 内主程序已通过 PE32+ / x64 GUI 结构校验。
+Linux deb / rpm / AppImage 文件格式已核验。macOS runner 在分配执行器前被 GitHub 取消，
+因此 macOS 资产由同一提交在本机等价重建并完成签名、挂载与启动验收。
 
 ## 自动验收
 
@@ -60,7 +66,7 @@ DMG 已挂载验证：包含 `Personal Knowledge OS.app` 与 `Applications` 链�
 本机候选是 ad-hoc 签名。仓库正式 `v2.0.0` tag 仍要求 updater、Apple Developer ID / 公证与
 Windows Authenticode Secrets；当前远端 Actions 未配置这些 Secret。
 
-本次按用户确认走 `v2.0.0-unsigned.1` 未签名预发行通道：
+本次按用户确认走 `v2.0.0-unsigned.4` 未签名预发行通道：
 
 - GitHub Release 标记为 `prerelease=true`；
 - macOS 使用 ad-hoc 签名、不公证；
