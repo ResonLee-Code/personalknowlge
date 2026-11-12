@@ -92,7 +92,7 @@ export function OutlinePanel({
     <aside
       data-testid="outline-panel"
       className={cn(
-        'flex w-[190px] shrink-0 flex-col border-l border-[var(--border-subtle)] bg-[var(--surface)]',
+        'flex h-full min-h-0 w-[190px] shrink-0 flex-col border-l border-[var(--border-subtle)] bg-[var(--surface)]',
         className,
       )}
     >
@@ -108,6 +108,7 @@ export function OutlinePanel({
             className="flex shrink-0 items-center gap-0.5 rounded px-0.5 py-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
           >
             <ChevronsLeft className="h-3.5 w-3.5" />
+            <span className="whitespace-nowrap">返回列表</span>
           </button>
         ) : null}
         {/*
@@ -184,7 +185,10 @@ export function OutlinePanel({
               </button>
             )}
       </header>
-      <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-3">
+      <div
+        data-testid="outline-scroll"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 pb-3"
+      >
         {headings.length === 0 ? (
           <p className="px-1.5 text-[11px] leading-relaxed text-[var(--ink-subtle)]">
             正文还没有标题。用 <code># 标题</code> 开始分层，这里会自动生成大纲。

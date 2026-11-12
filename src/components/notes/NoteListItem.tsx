@@ -17,7 +17,7 @@ import {
   Trash2,
   Undo2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -51,6 +51,75 @@ import { useNotesStore } from '@/stores/notesStore';
 import type { NoteSummary } from '@/types';
 
 type MenuVariant = 'dropdown' | 'context';
+
+/**
+ * Codex 式列表标题：不使用省略号；悬停时测量溢出量并横向滚动露出完整标题。
+ *
+ * 只改变视觉位移，不改变行高或操作区布局，避免鼠标移入时整行跳动。
+ */
+function HoverScrollTitle({
+  title,
+  segments,
+  active,
+}: {
+  title: string;
+  segments: Array<{ text: string; matched: boolean }>;
+  active: boolean;
+}) {
+  const viewportRef = useRef<HTMLSpanElement | null>(null);
+  const contentRef = useRef<HTMLSpanElement | null>(null);
+  const [overflow, setOverflow] = useState(0);
+
+  useEffect(() => {
+    const measure = () => {
+      const viewport = viewportRef.current;
+      const content = contentRef.current;
+      if (!viewport || !content) return;
+      setOverflow(Math.max(0, content.scrollWidth - viewport.clientWidth));
+    };
+    measure();
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(measure);
+      if (viewportRef.current) observer.observe(viewportRef.current);
+      if (contentRef.current) observer.observe(contentRef.current);
+      return () => observer.disconnect();
+    }
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [title]);
+
+  const duration = Math.min(4200, Math.max(700, overflow * 14));
+  return (
+    <span
+      ref={viewportRef}
+      data-testid="note-list-item-title-scroll"
+      className={cn(
+        'pointer-events-none block min-w-0 overflow-hidden whitespace-nowrap [text-overflow:clip]',
+        active
+          ? '[mask-image:none]'
+          : '[mask-image:linear-gradient(to_right,black_calc(100%_-_22px),transparent)]',
+      )}
+    >
+      <span
+        ref={contentRef}
+        data-testid="note-list-item-title-content"
+        className="inline-block will-change-transform"
+        style={{
+          transform: active && overflow > 0 ? `translateX(-${overflow}px)` : 'translateX(0px)',
+          transitionDuration: `${active ? duration : 180}ms`,
+          transitionProperty: 'transform',
+          transitionTimingFunction: 'linear',
+        }}
+      >
+        {segments.map((segment, index) => (
+          <span key={index} className={segment.matched ? 'search-highlight' : undefined}>
+            {segment.text}
+          </span>
+        ))}
+      </span>
+    </span>
+  );
+}
 
 /** 笔记条目上的操作集合：`⋮` 与右键菜单共用同一份定义（对标语雀）。 */
 function NoteMenuItems({
@@ -224,12 +293,15 @@ export function NoteListItem({
   const [copyOpen, setCopyOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [rowHovered, setRowHovered] = useState(false);
 
   /** 当前列表结果里的直接子文档（用于删除确认框与提示） */
   const children = useNotesStore((state) => state.items).filter(
     (item) => item.parentId === note.id,
   );
-  const titleSegments = keyword ? splitHighlight(note.title, [keyword]) : [{ text: note.title, matched: false }];
+  const titleSegments = keyword
+    ? splitHighlight(note.title, [keyword])
+    : [{ text: note.title, matched: false }];
   const snippet = note.snippet ?? [];
   const deleted = note.status === 'deleted';
 
@@ -238,7 +310,9 @@ export function NoteListItem({
 
   const handleFavorite = () => {
     const success = note.favorite ? '已取消收藏' : '已收藏';
-    void toggleFavorite(note.id).then((ok) => reportAction(ok, success, notesError(), '收藏操作失败'));
+    void toggleFavorite(note.id).then((ok) =>
+      reportAction(ok, success, notesError(), '收藏操作失败'),
+    );
   };
 
   const handlePin = () => {
@@ -258,9 +332,7 @@ export function NoteListItem({
   };
 
   const handlePromote = () => {
-    void setParent(note.id, null).then((ok) =>
-      reportAction(ok, '已升级为顶层文档', notesError()),
-    );
+    void setParent(note.id, null).then((ok) => reportAction(ok, '已升级为顶层文档', notesError()));
   };
 
   const handleDelete = () => {
@@ -307,14 +379,18 @@ export function NoteListItem({
     onCopyTo: () => setCopyOpen(true),
     onExport: () => setExportOpen(true),
     onDuplicate: () =>
-      void duplicate(note.id).then((ok) => reportAction(ok, '已创建副本', notesError(), '创建副本失败')),
+      void duplicate(note.id).then((ok) =>
+        reportAction(ok, '已创建副本', notesError(), '创建副本失败'),
+      ),
     onDelete: handleDelete,
     onRestore: () =>
       void restore(note.id).then((ok) =>
         reportAction(ok, '已从回收站恢复', notesError(), '恢复失败'),
       ),
     onPurge: () =>
-      void purge(note.id).then((ok) => reportAction(ok, '已永久删除', notesError(), '永久删除失败')),
+      void purge(note.id).then((ok) =>
+        reportAction(ok, '已永久删除', notesError(), '永久删除失败'),
+      ),
   };
 
   return (
@@ -335,6 +411,14 @@ export function NoteListItem({
                 return;
               }
               onOpen();
+            }}
+            onMouseEnter={() => setRowHovered(true)}
+            onMouseLeave={() => setRowHovered(false)}
+            onFocus={() => setRowHovered(true)}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setRowHovered(false);
+              }
             }}
             onKeyDownCapture={(event) => {
               if (selectionMode && (event.key === ' ' || event.key === 'Enter')) {
@@ -375,11 +459,11 @@ export function NoteListItem({
               setNoteDragData(event.dataTransfer, ids, note.title);
             }}
             className={cn(
-              'group relative cursor-pointer rounded-lg border border-transparent px-2.5 py-2 transition-colors',
+              'group relative cursor-pointer rounded-lg border border-transparent px-2.5 py-2 transition-[background-color,border-color] duration-150',
               selectedForBatch
                 ? 'border-[var(--brand)]/60 bg-[var(--brand-soft)]'
                 : selected
-                  ? 'border-[var(--brand)]/40 bg-[var(--brand-soft)]'
+                  ? 'border-[var(--brand)]/40 bg-[var(--brand-soft)] hover:border-transparent hover:bg-[var(--surface-muted)]'
                   : 'hover:bg-[var(--surface-muted)]',
               // 对标语雀：蓝色框 = 拖成该节点的子级
               dropHint === 'inside' && 'ring-2 ring-[var(--brand)] bg-[var(--brand-soft)]',
@@ -427,7 +511,7 @@ export function NoteListItem({
                     data-testid="note-tree-toggle"
                     aria-label={collapsed ? `展开 ${note.title}` : `折叠 ${note.title}`}
                     aria-expanded={!collapsed}
-                    className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--ink)]"
+                    className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--ink)]"
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -442,82 +526,102 @@ export function NoteListItem({
                   </button>
                 ) : null}
               </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    data-testid="note-list-item-title"
-                    className="min-w-0 flex-1 truncate text-sm text-[var(--ink)]"
-                  >
-                    {titleSegments.map((segment, index) => (
-                      <span key={index} className={segment.matched ? 'search-highlight' : undefined}>
-                        {segment.text}
-                      </span>
-                    ))}
-                  </span>
-                </TooltipTrigger>
-                {/* 标题被截断时，悬停显示完整标题 */}
-                <TooltipContent side="top" className="max-w-[min(420px,60vw)] break-words">
-                  {note.title}
-                </TooltipContent>
-              </Tooltip>
-              {note.pinned ? (
-                <span
-                  data-testid="note-pinned-marker"
-                  role="img"
-                  aria-label="已置顶"
-                  title="已置顶"
-                  className="flex shrink-0 text-[var(--brand)]"
-                >
-                  <Pin className="h-3 w-3" />
-                </span>
-              ) : null}
-              {note.favorite ? (
-                <span
-                  data-testid="note-favorite-marker"
-                  role="img"
-                  aria-label="已收藏"
-                  title="已收藏"
-                  className="flex shrink-0 text-amber-500"
-                >
-                  <Star className="h-3 w-3" />
-                </span>
-              ) : null}
-              {/* hover 才出现的快捷操作（对标语雀：⋮ 与 + 在建条目右侧） */}
-              {/* 快捷操作统一"鼠标移到条目上才出现"（长标题也一样）：
-                  标题会被截断，但按钮不常驻——列表保持安静（2026-10-16 按用户反馈回退上一版） */}
-              <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                <button
-                  type="button"
-                  data-testid="note-quick-child"
-                  title="新建子文档"
-                  aria-label={`为 ${note.title} 新建子文档`}
-                  disabled={deleted}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setChildOpen(true);
-                  }}
-                  className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--brand)] disabled:opacity-40"
-                >
-                  <FilePlus2 className="h-3.5 w-3.5" />
-                </button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label="笔记操作"
-                      title="更多操作"
-                      onClick={(event) => event.stopPropagation()}
-                      className="rounded p-0.5 text-[var(--ink-subtle)] data-[state=open]:opacity-100"
+              <div className="relative flex min-w-0 flex-1 items-center gap-1.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      data-testid="note-list-item-title"
+                      className={cn(
+                        'min-w-0 flex-1 text-sm leading-5 transition-colors duration-150',
+                        depth > 0
+                          ? 'text-[var(--ink-muted)] group-hover:text-[var(--ink)]'
+                          : 'text-[var(--ink)]',
+                      )}
                     >
-                      <MoreHorizontal className="h-3.5 w-3.5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
-                    <NoteMenuItems variant="dropdown" note={note} {...menuHandlers} />
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </span>
+                      <HoverScrollTitle
+                        title={note.title}
+                        segments={titleSegments}
+                        active={rowHovered}
+                      />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="right"
+                    align="start"
+                    className="max-w-[min(380px,55vw)] rounded-lg p-2.5"
+                  >
+                    <p className="whitespace-normal font-medium leading-relaxed text-[var(--ink)]">
+                      {note.title}
+                    </p>
+                    <p className="mt-1 flex items-center gap-1 text-[11px] text-[var(--ink-subtle)]">
+                      <FolderTree className="h-3 w-3 shrink-0" />
+                      {note.categoryPath || 'Inbox'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+                {note.pinned ? (
+                  <span
+                    data-testid="note-pinned-marker"
+                    role="img"
+                    aria-label="已置顶"
+                    title="已置顶"
+                    className="flex shrink-0 text-[var(--brand)] group-hover:opacity-0"
+                  >
+                    <Pin className="h-3 w-3" />
+                  </span>
+                ) : null}
+                {note.favorite ? (
+                  <span
+                    data-testid="note-favorite-marker"
+                    role="img"
+                    aria-label="已收藏"
+                    title="已收藏"
+                    className="flex shrink-0 text-amber-500 group-hover:opacity-0"
+                  >
+                    <Star className="h-3 w-3" />
+                  </span>
+                ) : null}
+                {/* Codex 式覆盖操作区：不占标题宽度，悬停时淡入并接管右侧点击。 */}
+                <span
+                  data-testid="note-row-actions"
+                  className={cn(
+                    'absolute inset-y-0 right-0 z-30 flex items-center gap-0.5 rounded-md bg-[var(--surface-muted)]/95 px-1 shadow-[0_0_12px_8px_var(--surface-muted)] transition-opacity duration-150',
+                    rowHovered ? 'opacity-100' : 'opacity-0',
+                  )}
+                >
+                  <button
+                    type="button"
+                    data-testid="note-quick-child"
+                    title="新建子文档"
+                    aria-label={`为 ${note.title} 新建子文档`}
+                    disabled={deleted}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setChildOpen(true);
+                    }}
+                    className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--ink)] disabled:opacity-40"
+                  >
+                    <FilePlus2 className="h-3.5 w-3.5" />
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="笔记操作"
+                        title="更多操作"
+                        onClick={(event) => event.stopPropagation()}
+                        className="rounded p-0.5 text-[var(--ink-subtle)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--ink)] data-[state=open]:opacity-100"
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
+                      <NoteMenuItems variant="dropdown" note={note} {...menuHandlers} />
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </span>
+              </div>
             </div>
             {/* 搜索态才显示命中摘要：定位匹配位置用，平时保持列表紧凑 */}
             {keyword && snippet.length > 0 ? (
@@ -555,7 +659,11 @@ export function NoteListItem({
       ) : null}
       {copyOpen ? <CopyNoteDialog note={note} onClose={() => setCopyOpen(false)} /> : null}
       {exportOpen ? (
-        <ExportNoteDialog noteId={note.id} title={note.title} onClose={() => setExportOpen(false)} />
+        <ExportNoteDialog
+          noteId={note.id}
+          title={note.title}
+          onClose={() => setExportOpen(false)}
+        />
       ) : null}
       {deleteOpen ? (
         <DeleteNoteDialog

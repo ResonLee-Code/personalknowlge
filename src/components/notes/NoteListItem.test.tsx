@@ -35,7 +35,7 @@ describe('NoteListItem', () => {
    * 右边看着空一块）——用户明确要求改回统一 hover 显示，长标题也一样。
    * 这条断言就是把这个口径钉住：默认透明、hover / 焦点进入才出现。
    */
-  it('右侧两个快捷按钮默认隐藏，鼠标移到条目上（或焦点进入）才出现', () => {
+  it('右侧两个快捷按钮默认隐藏，鼠标移到条目上才出现并可点击', async () => {
     render(
       <TooltipProvider delayDuration={0}>
         <MemoryRouter>
@@ -47,8 +47,8 @@ describe('NoteListItem', () => {
     );
     const buttons = screen.getByTestId('note-quick-child').parentElement;
     expect(buttons).toHaveClass('opacity-0');
-    expect(buttons).toHaveClass('group-hover:opacity-100');
-    expect(buttons).toHaveClass('group-focus-within:opacity-100');
+    await userEvent.hover(screen.getByTestId('note-list-item'));
+    expect(buttons).toHaveClass('opacity-100');
   });
 
   it('语雀式单行条目：只显示标题，分类 / 标签 / 时间不在列表里重复', () => {
@@ -67,6 +67,40 @@ describe('NoteListItem', () => {
     expect(screen.queryByText(/技术\/数据库/)).not.toBeInTheDocument();
     expect(screen.queryByText('sqlite')).not.toBeInTheDocument();
     expect(screen.queryByText(/分钟前|小时前|天前/)).not.toBeInTheDocument();
+  });
+
+  it('子项悬停时操作覆盖淡入，标题用裁切和横向滚动而非省略号', () => {
+    render(
+      <TooltipProvider delayDuration={0}>
+        <MemoryRouter>
+          <ul>
+            <NoteListItem
+              note={{ ...note, parentId: 'note_parent' }}
+              selected={false}
+              basePath="/notes"
+              depth={2}
+              onOpen={() => {}}
+            />
+          </ul>
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByTestId('note-list-item')).toHaveClass(
+      'rounded-lg',
+      'hover:bg-[var(--surface-muted)]',
+    );
+    expect(screen.getByTestId('note-row-actions')).toHaveClass('absolute', 'right-0', 'opacity-0');
+    expect(screen.getByTestId('note-list-item-title')).toHaveClass(
+      'flex-1',
+      'text-[var(--ink-muted)]',
+      'group-hover:text-[var(--ink)]',
+    );
+    expect(screen.getByTestId('note-list-item-title')).not.toHaveClass('truncate');
+    expect(screen.getByTestId('note-list-item-title-scroll')).toHaveClass(
+      'overflow-hidden',
+      'whitespace-nowrap',
+    );
   });
 
   it('搜索态才显示命中摘要并高亮', () => {

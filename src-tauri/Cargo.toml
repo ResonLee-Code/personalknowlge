@@ -44,20 +44,18 @@ serde_yaml = "0.9.34"
 sha2 = "0.10.9"
 tauri = { version = "2.11", features = [] }
 tauri-plugin-dialog = "2.4"
+tauri-plugin-deep-link = "2.6.2"
 tauri-plugin-opener = "2.5.5"
 thiserror = "2.0.20"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2.5.7"
 ureq = { version = "3.4.2", features = ["charset"] }
 # GBK 等非 UTF-8 网页的解码（已在依赖树里：ureq 的 charset 特性带入）
 encoding_rs = "0.8"
 uuid = { version = "1.20.0", features = ["v4"] }
 walkdir = "2.5.0"
 zip = { version = "9.0.0", default-features = false, features = ["deflate"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-# 禁用 macOS 原生全屏：让绿色按钮执行系统“缩放”（保留系统红黄绿），见 lib.rs
-objc2 = "0.6.4"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2.14.0"

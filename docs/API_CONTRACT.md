@@ -533,6 +533,55 @@ evidenceNote, warnings[], channels[], retrievedCount, tookMs }`。
 要求重新提问。预览返回 `{ title, content, categoryId, sources, warnings }`；
 正文包含问题、实际生成档位、答案、`[[来源笔记]]` 与折叠的原文摘录，默认落 Inbox。
 
+## 23.1.1 内容发现（V2.0.x）
+
+内容发现是独立于研究助手的外部内容入口。它只抓取用户提交的公开 URL，
+不会自动发起搜索引擎查询；网页正文默认不发送给外部 AI，Decision Model
+只在已授权时接收候选链接的标题与上下文用于筛选。
+
+| 命令                      | 参数                                  | 返回                       | 说明                                                             |
+| ------------------------- | ------------------------------------- | -------------------------- | ---------------------------------------------------------------- |
+| `content_capture_create`  | `{ input: ContentCaptureInput }`      | `ContentCapture`           | 抓取根页面并生成收件箱记录、候选链接与本地整理建议               |
+| `content_capture_list`    | `{ status?, limit? }`                 | `ContentCapture[]`         | 查询收件箱；`limit` 默认 50                                      |
+| `content_capture_get`     | `{ captureId }`                       | `ContentCapture`           | 读取详情、候选、页面状态和 Markdown 预览                         |
+| `content_discovery_run`   | `{ input: ContentDiscoveryRunInput }` | `ContentCapture`           | 抓取用户勾选的候选；再次调用会复用整个 capture 的页面预算        |
+| `content_capture_refresh` | `{ captureId, confirmed }`            | `ContentCapture`           | 重新检查来源；只刷新收件箱预览，不覆盖已入库笔记                 |
+| `content_capture_save`    | `{ input: ContentCaptureSaveInput }`  | `ContentCaptureSaveResult` | 通过普通笔记写入路径保存，允许覆盖标题、分类、标签与完整正文选项 |
+| `content_capture_ignore`  | `{ captureId }`                       | `ContentCapture`           | 将收件箱记录标为忽略，不删除正式笔记                             |
+
+`ContentCaptureInput` 为
+`{ url, sharedText?, userNote?, confirmed }`。`confirmed=true` 表示用户已确认本次访问公开页面，
+但仍需同时满足 AI 总开关、联网档位和联网授权；否则返回 `AI_DISABLED` / `NETWORK_DISABLED`，
+且不发起请求。URL 缺少协议时补为 `https://`，只接受公开 http/https 页面。
+
+`ContentDiscoveryRunInput` 为
+`{ captureId, selectedUrls: string[], options: ContentDiscoveryOptions, confirmed }`。
+`ContentDiscoveryOptions` 默认
+`{ maxDepth: 1, maxPages: 20, samePath: true, includeSubdomains: false, includeExternal: false,
+includeHidden: false, keepFullText: false }`；后端将 `maxDepth` 限制在 0–3、`maxPages`
+限制在 1–100。页面预算按整个 capture 计算，包含根页面与所有轮次成功抓取或已占用的页面。
+已成功页面不重复抓取；失败页面会持久化并可重试，不会中止其它页面。
+
+`ContentCaptureSaveInput` 为
+`{ captureId, title?, categoryId?, tags?, keepFullText? }`；`tags` 与 `keepFullText`
+缺省时沿用内容发现建议和收件箱设置。返回
+`ContentCaptureSaveResult`：`{ captureId, noteId, noteTitle }`。
+
+`ContentCapture` 主要字段：
+`{ id, workspaceId, requestedUrl, finalUrl, canonicalUrl, sourceKind, title, author, site,
+publishedAt, capturedAt, userNote, status, summary, keyPoints, tags, relatedNoteIds,
+relatedNotes, suggestedCategoryId, decisionProvider, keepFullText, pageCount, wordCount,
+cacheDir, error, noteId, duplicateOf, createdAt, updatedAt, savedAt, sourceChanged,
+lastRefreshedAt, candidates, pages, markdown }`。`sourceKind` 为
+`web | wechat | git`；`status` 为
+`received | discovering | awaitingSelection | fetching | ready | saved | failed | ignored | duplicate`。
+`markdown` 只是详情接口从工作区缓存拼出的可查看预览，不是数据库备份内容。
+
+候选链接 `ContentDiscoveryCandidate` 带 URL、canonical、父页面、深度、标题、锚文本、
+上下文、静态隐藏标记、同源 / 同站判断、是否可选、阻断原因与 Decision 分数；
+页面 `ContentDiscoveryPage` 带抓取状态、正文哈希、字节数、缓存相对路径、耗时和错误。
+原始正文缓存位于 `.knowledge/content-discovery/<captureId>/`，不进入 SQLite 备份。
+
 ## 23.2 Organize 建议队列（V2.0 P0）
 
 | 命令 | 参数 | 返回 | 说明 |

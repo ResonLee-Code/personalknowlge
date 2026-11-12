@@ -1530,6 +1530,153 @@ export interface ClippedPage {
   wordCount: number;
   fetchedAt: string;
   bytes: number;
+  /** 静态 HTML 中发现的可继续探索链接（内容发现使用） */
+  links?: ClippedPageLink[];
+}
+
+export interface ClippedPageLink {
+  url: string;
+  title: string;
+  context: string;
+  hidden: boolean;
+}
+
+/** 内容发现来源类型 */
+export type ContentSourceKind = 'web' | 'wechat' | 'git';
+
+/** 内容发现收件箱状态 */
+export type ContentCaptureStatus =
+  | 'received'
+  | 'discovering'
+  | 'awaitingSelection'
+  | 'fetching'
+  | 'ready'
+  | 'saved'
+  | 'failed'
+  | 'ignored'
+  | 'duplicate';
+
+export interface ContentCaptureInput {
+  url: string;
+  sharedText?: string | null;
+  userNote?: string | null;
+  confirmed: boolean;
+}
+
+export interface ContentDiscoveryOptions {
+  maxDepth: number;
+  maxPages: number;
+  samePath: boolean;
+  includeSubdomains: boolean;
+  includeExternal: boolean;
+  includeHidden: boolean;
+  keepFullText: boolean;
+}
+
+export interface ContentDiscoveryRunInput {
+  captureId: string;
+  selectedUrls: string[];
+  options: ContentDiscoveryOptions;
+  confirmed: boolean;
+}
+
+export interface ContentDiscoveryProgress {
+  captureId: string;
+  status: 'fetching' | 'ready';
+  completed: number;
+  total: number;
+  currentUrl?: string | null;
+}
+
+export interface ContentDiscoveryCandidate {
+  url: string;
+  canonicalUrl: string;
+  parentUrl: string;
+  depth: number;
+  title: string;
+  anchorText?: string | null;
+  context: string;
+  hidden: boolean;
+  sameOrigin: boolean;
+  sameSite: boolean;
+  eligible: boolean;
+  blockedReason?: string | null;
+  relevanceScore?: number | null;
+  relevanceReason?: string | null;
+  selected: boolean;
+}
+
+export interface ContentDiscoveryPage {
+  url: string;
+  canonicalUrl: string;
+  parentUrl?: string | null;
+  depth: number;
+  title: string;
+  site?: string | null;
+  contentHash: string;
+  wordCount: number;
+  bytes: number;
+  cachePath: string;
+  status: string;
+  fetchedAt: string;
+  error?: string | null;
+}
+
+export interface ContentCapture {
+  id: string;
+  workspaceId: string;
+  requestedUrl: string;
+  finalUrl: string;
+  canonicalUrl: string;
+  sourceKind: ContentSourceKind;
+  title: string;
+  author?: string | null;
+  site?: string | null;
+  publishedAt?: string | null;
+  capturedAt: string;
+  userNote?: string | null;
+  status: ContentCaptureStatus;
+  summary?: string | null;
+  keyPoints: string[];
+  tags: string[];
+  relatedNoteIds: string[];
+  relatedNotes: ContentRelatedNote[];
+  suggestedCategoryId?: string | null;
+  decisionProvider?: string | null;
+  keepFullText: boolean;
+  pageCount: number;
+  wordCount: number;
+  cacheDir: string;
+  error?: string | null;
+  noteId?: string | null;
+  duplicateOf?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  savedAt?: string | null;
+  sourceChanged: boolean;
+  lastRefreshedAt?: string | null;
+  candidates: ContentDiscoveryCandidate[];
+  pages: ContentDiscoveryPage[];
+  markdown?: string | null;
+}
+
+export interface ContentRelatedNote {
+  noteId: string;
+  title: string;
+}
+
+export interface ContentCaptureSaveInput {
+  captureId: string;
+  title?: string | null;
+  categoryId?: string | null;
+  tags?: string[] | null;
+  keepFullText?: boolean | null;
+}
+
+export interface ContentCaptureSaveResult {
+  captureId: string;
+  noteId: string;
+  noteTitle: string;
 }
 
 /** 版本历史快照（对标语雀「查看历史版本」） */

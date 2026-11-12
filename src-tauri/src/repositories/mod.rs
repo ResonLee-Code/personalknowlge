@@ -5,6 +5,7 @@
 
 pub mod ai_organize_repository;
 pub mod category_repository;
+pub mod content_discovery_repository;
 pub mod chunk_repository;
 pub mod link_repository;
 pub mod note_repository;
@@ -15,6 +16,9 @@ pub mod workspace_repository;
 
 pub use ai_organize_repository::{AiOrganizeRepository, SqliteAiOrganizeRepository, SuggestionRow};
 pub use category_repository::{CategoryRepository, SqliteCategoryRepository};
+pub use content_discovery_repository::{
+    ContentDiscoveryRepository, SqliteContentDiscoveryRepository,
+};
 pub use chunk_repository::{ChunkRepository, SqliteChunkRepository, StoredChunk};
 pub use link_repository::{
     LinkRepository, NoteLinkRow, NoteTitleRow, SqliteLinkRepository,

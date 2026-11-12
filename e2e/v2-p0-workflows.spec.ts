@@ -24,6 +24,14 @@ async function enableAi(page: Page) {
   await expect(page.getByTestId('ai-enabled')).toBeChecked();
 }
 
+async function enableNetwork(page: Page) {
+  await enableAi(page);
+  await page.getByTestId('ai-tab-retrieval').click();
+  await page.getByTestId('ai-network').selectOption('allowNetwork');
+  await page.getByTestId('ai-network-confirm-ok').click();
+  await expect(page.getByTestId('ai-network')).toHaveValue('allowNetwork');
+}
+
 test('Ask 提问、展示可引用材料并经预览确认存为普通笔记', async ({ page }) => {
   await createWorkspace(page);
   await enableAi(page);
@@ -92,4 +100,93 @@ test('Research 编辑计划、保存模板、重跑并展示差异', async ({ pa
   await expect(page.getByText(/新增来源 \d+/)).toBeVisible();
   await expect(page.getByText(/消失来源 \d+/)).toBeVisible();
   await expect(page.getByText(/结论变化 \d+/)).toBeVisible();
+});
+
+test('长大纲可独立滚动、点击后段章节后仍能返回笔记列表', async ({ page }) => {
+  await createWorkspace(page);
+  await page.goto('/#/notes');
+  const body = Array.from(
+    { length: 40 },
+    (_, index) => `## 章节 ${index + 1}\n\n这是第 ${index + 1} 节正文内容。`,
+  ).join('\n\n');
+  await createNote(page, '长文档大纲测试', body);
+
+  await page.getByTestId('outline-toggle').click();
+  await expect(page.getByTestId('list-pane-outline')).toBeVisible();
+  await expect(page.getByTestId('outline-back')).toBeVisible();
+  await expect(page.getByTestId('outline-back')).toContainText('返回列表');
+
+  const scroll = page.getByTestId('outline-scroll');
+  expect(await scroll.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+    true,
+  );
+
+  await scroll.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  const last = page.getByTestId('outline-item').last();
+  await last.click();
+  await expect(page.getByTestId('outline-back')).toBeVisible();
+
+  await scroll.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect(page.getByTestId('outline-item').first()).toBeVisible();
+
+  await page.getByTestId('outline-back').click();
+  await expect(page.getByTestId('note-list-panel')).toBeVisible();
+  await expect(page.getByTestId('list-pane-outline')).not.toBeVisible();
+});
+
+test('长标题悬停时横向滚动并显示覆盖式操作按钮', async ({ page }) => {
+  await createWorkspace(page);
+  await page.goto('/#/notes');
+  const longTitle = '查看当前项目文件中的文档，构建一个可本地化运行的桌面程序和完整知识库工作流';
+  await createNote(page, longTitle, '# 长标题测试\n\n用于验证列表项悬停效果。');
+
+  const row = page.getByTestId('note-list-item').first();
+  const title = row.getByTestId('note-list-item-title');
+  const titleWindow = row.getByTestId('note-list-item-title-scroll');
+  const titleContent = row.getByTestId('note-list-item-title-content');
+  const actions = row.getByTestId('note-row-actions');
+
+  expect(await title.evaluate((element) => element.className)).not.toContain('truncate');
+  expect(await titleWindow.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
+    true,
+  );
+
+  await row.hover();
+  await page.waitForTimeout(450);
+  const transform = await titleContent.evaluate((element) => getComputedStyle(element).transform);
+  expect(transform).not.toBe('none');
+  expect(transform).not.toContain('1, 0, 0, 1, 0, 0');
+  await expect(actions).toHaveCSS('opacity', '1');
+});
+
+test('内容发现：URL 抓取、候选勾选、深抓汇总并确认入库', async ({ page }) => {
+  await createWorkspace(page);
+  await enableNetwork(page);
+
+  await page.goto('/#/discover');
+  await expect(page.getByRole('heading', { name: '内容发现', exact: true })).toBeVisible();
+  await page.getByTestId('content-discovery-url').fill('https://example.com/knowledge-article');
+  await page.getByTestId('content-discovery-note').fill('用于日常知识积累');
+  await page.getByTestId('content-discovery-create').click();
+  await expect(page.getByTestId('content-discovery-network-confirm')).toBeVisible();
+  await page.getByTestId('content-discovery-network-confirm-ok').click();
+
+  await expect(page.getByTestId('content-discovery-detail')).toContainText('剪藏示例');
+  const candidates = page.getByTestId('content-candidate');
+  await expect(candidates).toHaveCount(2);
+  await candidates.first().click();
+  await page.getByTestId('content-discovery-crawl').click();
+  await page.getByTestId('content-discovery-network-confirm-ok').click();
+  await expect(page.getByText('已抓取页面')).toBeVisible();
+  await page.screenshot({ path: 'docs/screenshots/54-content-discovery.png' });
+
+  await page.getByTestId('content-discovery-save-open').click();
+  await page.getByTestId('content-discovery-save').click();
+  await expect(page.getByRole('link', { name: '打开笔记' })).toBeVisible();
+  await page.getByRole('link', { name: '打开笔记' }).click();
+  await expect(page.locator('.cm-content')).toContainText('内容摘录');
 });

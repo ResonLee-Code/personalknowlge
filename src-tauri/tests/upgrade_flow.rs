@@ -84,8 +84,8 @@ fn opening_a_v1_1_workspace_migrates_and_rebuilds_search_index() {
     let context = app.context().expect("上下文");
     assert_eq!(
         context.db.schema_version().expect("schema 版本"),
-        17,
-        "应自动迁移到最新 schema（011 分块 / 012 决策缓存 / 013 向量索引 / 014 Organize / 015 撤销哈希 / 016 FTS 分片 / 017 排序索引）"
+        18,
+        "应自动迁移到最新 schema（011 分块 / 012 决策缓存 / 013 向量索引 / 014 Organize / 015 撤销哈希 / 016 FTS 分片 / 017 排序索引 / 018 内容发现）"
     );
     let (has_map, fts_rows, map_rows): (i64, i64, i64) = context
         .db

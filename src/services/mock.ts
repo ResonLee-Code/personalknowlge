@@ -23,6 +23,10 @@ import type {
   Category,
   CategoryNode,
   ClippedPage,
+  ContentCapture,
+  ContentDiscoveryCandidate,
+  ContentDiscoveryOptions,
+  ContentDiscoveryPage,
   CreateNoteInput,
   GraphData,
   GraphInsights,
@@ -88,7 +92,7 @@ import type {
 import packageJson from '../../package.json';
 
 /** 与后端 `SCHEMA_VERSION` 对齐的迁移版本（预览端不跑迁移，只用于如实展示）。 */
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 
 /** 仓库当前版本（来自 package.json，避免预览端硬编码版本号）。 */
 const packageVersion = packageJson.version;
@@ -117,6 +121,7 @@ interface MockState {
   researchTemplates: ResearchPlanTemplate[];
   syncSettings: SyncSettings;
   syncConflicts: SyncConflictSummary[];
+  contentCaptures: ContentCapture[];
 }
 
 interface MockHistoryEntry {
@@ -278,6 +283,7 @@ function load(): MockState {
         researchTemplates: parsed.researchTemplates ?? [],
         syncSettings: parsed.syncSettings ?? defaultSyncSettings,
         syncConflicts: parsed.syncConflicts ?? [],
+        contentCaptures: parsed.contentCaptures ?? [],
       };
     }
   } catch {
@@ -301,6 +307,7 @@ function load(): MockState {
     researchTemplates: [],
     syncSettings: { ...defaultSyncSettings },
     syncConflicts: [],
+    contentCaptures: [],
   };
 }
 
@@ -576,7 +583,135 @@ function mockClip(url: string): ClippedPage {
     wordCount: markdown.replace(/\s/g, '').length,
     fetchedAt: now(),
     bytes: markdown.length,
+    links: [],
   };
+}
+
+function mockContentCapture(
+  input: { url?: string; sharedText?: string; userNote?: string },
+  confirmed: boolean,
+): ContentCapture {
+  if (!state.ai.network || state.ai.network !== 'allowNetwork' || !state.ai.networkConfirmedAt) {
+    fail('NETWORK_DISABLED', '内容发现需要先开启联网检索并确认一次。');
+  }
+  if (!confirmed) fail('NETWORK_DISABLED', '本次内容抓取尚未确认。');
+  const raw = String(input.url ?? input.sharedText ?? '').trim();
+  const match = raw.match(/https?:\/\/[^\s"'）)】]+/i);
+  const normalized = match?.[0] ?? (raw ? `https://${raw}` : '');
+  if (!normalized) fail('INVALID_INPUT', '没有找到可抓取的 URL。');
+  const existing = state.contentCaptures.find(
+    (capture) => capture.canonicalUrl === normalized && capture.status !== 'ignored',
+  );
+  if (existing) return existing;
+  const page = mockClip(normalized);
+  const nowValue = now();
+  const host = hostOf(normalized);
+  const candidates: ContentDiscoveryCandidate[] = [
+    {
+      url: `${normalized.replace(/\/$/, '')}/guide`,
+      canonicalUrl: `${normalized.replace(/\/$/, '')}/guide`,
+      parentUrl: normalized,
+      depth: 1,
+      title: '关联指南',
+      anchorText: '关联指南',
+      context: '页面正文中的关联指南链接',
+      hidden: false,
+      sameOrigin: true,
+      sameSite: true,
+      eligible: true,
+      blockedReason: null,
+      relevanceScore: 0.82,
+      relevanceReason: '与当前页面主题直接相关',
+      selected: false,
+    },
+    {
+      url: `https://${host}/external-reference`,
+      canonicalUrl: `https://${host}/external-reference`,
+      parentUrl: normalized,
+      depth: 1,
+      title: '外部参考',
+      anchorText: '外部参考',
+      context: '页面中的外部参考资料',
+      hidden: true,
+      sameOrigin: true,
+      sameSite: true,
+      eligible: false,
+      blockedReason: 'hidden',
+      relevanceScore: null,
+      relevanceReason: null,
+      selected: false,
+    },
+  ];
+  const capture: ContentCapture = {
+    id: `capture_${ulid()}`,
+    workspaceId: state.workspace?.id ?? 'mock-workspace',
+    requestedUrl: normalized,
+    finalUrl: normalized,
+    canonicalUrl: normalized,
+    sourceKind: host.includes('weixin.qq.com')
+      ? 'wechat'
+      : /github\.com|gitlab\.com|gitee\.com/.test(host)
+        ? 'git'
+        : 'web',
+    title: page.title,
+    author: null,
+    site: page.site,
+    publishedAt: null,
+    capturedAt: nowValue,
+    userNote: String(input.userNote ?? '').trim() || null,
+    status: 'awaitingSelection',
+    summary: `这是从 ${host} 捕获的预览内容，可在真实桌面端抓取完整网页并生成摘要。`,
+    keyPoints: ['已提取页面标题和正文', '发现 2 个关联链接，可勾选深入抓取'],
+    tags: ['网页发现'],
+    relatedNoteIds: [],
+    relatedNotes: [],
+    suggestedCategoryId: null,
+    decisionProvider: state.ai.decisionProvider === 'system_one' ? 'system_one' : null,
+    keepFullText: false,
+    pageCount: 1,
+    wordCount: page.wordCount,
+    cacheDir: `.knowledge/content-discovery/${normalized}`,
+    error: null,
+    noteId: null,
+    duplicateOf: null,
+    createdAt: nowValue,
+    updatedAt: nowValue,
+    savedAt: null,
+    sourceChanged: false,
+    lastRefreshedAt: null,
+    candidates,
+    pages: [
+      {
+        url: normalized,
+        canonicalUrl: normalized,
+        parentUrl: null,
+        depth: 0,
+        title: page.title,
+        site: page.site,
+        contentHash: `mock-${shortHash(markdownHashSource(page.markdown))}`,
+        wordCount: page.wordCount,
+        bytes: page.bytes,
+        cachePath: '',
+        status: 'ready',
+        fetchedAt: page.fetchedAt,
+        error: null,
+      },
+    ],
+    markdown: page.markdown,
+  };
+  state.contentCaptures.unshift(capture);
+  persist();
+  return capture;
+}
+
+function markdownHashSource(markdown: string) {
+  return markdown;
+}
+
+function shortHash(value: string) {
+  let hash = 0;
+  for (const char of value) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return hash.toString(16);
 }
 
 // ---------------------------------------------------------------- 研究助手（D1/D2）
@@ -3257,6 +3392,7 @@ export async function handleMockInvoke(
         researchTemplates: [],
         syncSettings: { ...defaultSyncSettings },
         syncConflicts: [],
+        contentCaptures: [],
       };
       persist();
       return null;
@@ -4885,6 +5021,136 @@ export async function handleMockInvoke(
         auditResearch('research_abort', 'ok', 'aborted');
       }
       return researchSave(session);
+    }
+    case 'content_capture_create': {
+      requireWorkspace();
+      const input = (payload.input ?? {}) as {
+        url?: string;
+        sharedText?: string;
+        userNote?: string;
+        confirmed?: boolean;
+      };
+      return mockContentCapture(input, Boolean(input.confirmed));
+    }
+    case 'content_capture_list': {
+      requireWorkspace();
+      const status = typeof payload.status === 'string' ? payload.status : null;
+      const limit = Math.max(1, Math.min(200, Number(payload.limit ?? 50)));
+      return state.contentCaptures
+        .filter((capture) => !status || capture.status === status)
+        .slice(0, limit);
+    }
+    case 'content_capture_get': {
+      requireWorkspace();
+      const capture = state.contentCaptures.find((item) => item.id === payload.captureId);
+      if (!capture) fail('INVALID_INPUT', '内容记录不存在。');
+      return capture;
+    }
+    case 'content_discovery_run': {
+      requireWorkspace();
+      const input = (payload.input ?? {}) as {
+        captureId?: string;
+        selectedUrls?: string[];
+        options?: ContentDiscoveryOptions;
+        confirmed?: boolean;
+      };
+      if (!input.confirmed) fail('NETWORK_DISABLED', '本次内容抓取尚未确认。');
+      const capture = state.contentCaptures.find((item) => item.id === input.captureId);
+      if (!capture) fail('INVALID_INPUT', '内容记录不存在。');
+      const maxPages = Math.max(1, Math.min(100, Number(input.options?.maxPages ?? 20)));
+      const selected = [...new Set(input.selectedUrls ?? [])].slice(0, maxPages - 1);
+      for (const [index, url] of selected.entries()) {
+        const candidate = capture.candidates.find((item) => item.canonicalUrl === url);
+        const page: ContentDiscoveryPage = {
+          url,
+          canonicalUrl: url,
+          parentUrl: capture.finalUrl,
+          depth: 1,
+          title: candidate?.title ?? `关联页面 ${index + 1}`,
+          site: hostOf(url),
+          contentHash: `mock-page-${shortHash(url)}`,
+          wordCount: 320 + index * 40,
+          bytes: 1200 + index * 100,
+          cachePath: '',
+          status: 'ready',
+          fetchedAt: now(),
+          error: null,
+        };
+        if (!capture.pages.some((item) => item.canonicalUrl === url)) capture.pages.push(page);
+      }
+      capture.status = 'ready';
+      capture.keepFullText = Boolean(input.options?.keepFullText);
+      capture.pageCount = capture.pages.filter((page) => page.status === 'ready').length;
+      capture.wordCount = capture.pages.reduce((sum, page) => sum + page.wordCount, 0);
+      capture.summary = `已从 ${capture.site ?? capture.sourceKind} 汇总 ${capture.pageCount} 个页面；可在桌面端查看完整 Markdown 预览。`;
+      capture.keyPoints = [
+        '包含页面主题和主要内容',
+        `已合并 ${capture.pageCount - 1} 个勾选的相关页面`,
+      ];
+      capture.updatedAt = now();
+      persist();
+      return capture;
+    }
+    case 'content_capture_refresh': {
+      requireWorkspace();
+      if (!payload.confirmed) fail('NETWORK_DISABLED', '本次来源检查尚未确认。');
+      const capture = state.contentCaptures.find((item) => item.id === payload.captureId);
+      if (!capture) fail('INVALID_INPUT', '内容记录不存在。');
+      capture.sourceChanged = !capture.sourceChanged;
+      capture.lastRefreshedAt = now();
+      capture.updatedAt = capture.lastRefreshedAt;
+      persist();
+      return capture;
+    }
+    case 'content_capture_save': {
+      requireWorkspace();
+      const input = (payload.input ?? {}) as {
+        captureId?: string;
+        title?: string;
+        categoryId?: string | null;
+        tags?: string[] | null;
+        keepFullText?: boolean | null;
+      };
+      const capture = state.contentCaptures.find((item) => item.id === input.captureId);
+      if (!capture) fail('INVALID_INPUT', '内容记录不存在。');
+      if (capture.noteId) {
+        return {
+          captureId: capture.id,
+          noteId: capture.noteId,
+          noteTitle: capture.title,
+        };
+      }
+      const title = String(input.title ?? capture.title).trim() || capture.title;
+      const tags = Array.isArray(input.tags) ? input.tags : capture.tags;
+      capture.keepFullText = Boolean(input.keepFullText ?? capture.keepFullText);
+      const bodySection = capture.keepFullText
+        ? `## 原文\n\n${capture.markdown ?? ''}`
+        : `## 内容摘录\n\n${(capture.markdown ?? '').slice(0, 1800)}\n\n> 完整原文未长期保存；可从来源链接重新阅读。`;
+      const detail = (await handleMockInvoke('note_create', {
+        input: {
+          title,
+          categoryId: input.categoryId ?? null,
+          initialContent: `# ${title}\n\n> 来源：${capture.finalUrl}\n\n## 摘要\n\n${capture.summary ?? ''}\n\n${bodySection}`,
+          tags,
+          parentId: null,
+        },
+      })) as NoteDetail;
+      capture.noteId = detail.note.id;
+      capture.tags = tags;
+      capture.status = 'saved';
+      capture.savedAt = now();
+      capture.updatedAt = capture.savedAt;
+      persist();
+      return { captureId: capture.id, noteId: detail.note.id, noteTitle: title };
+    }
+    case 'content_capture_ignore': {
+      requireWorkspace();
+      const capture = state.contentCaptures.find((item) => item.id === payload.captureId);
+      if (!capture) fail('INVALID_INPUT', '内容记录不存在。');
+      capture.status = 'ignored';
+      capture.updatedAt = now();
+      persist();
+      return capture;
     }
     case 'note_clip_url': {
       const raw = String(payload.url ?? '').trim();

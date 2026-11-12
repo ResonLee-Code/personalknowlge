@@ -2,6 +2,7 @@ import { Loader2 } from 'lucide-react';
 import { useEffect } from 'react';
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
+import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link';
 
 import { AppShell } from '@/components/layout/AppShell';
 import { NotesSection } from '@/components/notes/NotesSection';
@@ -9,6 +10,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { AboutPage } from '@/features/about/AboutPage';
 import { CategoriesPage } from '@/features/categories/CategoriesPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
+import { ContentDiscoveryPage } from '@/features/discover/ContentDiscoveryPage';
 import { AttachmentsPage } from '@/features/attachments/AttachmentsPage';
 import { GraphPage } from '@/features/graph/GraphPage';
 import { ManagePage } from '@/features/manage/ManagePage';
@@ -20,6 +22,8 @@ import { TagsPage } from '@/features/tags/TagsPage';
 import { WelcomePage } from '@/features/workspace/WelcomePage';
 import { useWorkspaceEvents } from '@/hooks/useWorkspaceEvents';
 import { useWindowBounds } from '@/hooks/useWindowBounds';
+import { isTauriRuntime } from '@/services/api';
+import { contentDiscoveryPathFromDeepLink } from '@/lib/deepLink';
 import { useUiStore } from '@/stores/uiStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
@@ -60,6 +64,7 @@ function BootstrappedApp() {
         <Route path="favorites" element={<NotesSection baseScope={{ kind: 'favorites' }} />} />
         <Route path="favorites/:id" element={<NotesSection baseScope={{ kind: 'favorites' }} />} />
         <Route path="graph" element={<GraphPage />} />
+        <Route path="discover" element={<ContentDiscoveryPage />} />
         <Route path="research" element={<ResearchPage />} />
         <Route path="organize" element={<OrganizePage />} />
         <Route path="attachments" element={<AttachmentsPage />} />
@@ -83,6 +88,23 @@ export function App() {
   // 窗口尺寸/位置记忆（Track B4）必须挂在**根组件**：挂在 AppShell 只会在
   // 「打开工作区之后」才跑，而用户可能停在欢迎页——真机验证时就是这么漏掉的。
   useWindowBounds();
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    const navigate = (urls: string[] | null) => {
+      const path = urls?.map(contentDiscoveryPathFromDeepLink).find(Boolean);
+      if (path) window.location.hash = `#${path}`;
+    };
+    void getCurrent()
+      .then(navigate)
+      .catch(() => undefined);
+    void onOpenUrl(navigate)
+      .then((dispose) => {
+        unlisten = dispose;
+      })
+      .catch(() => undefined);
+    return () => unlisten?.();
+  }, []);
   return (
     <TooltipProvider delayDuration={200}>
       <HashRouter>

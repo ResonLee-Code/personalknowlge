@@ -152,6 +152,30 @@ impl AiPolicyService {
         confirmed: bool,
     ) -> Result<AiPolicy> {
         let policy = self.ensure_enabled(capability)?;
+        self.ensure_network_policy(capability, url, confirmed, policy)
+    }
+
+    /// 外部内容抓取闸门：与 AI 检索共用联网档位、单次确认和域名策略，但**不要求 AI 总开关**。
+    ///
+    /// “内容发现”是独立功能，即使用户关闭生成/决策模型，也可以抓取并保存公开资料；
+    /// 若后续启用摘要模型，仍由独立的在线模型授权闸门控制。
+    pub fn ensure_external_fetch_allowed(
+        &self,
+        capability: &str,
+        url: &str,
+        confirmed: bool,
+    ) -> Result<AiPolicy> {
+        let policy = self.policy();
+        self.ensure_network_policy(capability, url, confirmed, policy)
+    }
+
+    fn ensure_network_policy(
+        &self,
+        capability: &str,
+        url: &str,
+        confirmed: bool,
+        policy: AiPolicy,
+    ) -> Result<AiPolicy> {
         if policy.network != NetworkMode::AllowNetwork {
             self.audit(capability, false, "denied", 0, Some("NETWORK_DISABLED"));
             return Err(AppError::new(

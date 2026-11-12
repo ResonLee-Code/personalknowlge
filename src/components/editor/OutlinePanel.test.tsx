@@ -2,7 +2,9 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import { OutlinePane } from '@/components/editor/OutlinePane';
 import { OutlinePanel } from '@/components/editor/OutlinePanel';
+import { useOutlineStore } from '@/stores/outlineStore';
 
 const headings = [
   { level: 1, text: '全文搜索', offset: 0 },
@@ -43,9 +45,7 @@ describe('OutlinePanel', () => {
     expect(onCollapse).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('outline-pin')).not.toBeInTheDocument();
 
-    rerender(
-      <OutlinePanel headings={headings} onJump={() => {}} pinned={false} onPin={onPin} />,
-    );
+    rerender(<OutlinePanel headings={headings} onJump={() => {}} pinned={false} onPin={onPin} />);
     await userEvent.click(screen.getByTestId('outline-pin'));
     expect(onPin).toHaveBeenCalledTimes(1);
   });
@@ -78,14 +78,41 @@ describe('OutlinePanel', () => {
     expect(screen.queryByTestId('outline-move-to-list')).not.toBeInTheDocument();
   });
 
+  it('栏头固定且大纲正文在自身容器内纵向滚动', () => {
+    render(<OutlinePanel headings={headings} onJump={() => {}} title="长文档" onBack={() => {}} />);
+
+    const panel = screen.getByTestId('outline-panel');
+    expect(panel).toHaveClass('h-full', 'min-h-0');
+    expect(screen.getByTestId('outline-scroll')).toHaveClass(
+      'min-h-0',
+      'overflow-y-auto',
+      'overscroll-contain',
+    );
+    expect(screen.getByTestId('outline-back')).toHaveTextContent('返回列表');
+  });
+
   it('钉在正文右侧时提供「改到列表栏」（挪走了也能挪回来）', async () => {
     const onMoveToList = vi.fn();
-    render(
-      <OutlinePanel headings={headings} onJump={() => {}} onMoveToList={onMoveToList} />,
-    );
+    render(<OutlinePanel headings={headings} onJump={() => {}} onMoveToList={onMoveToList} />);
 
     await userEvent.click(screen.getByTestId('outline-move-to-list'));
     expect(onMoveToList).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('outline-back')).not.toBeInTheDocument();
+  });
+
+  it('与列表共用栏位时占满整个可用高度', () => {
+    const jump = vi.fn();
+    useOutlineStore.setState({
+      noteId: 'note_1',
+      title: '长文档',
+      headings,
+      activeOffset: 20,
+      jump,
+    });
+
+    render(<OutlinePane width={320} onBack={() => {}} onMoveToSide={() => {}} />);
+
+    expect(screen.getByTestId('list-pane-outline')).toHaveClass('h-full', 'min-h-0');
+    expect(screen.getByTestId('list-pane-outline')).toHaveStyle({ width: '320px' });
   });
 });

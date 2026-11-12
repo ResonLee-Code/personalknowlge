@@ -100,9 +100,14 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "search_sort_indexes",
         sql: include_str!("../../../migrations/017_search_sort_indexes.sql"),
     },
+    Migration {
+        version: 18,
+        name: "content_discovery",
+        sql: include_str!("../../../migrations/018_content_discovery.sql"),
+    },
 ];
 
-pub const SCHEMA_VERSION: i64 = 17;
+pub const SCHEMA_VERSION: i64 = 18;
 
 /// 创建迁移记录表。
 fn ensure_migration_table(conn: &Connection) -> Result<()> {

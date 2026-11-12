@@ -11,9 +11,9 @@ pub mod infrastructure;
 pub mod repositories;
 pub mod state;
 
+use crate::application::workspace_service::WorkspaceService;
 use crate::core::events::TauriEventSink;
 use crate::core::logging;
-use crate::application::workspace_service::WorkspaceService;
 use crate::state::{AppInner, AppState};
 
 pub fn run() {
@@ -23,6 +23,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
@@ -38,11 +39,6 @@ pub fn run() {
             }
             app.manage(AppState::new(inner));
             tracing::info!(target: "app", "数据目录：{}", data_dir.display());
-            #[cfg(target_os = "macos")]
-            {
-                configure_macos_window(app);
-                relabel_macos_fullscreen_menu(app);
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -95,6 +91,13 @@ pub fn run() {
             commands::note_commands::note_history_save_version,
             commands::note_commands::note_history_label,
             commands::clip_commands::note_clip_url,
+            commands::content_discovery_commands::content_capture_create,
+            commands::content_discovery_commands::content_capture_list,
+            commands::content_discovery_commands::content_capture_get,
+            commands::content_discovery_commands::content_discovery_run,
+            commands::content_discovery_commands::content_capture_refresh,
+            commands::content_discovery_commands::content_capture_save,
+            commands::content_discovery_commands::content_capture_ignore,
             commands::ai_commands::ai_policy_get,
             commands::ai_commands::ai_policy_set,
             commands::ai_commands::ai_audit_tail,
@@ -207,106 +210,6 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("Personal Knowledge OS 启动失败");
-}
-
-/// macOS：禁用“原生全屏”，让绿色按钮执行系统**缩放**（zoom）。
-///
-/// 背景（2026-10-19）：原生全屏会把标题栏与系统红黄绿一起藏起来，鼠标移到顶部也唤不出；
-/// 自绘一套按钮又被指出“像外挂上去的”。最终选择：不再进原生全屏——把窗口的
-/// collection behavior 设为 `FullScreenNone`，绿色按钮改为 macOS 原生“缩放”：
-/// 窗口铺满可用区域，但标题栏、菜单栏和系统红黄绿全部保留。
-#[cfg(target_os = "macos")]
-fn configure_macos_window(app: &tauri::App) {
-    use std::ffi::CStr;
-    use std::sync::OnceLock;
-
-    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
-    use objc2::{class, msg_send, sel};
-    use tauri::Manager;
-
-    let Some(window) = app.get_webview_window("main") else {
-        tracing::warn!(target: "app", "未找到主窗口，跳过 macOS 全屏配置");
-        return;
-    };
-    match window.ns_window() {
-        Ok(pointer) => {
-            extern "C-unwind" fn toggle_full_screen_as_zoom(
-                this: &mut AnyObject,
-                _cmd: Sel,
-                _sender: *mut AnyObject,
-            ) {
-                // SAFETY: 由 AppKit 在主线程调用；zoom: 是 NSWindow 的标准方法。
-                let _: () = unsafe { msg_send![this, zoom: std::ptr::null_mut::<AnyObject>()] };
-            }
-
-            // 不要用 object_setClass 换窗口类：实测会让 AppKit 在关闭窗口
-            // （-[NSView removeFromSuperview]）时抛 ObjC 异常并 SIGABRT。
-            // 改为只替换 NSWindow 的 toggleFullScreen: 实现，窗口类保持不变。
-            static ZOOM_REDIRECT: OnceLock<()> = OnceLock::new();
-            ZOOM_REDIRECT.get_or_init(|| {
-                unsafe {
-                    let types = CStr::from_bytes_with_nul(b"v@:@\0").expect("method types");
-                    let imp: Imp = std::mem::transmute(
-                        toggle_full_screen_as_zoom
-                            as extern "C-unwind" fn(&mut AnyObject, Sel, *mut AnyObject),
-                    );
-                    objc2::ffi::class_replaceMethod(
-                        class!(NSWindow) as *const AnyClass as *mut AnyClass,
-                        sel!(toggleFullScreen:),
-                        imp,
-                        types.as_ptr(),
-                    );
-                }
-            });
-
-            let _ = pointer;
-            tracing::info!(
-                target: "app",
-                "macOS 绿色按钮保留系统全屏箭头外观，但 toggleFullScreen: 已重定向为 zoom:"
-            );
-        }
-        Err(error) => {
-            tracing::warn!(target: "app", "读取 macOS 窗口指针失败：{error}");
-        }
-    }
-}
-
-/// 原生全屏已被禁用，菜单里的 “Toggle Full Screen” 实际执行的是系统缩放。
-/// 把标签改成 “Zoom”，避免用户以为还能进全屏。
-#[cfg(target_os = "macos")]
-fn relabel_macos_fullscreen_menu(app: &tauri::App) {
-    let Some(menu) = app.menu() else {
-        return;
-    };
-    let Ok(items) = menu.items() else {
-        return;
-    };
-    for item in items {
-        let Some(submenu) = item.as_submenu() else {
-            continue;
-        };
-        let Ok(sub_items) = submenu.items() else {
-            continue;
-        };
-        for sub in sub_items {
-            let text = sub
-                .as_menuitem()
-                .and_then(|entry| entry.text().ok())
-                .or_else(|| {
-                    sub.as_predefined_menuitem()
-                        .and_then(|entry| entry.text().ok())
-                });
-            if text.as_deref() != Some("Toggle Full Screen") {
-                continue;
-            }
-            if let Some(entry) = sub.as_menuitem() {
-                let _ = entry.set_text("Zoom");
-            }
-            if let Some(entry) = sub.as_predefined_menuitem() {
-                let _ = entry.set_text("Zoom");
-            }
-        }
-    }
 }
 
 /// 供集成测试复用：构建没有 Tauri 运行时的应用上下文。

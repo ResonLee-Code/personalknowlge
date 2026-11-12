@@ -82,12 +82,7 @@ export function TopBar() {
         >
           {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          title="设置"
-          onClick={() => navigate(ROUTES.settings)}
-        >
+        <Button variant="ghost" size="icon" title="设置" onClick={() => navigate(ROUTES.settings)}>
           <Settings className="h-4 w-4" />
         </Button>
       </div>

@@ -9,6 +9,7 @@ export const ROUTES = {
   tags: '/tags',
   favorites: '/favorites',
   graph: '/graph',
+  discover: '/discover',
   research: '/research',
   organize: '/organize',
   attachments: '/attachments',
@@ -31,6 +32,8 @@ export const EVENTS = {
   vectorIndexProgress: 'ai://vector-index-progress',
   /** Organize 批量任务进度：只含计数与当前笔记 id */
   organizeProgress: 'ai://organize-progress',
+  /** 内容发现进度（只含 URL 与计数） */
+  contentDiscoveryProgress: 'content://discovery-progress',
   /** 签名更新下载 / 校验进度 */
   updateProgress: 'app://update-progress',
 } as const;

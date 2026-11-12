@@ -364,6 +364,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
     .getByTestId('note-list-item')
     .filter({ hasText: 'SQLite 全文搜索学习笔记' })
     .first();
+  await parentRow.hover();
   await parentRow.getByRole('button', { name: '笔记操作' }).click();
   await page.getByTestId('note-menu-create-child').click();
   await expect(page.getByRole('dialog')).toContainText('新建子文档');
@@ -378,6 +379,24 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   await expect(childRow).toBeVisible();
   await expect(childRow).toHaveAttribute('data-depth', '1');
   await page.screenshot({ path: path.join(SHOTS, '22-note-tree.png') });
+
+  // 子项悬停（Codex 式）：整行灰底、右侧操作淡入，标题宽度不因按钮出现而跳动
+  await page.goto('/#/notes');
+  await expect(childRow).toBeVisible();
+  const childBeforeHover = await childRow.boundingBox();
+  const selectedBackground = await childRow.evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  await childRow.hover();
+  await expect(childRow.getByTestId('note-row-actions')).toHaveCSS('opacity', '1');
+  const hoveredBackground = await childRow.evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  expect(hoveredBackground).not.toBe(selectedBackground);
+  const childAfterHover = await childRow.boundingBox();
+  expect(childAfterHover?.width).toBeCloseTo(childBeforeHover?.width ?? 0, 1);
+  await page.screenshot({ path: path.join(SHOTS, '55-note-child-hover.png') });
+  await page.mouse.move(0, 0);
 
   await parentRow.getByTestId('note-tree-toggle').click();
   await expect(childRow).toHaveCount(0);
@@ -807,7 +826,7 @@ test('核心流程：创建工作区 → 新建笔记 → 搜索 → 设置', as
   expect(Math.abs(expandBox!.y - collapseBox!.y)).toBeLessThan(4);
   // 收起后不是"空了"：导航项以图标栏形式留在那里（选中项高亮、悬停出名字）
   const railLinks = page.locator('nav[aria-label="主导航"] a');
-  await expect(railLinks).toHaveCount(12);
+  await expect(railLinks).toHaveCount(13);
   const railBackground = async (locator: Locator) =>
     locator.evaluate((element) => getComputedStyle(element).backgroundColor);
   const activeRail = page.locator('nav[aria-label="主导航"] a[aria-current="page"]');

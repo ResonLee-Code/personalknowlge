@@ -103,7 +103,10 @@ export function MarkdownPreview({
   };
 
   return (
-    <div className="markdown-body px-6 py-5">
+    <div
+      data-testid="markdown-preview"
+      className="markdown-body mx-auto w-full max-w-[900px] px-6 py-5"
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}

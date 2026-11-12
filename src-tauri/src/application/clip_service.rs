@@ -64,6 +64,20 @@ pub struct ClippedPage {
     pub fetched_at: String,
     /// 实际读取的字节数
     pub bytes: usize,
+    /// 页面中发现的 http/https 链接，供“内容发现”选择递归抓取。
+    #[serde(default)]
+    pub links: Vec<ExtractedPageLink>,
+}
+
+/// 页面中一条可继续探索的链接。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractedPageLink {
+    pub url: String,
+    pub title: String,
+    pub context: String,
+    /// HTML 自身或祖先带有 hidden / aria-hidden / display:none 等静态隐藏标记。
+    pub hidden: bool,
 }
 
 /// 解码网页字节。
@@ -75,7 +89,7 @@ pub struct ClippedPage {
 ///
 /// 原始字节的兜底顺序：BOM → HTML `<meta charset>` → 严格 UTF-8 → GBK
 /// （最后两步在 `core::encoding::decode_text` 里，与「导入本地文件」共用同一份实现）。
-fn decode_html(bytes: &[u8], content_type: &str) -> String {
+pub(crate) fn decode_html(bytes: &[u8], content_type: &str) -> String {
     if crate::core::encoding::charset_declared_non_utf8(content_type) {
         // ureq 已转成 UTF-8：只做一次容错转换，绝不再按 charset 解一遍
         return String::from_utf8_lossy(bytes).into_owned();
@@ -156,13 +170,14 @@ pub fn clip_with_proxy(raw_url: &str, proxy: Option<&str>) -> Result<ClippedPage
     let html = decode_html(&bytes, &content_type);
 
     let (title, markdown, site) = html_to_markdown(&html, &final_url)?;
+    let links = extract_page_links(&html, &final_url);
     if markdown.trim().is_empty() {
         return Err(AppError::new(
             ErrorCode::InvalidInput,
             "没有抽取到正文（页面可能要求登录、或正文由脚本渲染）。",
         ));
     }
-    let word_count = count_words(&markdown_to_plain_text(&markdown)) as i64;
+    let word_count = count_words(&markdown_to_plain_text(&markdown));
     Ok(ClippedPage {
         url: raw_url.trim().to_string(),
         final_url,
@@ -172,6 +187,7 @@ pub fn clip_with_proxy(raw_url: &str, proxy: Option<&str>) -> Result<ClippedPage
         word_count,
         fetched_at: now_iso(),
         bytes: html.len(),
+        links,
     })
 }
 
@@ -212,6 +228,58 @@ pub fn html_to_markdown(html: &str, base_url: &str) -> Result<(String, String, O
     render_node(&root, base_url, &mut out, &mut Context::default());
     let markdown = tidy(&out);
     Ok((title, markdown, site))
+}
+
+/// 提取页面内所有静态 `<a href>`，并标记 HTML 层面的隐藏状态。
+///
+/// 这里不执行 JavaScript，也不计算浏览器布局；`hidden` 只表示源码中存在明确的隐藏信号。
+pub fn extract_page_links(html: &str, base_url: &str) -> Vec<ExtractedPageLink> {
+    let document = Document::from(html);
+    let mut links: Vec<ExtractedPageLink> = Vec::new();
+    for node in document.select("a[href]").nodes() {
+        let Some(href) = node.attr("href") else {
+            continue;
+        };
+        let url = absolutize(base_url, href.as_ref());
+        let lowered = url.to_ascii_lowercase();
+        if !(lowered.starts_with("http://") || lowered.starts_with("https://")) {
+            continue;
+        }
+        if links.iter().any(|item| item.url == url) {
+            continue;
+        }
+        let title = node.text().trim().to_string();
+        let context = node
+            .parent()
+            .map(|parent| parent.text().trim().to_string())
+            .unwrap_or_else(|| title.clone());
+        links.push(ExtractedPageLink {
+            url,
+            title: crate::core::text::truncate_chars(&title, 160),
+            context: crate::core::text::truncate_chars(&context, 240),
+            hidden: node_or_ancestor_hidden(node),
+        });
+    }
+    links
+}
+
+fn node_or_ancestor_hidden(node: &NodeRef<'_>) -> bool {
+    let mut current = Some(*node);
+    while let Some(item) = current {
+        let hidden_attr = item.attr("hidden").is_some()
+            || item
+                .attr("aria-hidden")
+                .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+        let hidden_style = item.attr("style").is_some_and(|value| {
+            let style = value.to_ascii_lowercase().replace(' ', "");
+            style.contains("display:none") || style.contains("visibility:hidden")
+        });
+        if hidden_attr || hidden_style {
+            return true;
+        }
+        current = item.parent();
+    }
+    false
 }
 
 fn page_title(document: &Document, base_url: &str) -> String {
@@ -269,7 +337,7 @@ fn meta_content(document: &Document, property: &str) -> Option<String> {
 
 /// 正文容器启发式：优先语义标签，再看常见正文类名；都不合适时回退 `body`。
 fn pick_content_root(document: &Document) -> NodeRef<'_> {
-    const CANDIDATES: [&str; 14] = [
+    const CANDIDATES: [&str; 13] = [
         "article",
         "main",
         "[role=main]",
@@ -282,8 +350,7 @@ fn pick_content_root(document: &Document) -> NodeRef<'_> {
         ".content",
         ".post",
         ".article",
-        ".rich_media_content", // 微信公众号
-        "body",
+        "[class~=rich_media_content]", // 微信公众号
     ];
     let mut best: Option<(NodeRef<'_>, usize)> = None;
     for selector in CANDIDATES {
@@ -296,13 +363,9 @@ fn pick_content_root(document: &Document) -> NodeRef<'_> {
         if length < 120 && selector != "body" {
             continue;
         }
-        let is_body = selector == "body";
         match &best {
             Some((_, best_len)) if *best_len >= length => {}
-            _ => best = Some((node.clone(), length)),
-        }
-        if is_body {
-            break;
+            _ => best = Some((*node, length)),
         }
     }
     best.map(|(node, _)| node)
@@ -550,7 +613,7 @@ fn collect_tags<'a>(node: &NodeRef<'a>, tag: &str) -> Vec<NodeRef<'a>> {
     for child in node.element_children() {
         let name = child.node_name().map(|value| value.to_ascii_lowercase());
         if name.as_deref() == Some(tag) {
-            found.push(child.clone());
+            found.push(child);
         }
         found.extend(collect_tags(&child, tag));
     }
@@ -720,6 +783,35 @@ mod tests {
         let (title, markdown, _) = html_to_markdown(html, "https://example.com/x").expect("转换");
         assert!(markdown.contains("只有一段普通正文"));
         assert_eq!(title, "example.com", "没有标题时回退域名");
+    }
+
+    #[test]
+    fn extracts_static_wechat_rich_media_content() {
+        let html = r#"
+          <html>
+            <head><meta property="og:title" content="公众号文章标题"></head>
+            <body>
+              <div>页面导航</div>
+              <section class="rich_media_content">
+                <h2>正文小节</h2>
+                <p>这是一段公众号正文，不依赖 JavaScript。它会包含足够的正文长度，以便页面正文容器启发式能够将它识别为主内容，而不是退回到整页 body，并把导航和页脚一起收录。真实公众号文章通常包含多个段落、图片说明和章节标题；这里重复一段正文来验证正文容器阈值，确保抽取结果只包含文章主体，并且能够稳定转换为 Markdown，而不是把页面顶栏、作者头像、推荐阅读、广告和底部版权说明混入知识笔记。</p>
+              </section>
+            </body>
+          </html>
+        "#;
+        let document = Document::from(html);
+        assert_eq!(
+            document.select("[class~=rich_media_content]").nodes().len(),
+            1,
+            "测试 HTML 中的公众号正文容器应可被选择器命中"
+        );
+        let (title, markdown, _) =
+            html_to_markdown(html, "https://mp.weixin.qq.com/s/example").expect("转换公众号文章");
+
+        assert_eq!(title, "公众号文章标题");
+        assert!(markdown.contains("## 正文小节"));
+        assert!(markdown.contains("这是一段公众号正文"));
+        assert!(!markdown.contains("页面导航"), "{markdown}");
     }
 
     #[test]

@@ -40,4 +40,13 @@ describe('MarkdownPreview 双向链接', () => {
     render(<MarkdownPreview content="   " />);
     expect(screen.getByText('这篇笔记还没有正文')).toBeInTheDocument();
   });
+
+  it('正文使用居中的阅读列，避免全屏时行长过宽', () => {
+    render(<MarkdownPreview content={'# 标题\n\n正文'} />);
+    expect(screen.getByTestId('markdown-preview')).toHaveClass(
+      'mx-auto',
+      'w-full',
+      'max-w-[900px]',
+    );
+  });
 });

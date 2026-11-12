@@ -499,7 +499,11 @@ CREATE VIRTUAL TABLE search_documents_fts USING fts5(
 `015_organize_undo_hash`（撤销冲突保护）、
 `016_search_shards`（4 个稳定 FTS 分片 + 映射表 shard 列）、
 `017_search_sort_indexes`（高频检索的更新时间 / 创建时间 / 标题稳定排序索引），
-`SCHEMA_VERSION = 17`。
+`018_content_discovery`（内容发现收件箱、候选链接与逐页抓取元数据），
+`SCHEMA_VERSION = 18`。
+
+内容发现的网页正文只存放在工作区 `.knowledge/content-discovery/` 缓存中，不进入
+SQLite 数据库；收件箱、状态、摘要和页面元数据可随数据库备份恢复，临时正文缓存需要重新抓取。
 
 Sync 2.0 与 Writing 2.0 本身没有新增业务表：
 

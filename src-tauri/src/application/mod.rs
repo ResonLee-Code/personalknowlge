@@ -9,6 +9,7 @@ pub mod batch_service;
 pub mod category_service;
 pub mod clip_service;
 pub mod context;
+pub mod content_discovery;
 pub mod export_service;
 pub mod graph_insights;
 pub mod graph_service;

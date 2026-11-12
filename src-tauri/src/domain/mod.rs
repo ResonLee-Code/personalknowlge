@@ -4,6 +4,7 @@
 
 pub mod backup;
 pub mod category;
+pub mod content_discovery;
 pub mod graph;
 pub mod link;
 pub mod ai;

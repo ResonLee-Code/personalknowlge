@@ -31,8 +31,8 @@ use super::index_service::{IndexService, ScanReport};
 use super::note_service::NoteService;
 use super::search_service::SearchService;
 
-/// 大型且已有索引的工作区，启动时先把持久化状态交给界面，再后台核对文件变化。
-const DEFERRED_SCAN_MIN_NOTES: i64 = 20_000;
+/// 达到该规模时在界面里明确提示“已先打开、后台核对中”，避免大库看起来像没有扫描。
+const LARGE_WORKSPACE_WARNING_MIN_NOTES: i64 = 20_000;
 
 /// 打开工作区的返回值。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,9 +122,9 @@ impl WorkspaceService {
         let _ = self.write_starter_template(&context);
 
         let index_status = IndexService::new(Arc::clone(&context)).rebuild()?;
-        self.start_watcher(&context);
         self.app.set_active(Some(Arc::clone(&context)))?;
         self.register(&context.workspace)?;
+        Self::start_watcher(Arc::clone(&context), false);
         self.finish_open(&context, index_status, Vec::new(), true)
     }
 
@@ -224,9 +224,11 @@ impl WorkspaceService {
             .unwrap_or(0);
         let deferred_scan = should_defer_scan(!initialized, active_notes);
         let scan = if deferred_scan {
-            warnings.push(format!(
-                "大型知识库（{active_notes} 篇）已先恢复界面；正在后台核对离线期间的文件变化。"
-            ));
+            if active_notes >= LARGE_WORKSPACE_WARNING_MIN_NOTES {
+                warnings.push(format!(
+                    "大型知识库（{active_notes} 篇）已先恢复界面；正在后台核对离线期间的文件变化。"
+                ));
+            }
             ScanReport::default()
         } else {
             match index_service.scan_workspace() {
@@ -252,31 +254,12 @@ impl WorkspaceService {
             Err(_) => index_service.rebuild()?,
         };
 
-        self.start_watcher(&context);
         self.app.set_active(Some(Arc::clone(&context)))?;
         self.register(&context.workspace)?;
+        Self::start_watcher(Arc::clone(&context), deferred_scan);
 
         let mut result = self.finish_open(&context, index_status, warnings, initialized)?;
         result.scan = scan;
-        if deferred_scan {
-            let background = Arc::clone(&context);
-            std::thread::spawn(move || {
-                match IndexService::new(background).scan_workspace() {
-                    Ok(report) => {
-                        for warning in report.warnings {
-                            tracing::warn!(target: "workspace", "{warning}");
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            target: "workspace",
-                            "大型知识库后台扫描失败：{}",
-                            error.message
-                        );
-                    }
-                }
-            });
-        }
         Ok(result)
     }
 
@@ -492,44 +475,79 @@ impl WorkspaceService {
     }
 
     /// 启动文件监听；监听失败不影响应用使用。
-    fn start_watcher(&self, context: &Arc<WorkspaceContext>) {
-        let weak: Weak<WorkspaceContext> = Arc::downgrade(context);
-        let root = context.paths.root().to_path_buf();
-        let handle = start_best_watcher(root, move |batch: FileChangeBatch| {
-            if let Some(context) = weak.upgrade() {
-                let service = IndexService::new(context);
-                if let Err(error) = service.apply_file_changes(batch) {
-                    tracing::warn!(target: "watcher", "处理文件变化失败：{error}");
-                }
-            }
-        });
-        match handle {
-            Ok((handle, mode)) => {
-                match mode {
-                    WatchMode::Native => {
-                        tracing::info!(target: "watcher", "已启用原生文件监听")
+    /// 监听探测与启动可能等待系统事件后端；放到后台，避免阻塞工作区首屏。
+    ///
+    /// 已有资料的工作区还会在监听就绪后补扫一次，覆盖“打开完成到监听生效”之间的
+    /// 极短窗口；扫描结果通过既有事件自动刷新界面。
+    fn start_watcher(context: Arc<WorkspaceContext>, catch_up_scan: bool) {
+        let spawned = std::thread::Builder::new()
+            .name("pkos-watcher-start".to_string())
+            .spawn(move || {
+                let weak: Weak<WorkspaceContext> = Arc::downgrade(&context);
+                let root = context.paths.root().to_path_buf();
+                let handle = start_best_watcher(root, move |batch: FileChangeBatch| {
+                    if let Some(context) = weak.upgrade() {
+                        let service = IndexService::new(context);
+                        if let Err(error) = service.apply_file_changes(batch) {
+                            tracing::warn!(target: "watcher", "处理文件变化失败：{error}");
+                        }
                     }
-                    WatchMode::Polling => {
-                        tracing::info!(target: "watcher", "已启用轮询式文件监听（间隔 3 秒）");
+                });
+                match handle {
+                    Ok((handle, mode)) => {
+                        match mode {
+                            WatchMode::Native => {
+                                tracing::info!(target: "watcher", "已启用原生文件监听")
+                            }
+                            WatchMode::Polling => {
+                                tracing::info!(target: "watcher", "已启用轮询式文件监听（间隔 3 秒）");
+                                context.events.emit(
+                                    event_names::INDEX_STATUS,
+                                    serde_json::json!({
+                                        "warning": "文件系统事件不可用，已改用轮询方式同步外部修改（每 3 秒一次）。"
+                                    }),
+                                );
+                            }
+                        }
+                        if let Ok(mut guard) = context.watcher.lock() {
+                            *guard = Some(handle);
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(target: "watcher", "文件监听启动失败（不影响使用）：{error}");
                         context.events.emit(
                             event_names::INDEX_STATUS,
-                            serde_json::json!({
-                                "warning": "文件系统事件不可用，已改用轮询方式同步外部修改（每 3 秒一次）。"
-                            }),
+                            serde_json::json!({ "warning": format!("文件监听不可用：{}", error.message) }),
                         );
                     }
                 }
-                if let Ok(mut guard) = context.watcher.lock() {
-                    *guard = Some(handle);
+                if catch_up_scan {
+                    match IndexService::new(context).scan_workspace() {
+                        Ok(report) => {
+                            for warning in report.warnings {
+                                tracing::warn!(target: "workspace", "{warning}");
+                            }
+                            tracing::debug!(
+                                target: "workspace",
+                                added = report.added,
+                                updated = report.updated,
+                                missing = report.missing,
+                                duration_ms = report.duration_ms,
+                                "后台核对工作区完成"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                target: "workspace",
+                                "后台扫描工作区失败：{}",
+                                error.message
+                            );
+                        }
+                    }
                 }
-            }
-            Err(error) => {
-                tracing::warn!(target: "watcher", "文件监听启动失败（不影响使用）：{error}");
-                context.events.emit(
-                    event_names::INDEX_STATUS,
-                    serde_json::json!({ "warning": format!("文件监听不可用：{}", error.message) }),
-                );
-            }
+            });
+        if let Err(error) = spawned {
+            tracing::warn!(target: "watcher", "创建后台监听线程失败（不影响打开）：{error}");
         }
     }
 
@@ -658,7 +676,7 @@ pub fn default_workspace_name(root: &Path) -> String {
 }
 
 fn should_defer_scan(existing_workspace: bool, active_notes: i64) -> bool {
-    existing_workspace && active_notes >= DEFERRED_SCAN_MIN_NOTES
+    existing_workspace && active_notes > 0
 }
 
 /// 首次创建时写入的欢迎内容。
@@ -686,9 +704,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_existing_large_workspaces_defer_the_startup_scan() {
-        assert!(!should_defer_scan(false, DEFERRED_SCAN_MIN_NOTES));
-        assert!(should_defer_scan(true, DEFERRED_SCAN_MIN_NOTES));
-        assert!(!should_defer_scan(true, DEFERRED_SCAN_MIN_NOTES - 1));
+    fn existing_non_empty_workspaces_defer_the_startup_scan() {
+        assert!(!should_defer_scan(false, 1));
+        assert!(should_defer_scan(true, 1));
+        assert!(should_defer_scan(true, LARGE_WORKSPACE_WARNING_MIN_NOTES));
+        assert!(!should_defer_scan(true, 0));
     }
 }

@@ -1090,7 +1090,9 @@ fn file_watcher_reports_external_changes() {
     .expect("外部创建文件");
 
     // 事件粒度可能是文件或目录，这里断言可观察结果：外部文件最终成为笔记
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    // 并行测试会同时启动多条文件监听；这里只验证最终一致性，给系统事件后端
+    // 留出足够的探测时间。真实应用一次只启动一个监听。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let mut adopted = false;
     while std::time::Instant::now() < deadline {
         let _ = receiver.recv_timeout(std::time::Duration::from_secs(5));
@@ -1205,6 +1207,54 @@ fn layout_settings_round_trip_and_clamp() {
 }
 
 #[test]
+fn reopening_returns_before_background_reconcile_adopts_external_file() {
+    let harness = Harness::new();
+    let context = harness.create_workspace();
+    assert!(context.db.with_conn(|conn| {
+        Ok(SqliteNoteRepository.count_by_status(
+            conn,
+            &context.workspace.id,
+            personal_knowledge_os_lib::domain::note::NoteStatus::Active,
+        )? > 0)
+    })
+    .unwrap());
+    WorkspaceService::new(Arc::clone(&harness.app))
+        .close()
+        .expect("关闭工作区");
+
+    std::fs::write(
+        harness.absolute("00_Inbox/离线期间新增.md"),
+        "---\nid: note_offline_added\ntitle: 离线期间新增\n---\n\n重新打开后再由后台扫描采纳。\n",
+    )
+    .expect("写入外部文件");
+
+    let reopened = WorkspaceService::new(Arc::clone(&harness.app))
+        .open(&harness.root.to_string_lossy())
+        .expect("快速重新打开");
+    assert_eq!(
+        reopened.scan.added, 0,
+        "已有资料必须立即返回，不能同步等待全库扫描"
+    );
+
+    // 后台补扫与文件监听同时启动；验证最终一致，不把它变成启动时延断言。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut adopted = false;
+    while std::time::Instant::now() < deadline {
+        adopted = harness
+            .context()
+            .db
+            .with_conn(|conn| SqliteNoteRepository.get(conn, "note_offline_added"))
+            .map(|note| note.is_some())
+            .unwrap_or(false);
+        if adopted {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(adopted, "监听就绪后的补扫必须采纳离线期间新增的文件");
+}
+
+#[test]
 fn applies_note_links_migration() {
     let harness = Harness::new();
     harness.create_workspace();
@@ -1213,8 +1263,9 @@ fn applies_note_links_migration() {
     // 006 = note_links / note_assets / note_file_stamp / search_rowid_map，
     // 007 = notes.parent_id 子文档层级，008 = notes.sort_order 手动排序，009 = notes.pinned 置顶，
     // 010 = notes.declared_parent，011 = note_chunks（N5 分块索引），
-    // 012 = decision_cache（D2 决策缓存），013–017 = V2 索引与稳定排序
-    assert_eq!(context.db.schema_version().expect("schema 版本"), 17);
+    // 012 = decision_cache（D2 决策缓存），013–017 = V2 索引与稳定排序，
+    // 018 = 内容发现收件箱与候选链接
+    assert_eq!(context.db.schema_version().expect("schema 版本"), 18);
 
     // 004：来源/时效列与类型化关系表
     let (has_relations, source_column) = context

@@ -883,124 +883,124 @@ export function NoteEditorPage() {
       </div>
 
       {/* 标题 + 元信息（2026-10-19）：非全屏时这一块也在抢正文高度，内外边距各收一档 */}
-      <div
-        data-testid="editor-header"
-        className="space-y-1 border-b border-[var(--border-subtle)] px-4 py-1.5"
-      >
-        <Input
-          aria-label="笔记标题"
-          value={title}
-          readOnly={readOnly}
-          placeholder="笔记标题"
-          className="h-8 border-none bg-transparent px-0 text-[17px] font-semibold focus-visible:ring-0"
-          onChange={(event) => {
-            setTitle(event.target.value);
-            markDirty();
-          }}
-        />
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--ink-subtle)]">
-          <span className="flex items-center gap-1">
-            <FolderOpen className="h-3 w-3" />
-            {detail.categoryPath || 'Inbox'} · {note.filePath}
-          </span>
-          <span>更新于 {formatDateTime(note.updatedAt)}</span>
-          <span>{words} 字</span>
-          {linkCounts && countsFor === note.id ? (
-            <>
-              <span className="flex items-center gap-1" title="有多少篇笔记引用了本篇">
-                <Link2 className="h-3 w-3" />被 {linkCounts.backlinks} 篇引用
-              </span>
-              <span className="flex items-center gap-1" title="本篇引用了多少处笔记">
-                引用 {linkCounts.outgoing} 篇
-              </span>
-              {linkCounts.unresolved > 0 ? (
-                <span className="flex items-center gap-1 text-amber-600">
-                  <Unlink2 className="h-3 w-3" />
-                  {linkCounts.unresolved} 处未解析
+      <div data-testid="editor-header" className="border-b border-[var(--border-subtle)]">
+        <div className="mx-auto w-full max-w-[900px] space-y-1 px-6 py-1.5">
+          <Input
+            aria-label="笔记标题"
+            value={title}
+            readOnly={readOnly}
+            placeholder="笔记标题"
+            className="h-8 border-none bg-transparent px-0 text-[17px] font-semibold focus-visible:ring-0"
+            onChange={(event) => {
+              setTitle(event.target.value);
+              markDirty();
+            }}
+          />
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--ink-subtle)]">
+            <span className="flex items-center gap-1">
+              <FolderOpen className="h-3 w-3" />
+              {detail.categoryPath || 'Inbox'} · {note.filePath}
+            </span>
+            <span>更新于 {formatDateTime(note.updatedAt)}</span>
+            <span>{words} 字</span>
+            {linkCounts && countsFor === note.id ? (
+              <>
+                <span className="flex items-center gap-1" title="有多少篇笔记引用了本篇">
+                  <Link2 className="h-3 w-3" />被 {linkCounts.backlinks} 篇引用
                 </span>
-              ) : null}
-            </>
-          ) : null}
-          {note.status === 'deleted' ? (
-            <span className="text-red-500">位于回收站（只读）</span>
-          ) : null}
-          {note.sourceType || note.sourceRef || note.sourceReliability ? (
-            <button
-              type="button"
-              className="flex items-center gap-1 hover:text-[var(--brand)]"
-              title="点击编辑来源与时效"
-              // 无障碍名给个短的：这个按钮的内容是一串元信息（Inbox · 路径 · 更新时间…），
-              // 读屏会把整串念出来；顺带也让自动化能按名字点到它（真机验收里要改有效期）
-              aria-label="来源与时效"
-              // 元信息栏这个入口也走 store 请求（与顶栏「更多操作」同一套开关）
-              onClick={() => useUiStore.getState().requestNoteAction('source')}
-            >
-              <BookMarked className="h-3 w-3" />
-              {sourceTypeLabel(note.sourceType) || '来源'}
-              {note.sourceReliability ? (
-                <span className="text-amber-500">{reliabilityStars(note.sourceReliability)}</span>
-              ) : null}
-            </button>
-          ) : null}
-          {relations
-            ? (() => {
-                const highlights = relationHighlights(relations.outgoing, relations.incoming);
-                return (
-                  <>
-                    {highlights.supersededBy ? (
-                      <span className="flex items-center gap-1 text-amber-600">
-                        <GitBranch className="h-3 w-3" />
-                        已被「
-                        {relations.incoming.find((item) => item.id === highlights.supersededBy?.id)
-                          ?.sourceTitle ?? '其它笔记'}
-                        」取代
-                      </span>
-                    ) : null}
-                    {highlights.supersedes ? (
-                      <span className="text-amber-600">
-                        已取代「
-                        {relations.outgoing.find((item) => item.id === highlights.supersedes?.id)
-                          ?.targetTitle ?? '其它笔记'}
-                        」
-                      </span>
-                    ) : null}
-                    {highlights.conflictCount > 0 ? (
-                      <span className="text-red-500">{highlights.conflictCount} 处冲突</span>
-                    ) : null}
-                  </>
-                );
-              })()
-            : null}
-          {freshnessState(note.validUntil) === 'expired' ? (
-            <span
-              className="flex items-center gap-1 text-amber-600"
-              title={`有效期至 ${note.validUntil}`}
-            >
-              <AlertTriangle className="h-3 w-3" />
-              可能已过期
+                <span className="flex items-center gap-1" title="本篇引用了多少处笔记">
+                  引用 {linkCounts.outgoing} 篇
+                </span>
+                {linkCounts.unresolved > 0 ? (
+                  <span className="flex items-center gap-1 text-amber-600">
+                    <Unlink2 className="h-3 w-3" />
+                    {linkCounts.unresolved} 处未解析
+                  </span>
+                ) : null}
+              </>
+            ) : null}
+            {note.status === 'deleted' ? (
+              <span className="text-red-500">位于回收站（只读）</span>
+            ) : null}
+            {note.sourceType || note.sourceRef || note.sourceReliability ? (
+              <button
+                type="button"
+                className="flex items-center gap-1 hover:text-[var(--brand)]"
+                title="点击编辑来源与时效"
+                // 无障碍名给个短的：这个按钮的内容是一串元信息（Inbox · 路径 · 更新时间…），
+                // 读屏会把整串念出来；顺带也让自动化能按名字点到它（真机验收里要改有效期）
+                aria-label="来源与时效"
+                // 元信息栏这个入口也走 store 请求（与顶栏「更多操作」同一套开关）
+                onClick={() => useUiStore.getState().requestNoteAction('source')}
+              >
+                <BookMarked className="h-3 w-3" />
+                {sourceTypeLabel(note.sourceType) || '来源'}
+                {note.sourceReliability ? (
+                  <span className="text-amber-500">{reliabilityStars(note.sourceReliability)}</span>
+                ) : null}
+              </button>
+            ) : null}
+            {relations
+              ? (() => {
+                  const highlights = relationHighlights(relations.outgoing, relations.incoming);
+                  return (
+                    <>
+                      {highlights.supersededBy ? (
+                        <span className="flex items-center gap-1 text-amber-600">
+                          <GitBranch className="h-3 w-3" />
+                          已被「
+                          {relations.incoming.find(
+                            (item) => item.id === highlights.supersededBy?.id,
+                          )?.sourceTitle ?? '其它笔记'}
+                          」取代
+                        </span>
+                      ) : null}
+                      {highlights.supersedes ? (
+                        <span className="text-amber-600">
+                          已取代「
+                          {relations.outgoing.find((item) => item.id === highlights.supersedes?.id)
+                            ?.targetTitle ?? '其它笔记'}
+                          」
+                        </span>
+                      ) : null}
+                      {highlights.conflictCount > 0 ? (
+                        <span className="text-red-500">{highlights.conflictCount} 处冲突</span>
+                      ) : null}
+                    </>
+                  );
+                })()
+              : null}
+            {freshnessState(note.validUntil) === 'expired' ? (
+              <span
+                className="flex items-center gap-1 text-amber-600"
+                title={`有效期至 ${note.validUntil}`}
+              >
+                <AlertTriangle className="h-3 w-3" />
+                可能已过期
+              </span>
+            ) : freshnessState(note.validUntil) === 'expiring' ? (
+              <span className="text-amber-600" title={`有效期至 ${note.validUntil}`}>
+                即将到期
+              </span>
+            ) : null}
+            {note.lastIndexedAt ? (
+              <span className="flex items-center gap-1 text-emerald-600">
+                <Check className="h-3 w-3" />
+                已索引 {formatRelative(note.lastIndexedAt)}
+              </span>
+            ) : null}
+            {/* 标签并进元信息这一行：没在编辑时只有一个「+ 标签」，不再独占一行 */}
+            <span className="ml-auto flex items-center">
+              <TagEditor
+                inline
+                tags={tags}
+                onChange={(next) => {
+                  setTags(next);
+                  markDirty();
+                }}
+              />
             </span>
-          ) : freshnessState(note.validUntil) === 'expiring' ? (
-            <span className="text-amber-600" title={`有效期至 ${note.validUntil}`}>
-              即将到期
-            </span>
-          ) : null}
-          {note.lastIndexedAt ? (
-            <span className="flex items-center gap-1 text-emerald-600">
-              <Check className="h-3 w-3" />
-              已索引 {formatRelative(note.lastIndexedAt)}
-            </span>
-          ) : null}
-          {/* 标签并进元信息这一行：没在编辑时只有一个「+ 标签」，不再独占一行 */}
-          <span className="ml-auto flex items-center">
-            <TagEditor
-              inline
-              tags={tags}
-              onChange={(next) => {
-                setTags(next);
-                markDirty();
-              }}
-            />
-          </span>
+          </div>
         </div>
       </div>
 

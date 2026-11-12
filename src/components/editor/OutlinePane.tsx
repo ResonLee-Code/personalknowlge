@@ -25,7 +25,7 @@ export function OutlinePane({ width, onBack, onMoveToSide }: OutlinePaneProps) {
   return (
     <div
       data-testid="list-pane-outline"
-      className="flex min-h-0 min-w-0 shrink-0 flex-col"
+      className="flex h-full min-h-0 min-w-0 shrink-0 flex-col"
       style={{ width }}
     >
       <OutlinePanel
